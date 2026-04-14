@@ -1,0 +1,108 @@
+name: Codex PR Comment
+
+on:
+  issue_comment:
+    types:
+      - created
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: codex-pr-comment-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  codex-comment:
+    if: github.event.issue.pull_request && contains(github.event.comment.body, '@codex')
+    runs-on: ubuntu-latest
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          ref: refs/pull/${{ github.event.issue.number }}/merge
+
+      - name: Resolve PR metadata
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          pr_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
+          echo "base_ref=$(echo "$pr_json" | jq -r '.base.ref')" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$(echo "$pr_json" | jq -r '.base.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_sha=$(echo "$pr_json" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_repo=$(echo "$pr_json" | jq -r '.head.repo.full_name')" >> "$GITHUB_OUTPUT"
+
+      - name: Pre-fetch base and head refs for the PR
+        env:
+          PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
+          PR_NUMBER: ${{ github.event.issue.number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Verify Codex secret is configured
+        id: preflight
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ "${{ steps.pr.outputs.head_repo }}" != "${GITHUB_REPOSITORY}" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex response
+        if: steps.preflight.outputs.configured == 'true'
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          prompt: |
+            You are responding to a collaborator comment on pull request #${{ github.event.issue.number }} for ${{ github.repository }}.
+
+            The triggering comment was:
+            ----
+            ${{ github.event.comment.body }}
+            ----
+
+            Use the local checkout and git history as needed.
+            Focus on answering the request against the current pull request diff.
+            If the request is ambiguous, ask one focused follow-up question.
+            If there is nothing actionable, say so explicitly.
+
+            Base and head context:
+            - base sha: ${{ steps.pr.outputs.base_sha }}
+            - head sha: ${{ steps.pr.outputs.head_sha }}
+
+  post-comment:
+    runs-on: ubuntu-latest
+    needs: codex-comment
+    if: needs.codex-comment.outputs.final_message != ''
+    steps:
+      - name: Reply in PR thread
+        uses: actions/github-script@v8
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex-comment.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.payload.issue.number,
+              body: process.env.CODEX_FINAL_MESSAGE,
+            });

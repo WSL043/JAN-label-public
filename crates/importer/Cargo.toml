@@ -4,6 +4,8 @@ edition.workspace = true
 license.workspace = true
 version.workspace = true
 
+[dependencies]
+domain = { path = "../domain" }
+
 [lib]
 path = "src/lib.rs"
-

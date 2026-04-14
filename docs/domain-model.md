@@ -54,17 +54,21 @@ otherwise -> error
 
 ## 5. 監査ログモデル
 
-- `job_id`
-- `job_lineage_id`
-  再印刷でも lineage は維持
-- `actor_user_id`
-- `actor_display_name`
-- `event_kind`
-  `created`, `submitted`, `completed`, `failed`, `reprinted`
-- `template_version`
-- `printer_profile_id`
-- `occurred_at`
-- `reason`
+| field | rule |
+| --- | --- |
+| `job_id` | 個々の印刷実行を識別する |
+| `job_lineage_id` | original job とその reprint で共通に持つ |
+| `parent_job_id` | 再印刷元の直近 job。original では `null` |
+| `actor_user_id` | 操作者の内部 ID |
+| `actor_display_name` | 監査画面向け表示名 |
+| `event_kind` | `created`, `submitted`, `completed`, `failed`, `reprinted` |
+| `occurred_at` | event 発生時刻 |
+| `reason` | 再印刷理由や失敗理由。不要なら `null` |
+
+- original job は `job_lineage_id == job_id` を基本とする
+- reprint は新しい `job_id` を持つが、`job_lineage_id` は維持する
+- `parent_job_id` で直近の元 job を追跡できるようにする
+- `reason` は reprint / failure の両方で使えるように optional に保つ
 
 ## 6. importer の正規列
 
@@ -75,4 +79,8 @@ parent_sku,sku,jan,qty,brand,template,printer_profile,enabled
 - Excel から来ても、一度この列順へ正規化してから処理する
 - 余計な列は warning ではなく reject を基本とする
 - 列名ゆれ吸収は importer 境界内で明示的に行い、暗黙マッピングを禁止する
-
+- 行値の初期バリデーションは importer 境界で返す
+- `parent_sku`, `sku`, `brand`, `template`, `printer_profile` は空文字 reject
+- `jan` は Rust 側の JAN ルールで検証し、12 桁なら 13 桁へ正規化する
+- `qty` は 1 以上の整数のみ許可する
+- `enabled` は `true` / `false` のみ許可する
