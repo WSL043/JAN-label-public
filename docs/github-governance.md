@@ -88,9 +88,10 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - GitHub 上の Codex 連携は event-driven を基本とする
 - 第 1 段階では `openai/codex-action@v1` を使い、same-repo PR の自動レビューと `@codex` PR コメント応答を有効にする
 - 第 2 段階では `workflow_run` で `CI` failure を拾い、失敗ログを添えて Codex が PR に triage を返す
+- 第 3 段階では `schedule` / `workflow_dispatch` の `Codex Maintenance` で unresolved CI と release blocker を要約する
 - `OPENAI_API_KEY` は GitHub Actions secret として管理する
 - GitHub-hosted Linux runner では `sandbox: read-only` を基本にし、レビュー / triage を優先する
-- 自動修正 PR、release prep、schedule 巡回は次段階で追加する
+- 自動修正 PR と self-hosted runner / webhook 化は次段階で追加する
 - self-hosted runner を使う場合は persistent な `codex-home` を検討してよいが、最初から必須にはしない
 
 ## 7. release tagging
