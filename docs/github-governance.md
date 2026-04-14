@@ -89,6 +89,7 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - テンプレート変更だけでも patch を切る
 - printer profile の互換性破壊は minor 以上で扱う
 - 本番プリンタ向け adapter 追加は release notes に検証機種を明記する
+- `v*` タグ push 時は `.github/workflows/release.yml` が GitHub Release を自動作成する
 
 ## 8. セキュリティと監査
 

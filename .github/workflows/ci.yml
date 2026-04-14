@@ -9,6 +9,9 @@ on:
 permissions:
   contents: read
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
   rust-format:
     name: rust-format
@@ -52,8 +55,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v5
         with:
           cache: pnpm
@@ -67,8 +68,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v5
         with:
           cache: pnpm
@@ -83,8 +82,6 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v4
-        with:
-          version: 10
       - uses: actions/setup-node@v5
         with:
           cache: pnpm
@@ -96,6 +93,9 @@ jobs:
     name: docs-guard
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
       - uses: dorny/paths-filter@v3
         id: changes
         with:
@@ -121,4 +121,3 @@ jobs:
             echo "Product code changed without docs update."
             exit 1
           fi
-
