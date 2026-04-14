@@ -24,4 +24,3 @@ pub struct PrintAuditRecord {
     pub occurred_at: String,
     pub reason: Option<String>,
 }
-

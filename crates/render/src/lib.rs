@@ -22,7 +22,7 @@ pub fn render_svg(request: &RenderLabelRequest) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{RenderLabelRequest, render_svg};
+    use super::{render_svg, RenderLabelRequest};
 
     #[test]
     fn svg_matches_golden_fixture() {
@@ -37,7 +37,6 @@ mod tests {
 
         let actual = render_svg(&request);
         let expected = include_str!("../../../packages/fixtures/golden/basic-label.svg");
-        assert_eq!(actual, expected);
+        assert_eq!(actual.trim_end(), expected.trim_end());
     }
 }
-

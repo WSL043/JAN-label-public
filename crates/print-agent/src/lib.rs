@@ -1,7 +1,7 @@
 use audit_log::{AuditActor, AuditEventKind, PrintAuditRecord, PrintJobId};
 use barcode::{BarcodeEngine, BarcodeRequest};
 use printer_adapters::{PrintArtifact, PrinterAdapter};
-use render::{RenderLabelRequest, render_svg};
+use render::{render_svg, RenderLabelRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchRequest {
@@ -75,4 +75,3 @@ where
         })
     }
 }
-

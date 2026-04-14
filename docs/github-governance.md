@@ -12,6 +12,19 @@
 - force push 禁止
 - branch deletion 禁止
 
+## 現在の制約
+
+2026-04-14 時点で、remote は `WSL043/JAN-label` の private repository です。  
+`gh api repos/WSL043/JAN-label/branches/main/protection` は `HTTP 403` を返し、
+「GitHub Pro へアップグレードするか public repository にする必要がある」という制約が確認できました。
+
+そのため、このリポジトリでは次の 2 段階で進めます。
+
+- repo 側
+  `.github/workflows/ci.yml`、`CODEOWNERS`、PR template、issue forms を先に整備する
+- remote 側
+  GitHub Pro / Team 以上へ切り替えた後に branch protection / ruleset を有効化する
+
 ## 2. required status checks
 
 GitHub ruleset には次の job 名をそのまま登録します。
@@ -82,4 +95,3 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - セキュリティ報告先は `SECURITY.md`
 - 依存更新は PR ベースで実施
 - 監査ログ仕様を壊す変更は `print-core` owner の review を必須にする
-

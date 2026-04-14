@@ -1,7 +1,7 @@
 const corePillars = [
   "印刷コアは Rust で隔離する",
   "UI はジョブ作成と監査に集中する",
-  "プリンタ差異は adapter 境界に閉じ込める"
+  "プリンタ差異は adapter 境界に閉じ込める",
 ];
 
 export function App() {
@@ -44,4 +44,3 @@ export function App() {
     </main>
   );
 }
-

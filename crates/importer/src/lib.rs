@@ -30,7 +30,7 @@ pub fn validate_headers(headers: &[&str]) -> Result<(), HeaderError> {
 
 #[cfg(test)]
 mod tests {
-    use super::{HeaderError, validate_headers};
+    use super::{validate_headers, HeaderError};
 
     #[test]
     fn accepts_expected_headers() {
@@ -64,4 +64,3 @@ mod tests {
         );
     }
 }
-

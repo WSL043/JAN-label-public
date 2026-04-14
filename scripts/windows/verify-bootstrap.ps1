@@ -39,9 +39,10 @@ function Test-VsBuildTools {
 }
 
 function Test-WebView2Runtime {
+  $webView2Guid = "{F3017226-FE2A-4295-8BDF-00C3A9A7E4C5}"
   $paths = @(
-    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\{F1AEB8A8-8ACB-4EDE-AEDE-7F7E5A38F1A9}",
-    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F1AEB8A8-8ACB-4EDE-AEDE-7F7E5A38F1A9}"
+    "HKLM:\SOFTWARE\Microsoft\EdgeUpdate\Clients\$webView2Guid",
+    "HKLM:\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\$webView2Guid"
   )
 
   foreach ($path in $paths) {

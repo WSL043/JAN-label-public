@@ -28,4 +28,3 @@ pub trait PrinterAdapter {
     fn kind(&self) -> PrinterAdapterKind;
     fn submit(&self, artifact: &PrintArtifact) -> Result<SubmissionReceipt, AdapterError>;
 }
-

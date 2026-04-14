@@ -1,7 +1,6 @@
 :root {
   color: #14120f;
-  background:
-    radial-gradient(circle at top left, rgba(208, 92, 53, 0.22), transparent 32%),
+  background: radial-gradient(circle at top left, rgba(208, 92, 53, 0.22), transparent 32%),
     linear-gradient(180deg, #f6f0e8 0%, #ece4d8 100%);
   font-family: "Segoe UI", sans-serif;
 }
@@ -113,4 +112,3 @@ body {
     font-size: 16px;
   }
 }
-

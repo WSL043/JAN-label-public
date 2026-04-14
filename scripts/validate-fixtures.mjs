@@ -17,7 +17,7 @@ const requiredTopLevel = [
   "template",
   "printerProfile",
   "actor",
-  "requestedAt"
+  "requestedAt",
 ];
 
 function readJson(path) {
@@ -55,16 +55,17 @@ const csv = readFileSync(csvPath, "utf8").trim().split(/\r?\n/);
 assert(csv.length >= 2, `${csvPath}: expected header and at least one data row`);
 assert(
   csv[0] === "parent_sku,sku,jan,qty,brand,template,printer_profile,enabled",
-  `${csvPath}: header row does not match canonical column order`
+  `${csvPath}: header row does not match canonical column order`,
 );
 
 const fixtureDirs = readdirSync(fixtureRoot, { withFileTypes: true })
   .filter((entry) => entry.isDirectory())
   .map((entry) => entry.name);
 assert(
-  fixtureDirs.includes("golden") && fixtureDirs.includes("importer") && fixtureDirs.includes("label-jobs"),
-  `${fixtureRoot}: expected fixture directories are missing`
+  fixtureDirs.includes("golden") &&
+    fixtureDirs.includes("importer") &&
+    fixtureDirs.includes("label-jobs"),
+  `${fixtureRoot}: expected fixture directories are missing`,
 );
 
 console.log("Fixture validation passed.");
-
