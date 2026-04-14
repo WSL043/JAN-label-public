@@ -108,8 +108,11 @@ jobs:
         with:
           projectPath: apps/desktop-shell
           args: --ci --no-sign
-          uploadWorkflowArtifacts: true
-          workflowArtifactNamePattern: jan-label-[platform]-[arch]-[bundle]
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jan-label-windows-bundle
+          path: apps/desktop-shell/src-tauri/target/release/bundle/**
+          if-no-files-found: error
 
   docs-guard:
     name: docs-guard

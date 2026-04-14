@@ -68,4 +68,4 @@ jobs:
             See the generated notes below for merged changes in this tag.
           generateReleaseNotes: true
           args: --ci --no-sign
-          releaseAssetNamePattern: JAN-Label_[version]_windows_[arch][setup][ext]
+          assetNamePattern: JAN-Label_[version]_windows_[arch][setup][ext]
