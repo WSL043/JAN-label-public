@@ -23,7 +23,7 @@
 - GitHub 上の Codex 連携
   `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`
 
-## 2. 直近で通した確認
+## 2. 直近で使っている確認セット
 
 ```powershell
 pnpm fixture:validate
@@ -38,6 +38,7 @@ cargo test --workspace
 GitHub Actions の最新成功 run:
 
 - `CI` run `24411813836` on `main`
+- ローカル Windows で `link.exe` がない場合、`cargo test --workspace` の最終判定は CI を正とする
 
 GitHub 側の整理:
 
