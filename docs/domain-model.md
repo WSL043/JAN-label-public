@@ -75,4 +75,8 @@ parent_sku,sku,jan,qty,brand,template,printer_profile,enabled
 - Excel から来ても、一度この列順へ正規化してから処理する
 - 余計な列は warning ではなく reject を基本とする
 - 列名ゆれ吸収は importer 境界内で明示的に行い、暗黙マッピングを禁止する
-
+- 行値の初期バリデーションは importer 境界で返す
+- `parent_sku`, `sku`, `brand`, `template`, `printer_profile` は空文字 reject
+- `jan` は Rust 側の JAN ルールで検証し、12 桁なら 13 桁へ正規化する
+- `qty` は 1 以上の整数のみ許可する
+- `enabled` は `true` / `false` のみ許可する

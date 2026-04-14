@@ -2,16 +2,24 @@
 
 - Updated: 2026-04-14
 - Branch: `main`
-- HEAD: `bb85455`
+- HEAD: `516dc1e`
 - Remote: `origin/main`
 
 ## 1. 完了済み
 
 - Rust workspace と pnpm workspace の土台
 - `domain` / `importer` / `render` / `print-agent` などの最小 crate
+- `crates/barcode` の Zint CLI adapter
+  バイナリパス注入、終了コード / stderr を含むエラー、fake executable テスト
+- `crates/render` の PDF 出力ルート
+  deterministic な最小 PDF writer と golden fixture 比較
+- `crates/importer` の行単位バリデーション
+  canonical row ごとの cell error と JAN 正規化
 - React 管理 UI の最小骨格
 - GitHub Actions
   `CI`, `Pull Request Labeler`, `Sync Labels`, `Release`
+- Codex event-driven workflow
+  same-repo PR 自動レビューと `@codex` PR コメント応答
 - issue forms, labels, PR template, CODEOWNERS
 - Windows 開発環境の bootstrap スクリプト
 
@@ -29,17 +37,17 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24396410009`
+- `CI` run `24396716032`
 
 ## 3. 未完了
 
-- Zint 実接続
 - PDF adapter 実装
 - Windows spooler adapter 実装
 - admin-web のジョブ作成 UI
-- importer の行単位バリデーション
 - audit lineage / reprint の詳細化
 - 実機プリンタの検証記録
+- 開発環境 / CI への実 Zint バイナリ導入
+- Codex による自動修正 PR / CI 修復 / schedule 巡回
 
 対応する初期 GitHub issues:
 
@@ -52,10 +60,10 @@ GitHub Actions の最新成功 run:
 
 ## 4. 次の安全な一手
 
-1. `crates/barcode` で Zint CLI adapter を実装する
-2. `crates/render` で PDF 出力ルートを追加する
-3. `packages/fixtures` に barcode / pdf の fixture を足す
-4. `apps/admin-web` にジョブ作成フォームを作る
+1. `apps/admin-web` にジョブ作成フォームを作る
+2. `printer-adapters` に PDF adapter を追加する
+3. 開発環境 / CI への実 Zint バイナリ導入方針を固める
+4. Codex の自動修正 PR / CI 修復 / schedule 巡回を必要範囲で足す
 
 ## 5. 触る時の注意
 
@@ -69,4 +77,4 @@ GitHub Actions の最新成功 run:
 - GitHub branch protection / ruleset は current plan 制約で未適用
 - GitHub environments はまだ未作成
 - release tag はまだ未発行
-- Zint は repo / CI にまだ組み込んでいない
+- Zint CLI adapter は実装済みだが、repo / CI に実バイナリはまだ組み込んでいない

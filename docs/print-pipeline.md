@@ -27,6 +27,7 @@
 draft = ui.create_job()
 normalized = domain.normalize_jan(draft.jan)
 validated = importer.validate_columns(input_headers)
+validated_row = importer.validate_row(row_number, row_values)
 barcode_artifact = zint.render(normalized)
 label_artifact = render.svg(template_version, barcode_artifact, job)
 receipt = adapter.submit(label_artifact)
@@ -37,8 +38,11 @@ audit.record(job_id, receipt, actor, timestamp)
 
 - `packages/fixtures/golden/*.svg`
   SVG の期待出力
+- `packages/fixtures/golden/*.pdf`
+  PDF の期待出力
 - `render` crate のテストで fixture と完全一致比較
-- 将来 PDF を追加したら、メタデータ差分を除去した canonical compare を導入する
+- 現在の PDF は deterministic な最小 writer を使うため完全一致比較する
+- 将来メタデータや外部ライブラリ由来の差分が入る場合は canonical compare を導入する
 
 ## 5. 100% スケール固定の検証手順
 
@@ -54,4 +58,3 @@ audit.record(job_id, receipt, actor, timestamp)
 - adapter はレンダリングロジックを持たない
 - adapter は job ではなく render 済み artifact を受け取る
 - adapter 追加時は fixture、golden、printer profile、docs を同時更新する
-

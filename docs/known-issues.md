@@ -16,12 +16,12 @@
 - 回避: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を workflow に設定
 - 恒久対応: `pnpm/action-setup` と `dorny/paths-filter` の後継バージョンを追う
 
-## K-003 Zint がまだ開発ループに未接続
+## K-003 Zint adapter は実装済みだが実バイナリ導入が未完了
 
 - 状態: open
-- 影響: barcode crate は現在 stub に近い
-- 回避: `T-001` を優先して CLI adapter を実装する
-- 恒久対応: Windows / CI で Zint を導入し fixture と結線する
+- 影響: `barcode` crate は fake executable テストで安定化したが、実 Zint を使う E2E / CI はまだ未接続
+- 回避: 外部注入の `zint` バイナリパスでローカル確認し、CI は fake executable テストを維持する
+- 恒久対応: Windows / CI で Zint を導入し render / proof 経路まで結線する
 
 ## K-004 実機プリンタの測定データがまだない
 
@@ -29,4 +29,3 @@
 - 影響: 100% スケール検証が PDF proof に偏っている
 - 回避: PDF proof を先に維持する
 - 恒久対応: `docs/printer-matrix/` に最低 1 機種分の実測を記録する
-

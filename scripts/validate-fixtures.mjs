@@ -5,7 +5,9 @@ const fixtureRoot = join(process.cwd(), "packages", "fixtures");
 const validJobPath = join(fixtureRoot, "label-jobs", "valid-minimal.json");
 const invalidJobPath = join(fixtureRoot, "label-jobs", "invalid-missing-brand.json");
 const goldenPath = join(fixtureRoot, "golden", "basic-label.svg");
+const goldenPdfPath = join(fixtureRoot, "golden", "basic-label.pdf");
 const csvPath = join(fixtureRoot, "importer", "catalog-valid.csv");
+const invalidCsvPath = join(fixtureRoot, "importer", "catalog-invalid-values.csv");
 
 const requiredTopLevel = [
   "jobId",
@@ -51,11 +53,22 @@ assert(!("brand" in invalidJob), `${invalidJobPath}: invalid fixture should omit
 const svg = readFileSync(goldenPath, "utf8");
 assert(svg.includes("JOB-20260414-0001"), `${goldenPath}: expected golden job id missing`);
 
+const pdf = readFileSync(goldenPdfPath, "utf8");
+assert(pdf.startsWith("%PDF-1.4"), `${goldenPdfPath}: expected pdf header missing`);
+assert(pdf.includes("(job:JOB-20260414-0001)"), `${goldenPdfPath}: expected golden job id missing`);
+
 const csv = readFileSync(csvPath, "utf8").trim().split(/\r?\n/);
 assert(csv.length >= 2, `${csvPath}: expected header and at least one data row`);
 assert(
   csv[0] === "parent_sku,sku,jan,qty,brand,template,printer_profile,enabled",
   `${csvPath}: header row does not match canonical column order`,
+);
+
+const invalidCsv = readFileSync(invalidCsvPath, "utf8").trim().split(/\r?\n/);
+assert(invalidCsv.length >= 2, `${invalidCsvPath}: expected header and at least one data row`);
+assert(
+  invalidCsv[0] === "parent_sku,sku,jan,qty,brand,template,printer_profile,enabled",
+  `${invalidCsvPath}: header row does not match canonical column order`,
 );
 
 const fixtureDirs = readdirSync(fixtureRoot, { withFileTypes: true })
@@ -66,6 +79,12 @@ assert(
     fixtureDirs.includes("importer") &&
     fixtureDirs.includes("label-jobs"),
   `${fixtureRoot}: expected fixture directories are missing`,
+);
+
+const goldenFiles = readdirSync(join(fixtureRoot, "golden"));
+assert(
+  goldenFiles.includes("basic-label.svg") && goldenFiles.includes("basic-label.pdf"),
+  `${join(fixtureRoot, "golden")}: expected svg/pdf golden fixtures are missing`,
 );
 
 console.log("Fixture validation passed.");
