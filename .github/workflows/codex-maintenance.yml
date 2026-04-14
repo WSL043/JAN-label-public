@@ -5,6 +5,9 @@ on:
   schedule:
     - cron: "0 1 * * *"
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   actions: read
   contents: read
@@ -96,6 +99,7 @@ jobs:
         with:
           name: codex-maintenance-state
           path: .codex-maintenance-state.md
+          include-hidden-files: true
 
       - name: Verify Codex secret is configured
         id: preflight
