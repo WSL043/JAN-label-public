@@ -83,6 +83,15 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - Docs
   プロダクトコード変更時に docs 同時更新があるか確認
 
+## 6.5 Codex automation
+
+- GitHub 上の Codex 連携は event-driven を基本とする
+- 第 1 段階では `openai/codex-action@v1` を使い、same-repo PR の自動レビューと `@codex` PR コメント応答を有効にする
+- `OPENAI_API_KEY` は GitHub Actions secret として管理する
+- GitHub-hosted Linux runner では `sandbox: read-only` を基本にし、レビュー / triage を優先する
+- 自動修正 PR、CI failure 修復、release prep、schedule 巡回は次段階で追加する
+- self-hosted runner を使う場合は persistent な `codex-home` を検討してよいが、最初から必須にはしない
+
 ## 7. release tagging
 
 - tag 形式は `vMAJOR.MINOR.PATCH`
