@@ -53,6 +53,9 @@ node --version
 pnpm --version
 pwsh -File .\scripts\windows\verify-bootstrap.ps1
 pwsh -File .\scripts\windows\verify-bootstrap.ps1 --with-tauri
+pnpm --filter @label/desktop-shell tauri info
+pnpm --filter @label/desktop-shell dev
+pnpm --filter @label/desktop-shell build
 ```
 
 ## 5. トラブルシュート
@@ -71,6 +74,13 @@ pwsh -File .\scripts\windows\verify-bootstrap.ps1 --with-tauri
 
 - WebView2 Runtime の有無を確認する
 - `verify-bootstrap.ps1 --with-tauri` で確認する
+- `pnpm --filter @label/desktop-shell tauri info` で `devUrl` と `frontendDist` を確認する
+
+### desktop-shell が build できない
+
+- Visual Studio C++ Build Tools に `Desktop development with C++` を入れる
+- PowerShell を再起動して `link.exe` が見える状態にする
+- 先に `pnpm --filter @label/admin-web build` が通ることを確認する
 
 ### 印字倍率がずれる
 
@@ -96,3 +106,8 @@ pwsh -File .\scripts\windows\verify-bootstrap.ps1 --with-tauri
 - 共通
   印刷コアの責務は変わらない。印字精度は UI 技術ではなく template と adapter で決まる。
 
+## 8. desktop-shell の現状
+
+- `apps/desktop-shell` には `admin-web` を包む最小 Tauri 2 shell を配置済み
+- `tauri info` では `frontendDist` と `devUrl` を確認できる
+- ただしこの環境では Visual Studio C++ Build Tools 不足のため `build` までは未検証

@@ -1,0 +1,6 @@
+{
+  "identifier": "default",
+  "description": "Default desktop shell capability for the admin web UI.",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}
