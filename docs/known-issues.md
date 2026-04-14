@@ -44,12 +44,12 @@
 - 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
 - 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
 
-## K-007 Windows 配布シェルは scaffold 済みだが build 未検証
+## K-007 Windows 配布シェルは CI/release で build できるがローカル bundle は未検証
 
 - 状態: open
-- 影響: `apps/desktop-shell` の Tauri shell は入ったが、この環境では `link.exe` 不在により bundle 生成まで確認できない
-- 回避: `tauri info` と `admin-web` build で config を確認しつつ、当面は `admin-web` + `print-agent` を主開発経路として使う
-- 恒久対応: Build Tools 入りの Windows で `pnpm --filter @label/desktop-shell build` を通し、配布フローを release docs と CI に組み込む
+- 影響: GitHub-hosted `windows-latest` では build/release できても、一部ローカル Windows では `link.exe` 不在により bundle を再現できない
+- 回避: PR では `desktop-shell-windows` job を正とし、tag release は GitHub-hosted Windows runner に任せる
+- 恒久対応: Build Tools 入りの Windows で `pnpm --filter @label/desktop-shell build` を通し、ローカルでも installer を再現できるようにする
 
 ## K-008 GitHub Actions の `OPENAI_API_KEY` secret が未設定
 

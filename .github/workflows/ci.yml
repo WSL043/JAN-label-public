@@ -90,6 +90,30 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm typecheck
 
+  desktop-shell-windows:
+    name: desktop-shell-windows
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          cache: pnpm
+          node-version: lts/*
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          projectPath: apps/desktop-shell
+          args: --ci --no-sign
+      - uses: actions/upload-artifact@v4
+        with:
+          name: jan-label-windows-bundle
+          path: apps/desktop-shell/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+
   docs-guard:
     name: docs-guard
     runs-on: ubuntu-latest

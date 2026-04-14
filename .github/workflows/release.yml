@@ -8,16 +8,64 @@ on:
 permissions:
   contents: write
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 jobs:
-  publish-release:
-    name: publish-release
+  verify-release-ready:
+    name: verify-release-ready
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
-          fetch-depth: 0
-      - name: Create GitHub release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --generate-notes --verify-tag
+          node-version: lts/*
+      - name: Require printer matrix measurement
+        shell: bash
+        run: |
+          count=$(find docs/printer-matrix -maxdepth 1 -type f -name '*.md' ! -name 'template.md' | wc -l | tr -d ' ')
+          if [[ "$count" -lt 1 ]]; then
+            echo "At least one printer-matrix measurement is required before tagging a release."
+            exit 1
+          fi
+      - name: Require desktop-shell version matches tag
+        shell: bash
+        run: |
+          expected="${GITHUB_REF_NAME#v}"
+          package_version=$(node -p "require('./apps/desktop-shell/package.json').version")
+          tauri_version=$(node -p "require('./apps/desktop-shell/src-tauri/tauri.conf.json').version")
+          if [[ "$package_version" != "$expected" ]]; then
+            echo "apps/desktop-shell/package.json version $package_version does not match tag $expected."
+            exit 1
+          fi
+          if [[ "$tauri_version" != "$expected" ]]; then
+            echo "apps/desktop-shell/src-tauri/tauri.conf.json version $tauri_version does not match tag $expected."
+            exit 1
+          fi
 
+  publish-windows-release:
+    name: publish-windows-release
+    needs: verify-release-ready
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v5
+        with:
+          cache: pnpm
+          node-version: lts/*
+      - uses: dtolnay/rust-toolchain@stable
+      - run: pnpm install --frozen-lockfile
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: apps/desktop-shell
+          tagName: ${{ github.ref_name }}
+          releaseName: JAN Label ${{ github.ref_name }}
+          releaseBody: |
+            Windows desktop installer built from `apps/desktop-shell`.
+            See the generated notes below for merged changes in this tag.
+          generateReleaseNotes: true
+          args: --ci --no-sign
+          assetNamePattern: JAN-Label_[version]_windows_[arch][setup][ext]

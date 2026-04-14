@@ -23,3 +23,9 @@ pnpm --filter @label/desktop-shell build
 - Windows では WebView2 Runtime が必要
 - Windows で bundle まで作る場合は VC++ Build Tools が必要
 - `print-agent` とのブリッジはまだ未接続で、現時点では `admin-web` の shell 化まで
+
+## CI / Release
+
+- GitHub Actions の `desktop-shell-windows` job は `windows-latest` 上で bundle build を検証し、workflow artifact を残す
+- `v*` tag の `Release` workflow は同じ経路で Windows installer を build し、GitHub Release asset に添付する
+- icon を更新する場合は `pnpm --filter @label/desktop-shell tauri icon .\\app-icon.svg` で `src-tauri/icons/` を再生成する

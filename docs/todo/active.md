@@ -18,6 +18,7 @@
 | T-011 | `-` | P3 | done | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
 | T-013 | `-` | P3 | done | Codex | CI failure から自動修正 PR を起こす workflow を追加 | Codex が fix branch を作り draft PR まで出せる |
 | T-014 | `-` | P3 | done | Codex | release prep の結果を issue / discussion に定期集約する | schedule 実行結果が GitHub 上の恒久的なスレッドに残る |
+| T-015 | `-` | P2 | done | Codex | `apps/desktop-shell` の Windows 配布シェルを初期化 | `desktop-shell-windows` CI と Release workflow で Windows bundle 経路を検証できる |
 
 ## Now
 
@@ -31,7 +32,6 @@
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
 | T-012 | `-` | P3 | pending | Codex + Infra | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
-| T-015 | `-` | P2 | in_progress | Codex | `apps/desktop-shell` の Windows 配布シェルを初期化 | Tauri shell か同等の Windows 配布経路が起動し、配布手順を release docs に書ける |
 
 ## Later
 
@@ -45,4 +45,3 @@
 | --- | --- | --- | --- |
 | B-001 | GitHub plan 制約 | `main` branch protection / ruleset の本適用 | GitHub Pro / Team 以上へ変更 |
 | B-002 | 実機プリンタの測定データ未取得 | T-008, T-009 | `docs/printer-matrix/template.md` を使った実測記録が入る |
-| B-003 | Visual Studio C++ Build Tools 未導入 | T-015 | `link.exe` が解決し、`pnpm --filter @label/desktop-shell build` を流せる |
