@@ -36,6 +36,7 @@ git push origin v0.1.0
 - その場合でも `cargo check --workspace --tests` は補助確認として回し、最終判定は `main` 上の GitHub Actions `CI` success を使う
 - blocker が曖昧なら `Codex Maintenance` を `workflow_dispatch` で実行し、job summary を release 前確認に使う
 - maintenance ledger issue がある場合は、最新コメントも release 前確認に含める
+- Windows インストーラ配布を含める場合は、Build Tools 入り環境で `pnpm --filter @label/desktop-shell build` を追加する
 
 ## 4. smoke check
 

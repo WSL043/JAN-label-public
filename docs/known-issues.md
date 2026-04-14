@@ -44,9 +44,16 @@
 - 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
 - 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
 
-## K-007 Windows 配布シェルはまだ未初期化
+## K-007 Windows 配布シェルは scaffold 済みだが build 未検証
 
 - 状態: open
-- 影響: 現在の `v0.1.0` release は GitHub release / print-core release までは進められても、Windows インストーラ配布物はまだ生成できない
-- 回避: 当面は `admin-web` + `print-agent` + PDF proof / Windows spooler skeleton を開発経路として使う
-- 恒久対応: `apps/desktop-shell` を初期化し、Windows 向け配布フローを release docs と CI に組み込む
+- 影響: `apps/desktop-shell` の Tauri shell は入ったが、この環境では `link.exe` 不在により bundle 生成まで確認できない
+- 回避: `tauri info` と `admin-web` build で config を確認しつつ、当面は `admin-web` + `print-agent` を主開発経路として使う
+- 恒久対応: Build Tools 入りの Windows で `pnpm --filter @label/desktop-shell build` を通し、配布フローを release docs と CI に組み込む
+
+## K-008 GitHub Actions の `OPENAI_API_KEY` secret が未設定
+
+- 状態: open
+- 影響: `Codex PR Review`, `Codex Maintenance`, `Codex CI Autofix` などの cloud-side Codex 実行は preflight で skip される
+- 回避: ローカル Codex で実装を進め、GitHub 側は ledger / triage の fallback 出力を使う
+- 恒久対応: repository secret に `OPENAI_API_KEY` を設定する
