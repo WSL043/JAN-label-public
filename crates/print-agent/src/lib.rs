@@ -1,7 +1,7 @@
 use audit_log::{AuditActor, PrintAuditRecord, PrintJobId, PrintJobLineageId};
 use barcode::{BarcodeEngine, BarcodeRequest};
-use printer_adapters::{PrintArtifact, PrinterAdapter};
-use render::{render_svg, RenderLabelRequest};
+use printer_adapters::{PrintArtifact, PrinterAdapter, PrinterAdapterKind};
+use render::{render_pdf, render_svg, RenderLabelRequest};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DispatchRequest {
@@ -70,21 +70,27 @@ where
             })
             .map_err(|err| err.message)?;
 
-        let svg = render_svg(&RenderLabelRequest {
+        let render_request = RenderLabelRequest {
             job_id: job_id.clone(),
             sku,
             brand,
             jan,
             qty,
             template_version,
-        });
+        };
 
-        self.adapter
-            .submit(&PrintArtifact {
+        let artifact = match self.adapter.kind() {
+            PrinterAdapterKind::Pdf => PrintArtifact {
+                media_type: "application/pdf".to_string(),
+                bytes: render_pdf(&render_request),
+            },
+            _ => PrintArtifact {
                 media_type: "image/svg+xml".to_string(),
-                bytes: svg.into_bytes(),
-            })
-            .map_err(|err| err.message)?;
+                bytes: render_svg(&render_request).into_bytes(),
+            },
+        };
+
+        self.adapter.submit(&artifact).map_err(|err| err.message)?;
 
         Ok(PrintAuditRecord::dispatch(
             PrintJobId(job_id),
@@ -112,13 +118,14 @@ mod tests {
 
     #[test]
     fn dispatch_records_submitted_event_for_original_job() {
-        let adapter = FakeAdapter::new();
+        let adapter = FakeAdapter::new(PrinterAdapterKind::Pdf);
         let barcode_engine = FakeBarcodeEngine;
-        let agent = PrintAgent::new(adapter, barcode_engine);
+        let agent = PrintAgent::new(adapter.clone(), barcode_engine);
 
         let record = agent
             .dispatch(sample_request())
             .expect("original dispatch should succeed");
+        let submission = adapter.last_submission();
 
         assert_eq!(record.event, AuditEventKind::Submitted);
         assert_eq!(
@@ -127,11 +134,16 @@ mod tests {
         );
         assert_eq!(record.parent_job_id, None);
         assert_eq!(record.reason, None);
+        assert_eq!(submission.media_type, "application/pdf");
+        assert!(
+            submission.bytes.starts_with(b"%PDF-1.4"),
+            "pdf proof output should be rendered as a PDF artifact"
+        );
     }
 
     #[test]
     fn dispatch_records_reprint_event_with_lineage_and_reason() {
-        let adapter = FakeAdapter::new();
+        let adapter = FakeAdapter::new(PrinterAdapterKind::Pdf);
         let barcode_engine = FakeBarcodeEngine;
         let agent = PrintAgent::new(adapter, barcode_engine);
         let request = DispatchRequest {
@@ -161,7 +173,7 @@ mod tests {
 
     #[test]
     fn dispatch_uses_parent_job_as_lineage_when_explicit_lineage_is_missing() {
-        let adapter = FakeAdapter::new();
+        let adapter = FakeAdapter::new(PrinterAdapterKind::Pdf);
         let barcode_engine = FakeBarcodeEngine;
         let agent = PrintAgent::new(adapter, barcode_engine);
         let request = DispatchRequest {
@@ -183,6 +195,24 @@ mod tests {
         assert_eq!(record.event, AuditEventKind::Reprinted);
     }
 
+    #[test]
+    fn dispatch_uses_svg_for_non_pdf_adapters() {
+        let adapter = FakeAdapter::new(PrinterAdapterKind::Qz);
+        let barcode_engine = FakeBarcodeEngine;
+        let agent = PrintAgent::new(adapter.clone(), barcode_engine);
+
+        agent
+            .dispatch(sample_request())
+            .expect("non-pdf dispatch should succeed");
+
+        let submission = adapter.last_submission();
+        assert_eq!(submission.media_type, "image/svg+xml");
+        assert!(
+            submission.bytes.starts_with(b"<svg"),
+            "non-pdf adapters should keep receiving SVG artifacts"
+        );
+    }
+
     fn sample_request() -> DispatchRequest {
         DispatchRequest {
             job_id: "JOB-20260415-0001".to_string(),
@@ -202,20 +232,31 @@ mod tests {
 
     #[derive(Clone)]
     struct FakeAdapter {
+        kind: PrinterAdapterKind,
         submissions: Arc<Mutex<Vec<PrintArtifact>>>,
     }
 
     impl FakeAdapter {
-        fn new() -> Self {
+        fn new(kind: PrinterAdapterKind) -> Self {
             Self {
+                kind,
                 submissions: Arc::new(Mutex::new(Vec::new())),
             }
+        }
+
+        fn last_submission(&self) -> PrintArtifact {
+            self.submissions
+                .lock()
+                .expect("fake adapter submissions lock should be available")
+                .last()
+                .cloned()
+                .expect("a submission should have been recorded")
         }
     }
 
     impl PrinterAdapter for FakeAdapter {
         fn kind(&self) -> PrinterAdapterKind {
-            PrinterAdapterKind::Pdf
+            self.kind.clone()
         }
 
         fn submit(&self, artifact: &PrintArtifact) -> Result<SubmissionReceipt, AdapterError> {

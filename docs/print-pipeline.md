@@ -7,8 +7,8 @@
    `admin-web` は canonical な 13 桁 JAN だけを preview に載せ、12 桁補完は Rust 側へ委譲する
 3. `print-agent` が JAN と importer 正規化ルールを検証する
 4. `barcode` が Zint へ描画依頼する
-5. `render` が SVG/PDF を生成する
-6. `printer-adapters` が出力先へ送信する
+5. `render` が printer profile に応じて SVG/PDF を生成する
+6. `printer-adapters` が proof file や printer queue へ送信する
 7. `audit-log` が lineage / parent job / reason を含む実行結果を記録する
 
 ## 2. MVP の出力優先順位
@@ -16,7 +16,7 @@
 - 第 1 段階
   SVG
 - 第 2 段階
-  PDF
+  PDF proof
 - 第 3 段階
   Windows spooler
 - 第 4 段階
@@ -30,7 +30,7 @@ normalized = domain.normalize_jan(draft.jan)
 validated = importer.validate_columns(input_headers)
 validated_row = importer.validate_row(row_number, row_values)
 barcode_artifact = zint.render(normalized)
-label_artifact = render.svg(template_version, barcode_artifact, job)
+label_artifact = render.by_profile(template_version, printer_profile)
 receipt = adapter.submit(label_artifact)
 audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 ```

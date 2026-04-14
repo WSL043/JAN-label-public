@@ -19,6 +19,8 @@
   parent_sku / sku / jan / qty / brand 入力、template / printer profile 選択、`@label/job-schema` に沿った draft preview
 - `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
   original job と reprint の系譜、parent job、reason を監査ログで表現
+- `crates/printer-adapters` の PDF file adapter
+  `application/pdf` artifact を proof file として書き出し、`print-agent` から PDF proof を流せる
 - GitHub Actions
   `CI`, `Pull Request Labeler`, `Sync Labels`, `Release`
 - Codex event-driven workflow
@@ -40,11 +42,10 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24410728064`
+- `CI` run `24411043235`
 
 ## 3. 未完了
 
-- PDF adapter 実装
 - Windows spooler adapter 実装
 - 実機プリンタの検証記録
 - 開発環境 / CI への実 Zint バイナリ導入
@@ -61,7 +62,7 @@ GitHub Actions の最新成功 run:
 
 ## 4. 次の安全な一手
 
-1. `printer-adapters` に PDF adapter を追加する
+1. Windows spooler adapter の骨格を追加する
 2. 開発環境 / CI への実 Zint バイナリ導入方針を固める
 3. Codex の自動修正 PR / CI 修復 / schedule 巡回を必要範囲で足す
 4. 実機プリンタの測定記録を `docs/printer-matrix/` に残す

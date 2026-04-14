@@ -7,15 +7,9 @@
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-006 | `#6` | P1 | ready | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
-
-## Next
-
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
 | T-007 | `-` | P2 | pending | Codex | Windows spooler adapter の骨格実装 | printer profile 経由で submit できる |
 
-## Later
+## Next
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -31,6 +25,7 @@
 | T-003 | `#3` | P1 | done | Codex | `importer` の行単位バリデーションを実装 | 列だけでなくセル値エラーを返せる |
 | T-004 | `#4` | P1 | done | Codex | `admin-web` にジョブ作成フォームを追加 | parent_sku, sku, jan, qty, brand を入力できる |
 | T-005 | `#5` | P1 | done | Codex | `audit-log` に lineage / reprint 情報を追加 | 再印刷の系譜を表現できる |
+| T-006 | `#6` | P1 | done | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
 
 ## Blocked
 

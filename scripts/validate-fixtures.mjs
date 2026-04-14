@@ -46,6 +46,18 @@ function validateJan(job, path) {
 const validJob = readJson(validJobPath);
 validateRequiredFields(validJob, validJobPath);
 validateJan(validJob, validJobPath);
+assert(
+  validJob.printerProfile.id === "pdf-a4-proof",
+  `${validJobPath}: expected proof printer profile id to stay pdf-a4-proof`,
+);
+assert(
+  validJob.printerProfile.adapter === "pdf",
+  `${validJobPath}: expected proof printer profile adapter to stay pdf`,
+);
+assert(
+  validJob.printerProfile.scalePolicy === "fixed-100",
+  `${validJobPath}: expected proof printer profile to keep fixed-100 scaling`,
+);
 
 const invalidJob = readJson(invalidJobPath);
 assert(!("brand" in invalidJob), `${invalidJobPath}: invalid fixture should omit brand`);
