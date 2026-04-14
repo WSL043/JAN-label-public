@@ -92,6 +92,10 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - 第 3 段階では `schedule` / `workflow_dispatch` の `Codex Maintenance` で unresolved CI と release blocker を要約する
 - 第 4 段階では same-repo PR の failed `CI` から `Codex CI Autofix` が fix branch と draft PR を起こす
 - 第 5 段階では `Codex Maintenance` の結果を GitHub issue に集約し、release 前確認の恒久ログにする
+- GitHub 上の Codex は bug-finding / debugging の一次対応を担当する
+  PR review、`@codex` コメント応答、CI triage、CI autofix、maintenance summary をここに寄せる
+- ローカル Codex は実装、手元の再現、tag / release 実行を担当する
+- `Codex PR Review` と `Codex PR Comment` は `refs/pull/*/merge` に依存せず、PR の head SHA と base/head branch fetch で動かす
 - `OPENAI_API_KEY` は GitHub Actions secret として管理する
 - GitHub-hosted Linux runner では `sandbox: read-only` を基本にし、レビュー / triage を優先する
 - 自動修正 PR は same-repo PR のみに限定し、fork PR は triage comment のみに留める

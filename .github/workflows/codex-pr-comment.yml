@@ -21,11 +21,6 @@ jobs:
     outputs:
       final_message: ${{ steps.run_codex.outputs.final-message }}
     steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          ref: refs/pull/${{ github.event.issue.number }}/merge
-
       - name: Resolve PR metadata
         id: pr
         env:
@@ -35,17 +30,25 @@ jobs:
           pr_json=$(gh api "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}")
           echo "base_ref=$(echo "$pr_json" | jq -r '.base.ref')" >> "$GITHUB_OUTPUT"
           echo "base_sha=$(echo "$pr_json" | jq -r '.base.sha')" >> "$GITHUB_OUTPUT"
+          echo "head_ref=$(echo "$pr_json" | jq -r '.head.ref')" >> "$GITHUB_OUTPUT"
           echo "head_sha=$(echo "$pr_json" | jq -r '.head.sha')" >> "$GITHUB_OUTPUT"
           echo "head_repo=$(echo "$pr_json" | jq -r '.head.repo.full_name')" >> "$GITHUB_OUTPUT"
 
+      - uses: actions/checkout@v5
+        if: steps.pr.outputs.head_repo == github.repository
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.pr.outputs.head_sha }}
+
       - name: Pre-fetch base and head refs for the PR
+        if: steps.pr.outputs.head_repo == github.repository
         env:
           PR_BASE_REF: ${{ steps.pr.outputs.base_ref }}
-          PR_NUMBER: ${{ github.event.issue.number }}
+          PR_HEAD_REF: ${{ steps.pr.outputs.head_ref }}
         run: |
           git fetch --no-tags origin \
             "$PR_BASE_REF" \
-            "+refs/pull/$PR_NUMBER/head"
+            "$PR_HEAD_REF"
 
       - name: Verify Codex secret is configured
         id: preflight
