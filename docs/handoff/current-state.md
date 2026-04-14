@@ -21,7 +21,7 @@
 - `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
 - `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
 - GitHub 上の Codex 連携
-  `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`, `Codex Maintenance`
+  `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`, `Codex Maintenance`, `Codex CI Autofix`
 
 ## 2. 直近で使っている確認セット
 
@@ -50,7 +50,7 @@ GitHub 側の整理:
 - `docs/printer-matrix/` に最低 1 機種分の実測を記録
 - 初回 `v0.1.0` tag / release を発行
 - phase 3 の Codex 自動化
-  CI failure の自動修正 PR, self-hosted runner / webhook
+  self-hosted runner / webhook, maintenance 結果の恒久集約
 
 ## 4. 次の安全な一手
 

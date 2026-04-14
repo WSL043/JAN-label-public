@@ -36,3 +36,10 @@
 - 影響: ローカルでは full test を完走できなくても、CI 上は green という差が出る
 - 回避: `cargo check --workspace --tests` を補助で回しつつ、GitHub Actions の `rust-test` / `golden-tests` を正として確認する
 - 恒久対応: Windows Build Tools を導入し、`link.exe` が解決できる開発環境手順を整える
+
+## K-006 Codex CI Autofix は same-repo PR 前提
+
+- 状態: open
+- 影響: fork PR や GitHub Actions の PR 作成権限が不足する repo では draft autofix PR まで完了しない
+- 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
+- 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
