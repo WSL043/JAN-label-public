@@ -14,6 +14,8 @@
 | T-005 | `#5` | P1 | done | Codex | `audit-log` に lineage / reprint 情報を追加 | 再印刷の系譜を表現できる |
 | T-006 | `#6` | P1 | done | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
 | T-007 | `-` | P2 | done | Codex | Windows spooler adapter の骨格実装 | printer profile 経由で submit できる |
+| T-008 | `-` | P2 | done | Codex | `docs/printer-matrix` に baseline 記録を追加 | 初回 release gate を満たす記録が commit される |
+| T-009 | `-` | P2 | done | Codex | 初回 release tag 発行 | `v0.1.1` Release workflow が成功し Windows installer が添付される |
 | T-010 | `-` | P2 | done | Codex | CI failure 時の Codex triage workflow を追加 | same-repo PR の失敗 CI に Codex の診断コメントが付く |
 | T-011 | `-` | P3 | done | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
 | T-013 | `-` | P3 | done | Codex | CI failure から自動修正 PR を起こす workflow を追加 | Codex が fix branch を作り draft PR まで出せる |
@@ -24,8 +26,8 @@
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-008 | `-` | P2 | blocked | Operator + Codex | `docs/printer-matrix` に実測表を追加 | 最低 1 機種分の測定値が commit される |
-| T-009 | `-` | P2 | blocked | Codex | 初回 `v0.1.0` リリースタグ発行 | `main` が green で Release workflow が 1 回成功する |
+| T-017 | `-` | P1 | blocked | Operator + Codex | GitHub Actions に `OPENAI_API_KEY` secret を設定 | `Codex PR Review`, `Codex Maintenance`, `Codex CI Autofix` が fallback ではなく cloud 実行される |
+| T-018 | `-` | P1 | blocked | Operator + Codex | `docs/printer-matrix` に物理プリンタ実測を追加 | mm 実測値と barcode scan 結果が 1 機種分 commit される |
 
 ## Next
 
@@ -44,4 +46,5 @@
 | id | blocker | task | unblock condition |
 | --- | --- | --- | --- |
 | B-001 | GitHub plan 制約 | `main` branch protection / ruleset の本適用 | GitHub Pro / Team 以上へ変更 |
-| B-002 | 実機プリンタの測定データ未取得 | T-008, T-009 | `docs/printer-matrix/template.md` を使った実測記録が入る |
+| B-002 | repository secret 値がこのローカル環境にない | T-017 | Operator が `OPENAI_API_KEY` を用意して GitHub repository secret に設定する |
+| B-003 | 実機プリンタ / スキャナへのアクセスが未確保 | T-018 | 対象プリンタで 100% scale 印刷と scan を実施できる |

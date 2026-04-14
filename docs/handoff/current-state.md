@@ -2,7 +2,7 @@
 
 - Updated: 2026-04-15
 - Branch: `main`
-- HEAD: `acbabeb`
+- Release tag: `v0.1.1` (`0b95f41`)
 - Remote: `origin/main`
 
 ## 1. 完了済み
@@ -24,9 +24,10 @@
 - `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
 - GitHub 上の Codex 連携
   `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`, `Codex Maintenance`, `Codex CI Autofix`
-- `Codex Maintenance` は GitHub issue の maintenance ledger に要約を残せる
-- `Codex Maintenance` は fallback 時も `.codex-maintenance-state.md` artifact を添付できる
-  現在の ledger issue は `#16`
+- `docs/printer-matrix/2026-04-15-pdf-proof-baseline.md` に初回 baseline を記録
+- `v0.1.1` GitHub Release を発行し、Windows installer asset
+  `JAN-Label_0.1.1_windows_x64-setup.exe`
+  を添付済み
 
 ## 2. 直近で使っている確認セット
 
@@ -42,27 +43,25 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24414574908` on `main`
-- ローカル Windows で `link.exe` がない場合、`cargo test --workspace` の最終判定は CI を正とする
+- `CI` run `24419371752` on `main`
+- `Release` run `24419902840` on `v0.1.1`
+- GitHub Release
+  `https://github.com/WSL043/JAN-label/releases/tag/v0.1.1`
 
-GitHub 側の整理:
-
-- rollup PR `#11` を 2026-04-14 に `main` へ merge 済み
-- superseded された stacked draft PR `#8`, `#9`, `#10` は close 済み
+ローカル Windows で `link.exe` がない場合、`cargo test --workspace` の最終判定は CI を正とする。
 
 ## 3. 未完了
 
-- `docs/printer-matrix/` に最低 1 機種分の実測を記録
-- 初回 `v0.1.0` tag / release を発行
+- GitHub Actions repository secret `OPENAI_API_KEY` を設定し、cloud-side Codex 実行を有効化
+- `docs/printer-matrix/` に物理プリンタ実測を追加
 - phase 3 の Codex 自動化
   self-hosted runner / webhook
 
 ## 4. 次の安全な一手
 
-1. `docs/printer-matrix/template.md` を複製し、実機計測を 1 件記録する
-2. 必要なら `Codex Maintenance` を `workflow_dispatch` で実行し、release blocker を再確認する
-3. `main` の green CI と release handoff 条件を確認して `v0.1.0` tag を切る
-4. tag push 後は Release workflow が Windows installer を添付しているか確認する
+1. repository secret に `OPENAI_API_KEY` を設定し、`Codex PR Review` / `Codex Maintenance` / `Codex CI Autofix` を cloud 実行へ切り替える
+2. 実機プリンタ + スキャナで 1 件測定し、`docs/printer-matrix/` に物理実測を追記する
+3. persistent な半常駐運用が必要なら `T-012` の self-hosted runner / webhook 化に進む
 
 ## 5. 触る時の注意
 
@@ -70,7 +69,7 @@ GitHub 側の整理:
 - printer adapter に render 責務を混ぜない
 - fixture 変更だけで済ませず docs を更新する
 - 監査ログを単純な成功履歴に縮退させない
-- 実機測定値が入るまでは PDF proof を release 判定の補助に留める
+- `v0.1.1` は PDF proof baseline で出しているため、物理プリンタ検証は未完了の別作業として扱う
 
 ## 6. 現在の制約
 
@@ -78,5 +77,6 @@ GitHub 側の整理:
 - GitHub environments はまだ未作成
 - Zint は repo / CI にまだ組み込んでいない
 - 一部のローカル Windows 環境では `link.exe` 不在により `cargo test --workspace` が失敗する
-- ローカル Windows に Build Tools がなくても、`desktop-shell-windows` と Release workflow は GitHub-hosted `windows-latest` を正とする
+- ローカル Windows に Build Tools がなくても、`desktop-shell-windows` と `Release` workflow は GitHub-hosted `windows-latest` を正とする
+- `pnpm/action-setup@v4`, `dorny/paths-filter@v3`, `actions/upload-artifact@v4` は Node 20 deprecation 警告を出す
 - GitHub Actions の `OPENAI_API_KEY` secret が未設定だと Codex automation は fallback のみになる
