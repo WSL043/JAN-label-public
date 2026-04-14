@@ -1,0 +1,48 @@
+name: Printer Profile
+description: プリンタプロファイル追加・変更
+title: "[Printer Profile] "
+labels:
+  - "type:printer-profile"
+  - "area:printer-adapters"
+body:
+  - type: input
+    id: printer-model
+    attributes:
+      label: Printer Model
+      description: 機種名
+    validations:
+      required: true
+  - type: input
+    id: driver-version
+    attributes:
+      label: Driver Version
+      description: ドライババージョン
+  - type: input
+    id: label-stock
+    attributes:
+      label: Label Stock
+      description: 用紙型番
+    validations:
+      required: true
+  - type: input
+    id: template-version
+    attributes:
+      label: Template Version
+      description: 例 `basic-50x30@v1`
+    validations:
+      required: true
+  - type: textarea
+    id: measurement
+    attributes:
+      label: Measurement
+      description: 実測値と 100% スケール確認結果
+    validations:
+      required: true
+  - type: textarea
+    id: scan-result
+    attributes:
+      label: Scan Result
+      description: バーコード読取結果
+    validations:
+      required: true
+

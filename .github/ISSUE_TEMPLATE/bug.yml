@@ -1,0 +1,49 @@
+name: Bug Report
+description: バグ報告
+title: "[Bug] "
+labels:
+  - "type:bug"
+body:
+  - type: textarea
+    id: summary
+    attributes:
+      label: Summary
+      description: 何が起きたか
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps
+      description: 再現手順
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected
+      description: 期待結果
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual
+      description: 実際の結果
+    validations:
+      required: true
+  - type: input
+    id: template-version
+    attributes:
+      label: Template Version
+      description: 例 `basic-50x30@v1`
+  - type: input
+    id: printer-profile
+    attributes:
+      label: Printer Profile
+      description: 例 `pdf-a4-proof`
+

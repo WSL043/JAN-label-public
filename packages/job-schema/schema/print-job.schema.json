@@ -1,0 +1,83 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PrintJobDraft",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "jobId",
+    "parentSku",
+    "sku",
+    "jan",
+    "qty",
+    "brand",
+    "template",
+    "printerProfile",
+    "actor",
+    "requestedAt"
+  ],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "parentSku": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sku": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["raw", "normalized", "source"],
+      "properties": {
+        "raw": { "type": "string", "pattern": "^[0-9]{12,13}$" },
+        "normalized": { "type": "string", "pattern": "^[0-9]{13}$" },
+        "source": { "type": "string", "enum": ["manual", "import"] }
+      }
+    },
+    "qty": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1
+    },
+    "template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "version": { "type": "string", "minLength": 1 }
+      }
+    },
+    "printerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "adapter", "paperSize", "dpi", "scalePolicy"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 },
+        "adapter": {
+          "type": "string",
+          "enum": ["pdf", "windows-spooler", "zpl", "tspl", "qz"]
+        },
+        "paperSize": { "type": "string", "minLength": 1 },
+        "dpi": { "type": "integer", "minimum": 150 },
+        "scalePolicy": { "type": "string", "const": "fixed-100" }
+      }
+    },
+    "actor": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    }
+  }
+}
+

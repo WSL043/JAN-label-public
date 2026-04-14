@@ -1,0 +1,28 @@
+name: Feature Request
+description: 機能要望
+title: "[Feature] "
+labels:
+  - "type:feature"
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: 何が困っているか
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: どう変えたいか
+    validations:
+      required: true
+  - type: textarea
+    id: impact
+    attributes:
+      label: Impact
+      description: 印刷精度、監査、運用への影響
+    validations:
+      required: true
+

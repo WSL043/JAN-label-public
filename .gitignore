@@ -1,0 +1,16 @@
+node_modules/
+dist/
+coverage/
+.pnpm-store/
+
+target/
+
+.DS_Store
+Thumbs.db
+
+.idea/
+.vscode/
+
+*.log
+*.tmp
+

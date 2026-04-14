@@ -1,0 +1,8 @@
+* @WSL043
+
+/crates/render/** @WSL043
+/crates/printer-adapters/** @WSL043
+/crates/print-agent/** @WSL043
+/packages/fixtures/** @WSL043
+/docs/** @WSL043
+

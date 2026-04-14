@@ -1,0 +1,3 @@
+parent_sku,sku,jan,qty,brand,template,printer_profile,enabled
+PARENT-0001,SKU-0001,400638133393,24,Acme,basic-50x30,pdf-a4-proof,true
+

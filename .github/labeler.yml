@@ -1,0 +1,26 @@
+area:print-core:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/**"
+
+area:admin-web:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "apps/admin-web/**"
+
+area:printer-adapters:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "crates/printer-adapters/**"
+
+area:docs:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/**"
+          - "*.md"
+
+type:printer-profile:
+  - changed-files:
+      - any-glob-to-any-file:
+          - "docs/printer-matrix/**"
+          - "packages/fixtures/**"

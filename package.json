@@ -1,0 +1,19 @@
+{
+  "name": "label-platform",
+  "private": true,
+  "packageManager": "pnpm@10.0.0",
+  "scripts": {
+    "format": "pnpm exec biome check . --write",
+    "format:check": "pnpm exec biome check .",
+    "lint": "pnpm exec biome lint .",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "fixture:validate": "node scripts/validate-fixtures.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^1.9.4",
+    "typescript": "^5.6.3"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["@biomejs/biome", "esbuild"]
+  }
+}

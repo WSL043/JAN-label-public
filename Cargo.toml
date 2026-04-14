@@ -1,0 +1,17 @@
+[workspace]
+members = [
+  "crates/audit-log",
+  "crates/barcode",
+  "crates/domain",
+  "crates/importer",
+  "crates/print-agent",
+  "crates/printer-adapters",
+  "crates/render",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2021"
+license = "Proprietary"
+version = "0.1.0"
+

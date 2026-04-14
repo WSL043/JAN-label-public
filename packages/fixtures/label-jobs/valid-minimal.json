@@ -1,0 +1,26 @@
+{
+  "jobId": "JOB-20260414-0001",
+  "parentSku": "PARENT-0001",
+  "sku": "SKU-0001",
+  "jan": {
+    "raw": "400638133393",
+    "normalized": "4006381333931",
+    "source": "import"
+  },
+  "qty": 24,
+  "brand": "Acme",
+  "template": {
+    "id": "basic-50x30",
+    "version": "v1"
+  },
+  "printerProfile": {
+    "id": "pdf-a4-proof",
+    "adapter": "pdf",
+    "paperSize": "A4",
+    "dpi": 300,
+    "scalePolicy": "fixed-100"
+  },
+  "actor": "ops.user",
+  "requestedAt": "2026-04-14T09:00:00Z"
+}
+

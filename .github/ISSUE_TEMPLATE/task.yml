@@ -1,0 +1,30 @@
+name: Task
+description: 実装タスク
+title: "[Task] "
+labels:
+  - "type:task"
+body:
+  - type: textarea
+    id: goal
+    attributes:
+      label: Goal
+      description: 完了条件
+    validations:
+      required: true
+  - type: textarea
+    id: scope
+    attributes:
+      label: Scope
+      description: 触るパスや責務
+    validations:
+      required: true
+  - type: textarea
+    id: checks
+    attributes:
+      label: Checks
+      description: 必要な検証
+      placeholder: |
+        - unit tests
+        - golden tests
+        - fixture validation
+

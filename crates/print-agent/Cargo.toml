@@ -1,0 +1,15 @@
+[package]
+name = "print-agent"
+edition.workspace = true
+license.workspace = true
+version.workspace = true
+
+[dependencies]
+audit-log = { path = "../audit-log" }
+barcode = { path = "../barcode" }
+printer-adapters = { path = "../printer-adapters" }
+render = { path = "../render" }
+
+[lib]
+path = "src/lib.rs"
+

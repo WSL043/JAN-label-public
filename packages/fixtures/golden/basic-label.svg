@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="50mm" height="30mm" viewBox="0 0 50 30">
+  <rect width="50" height="30" fill="#ffffff" stroke="#000000" stroke-width="0.2" />
+  <text x="2" y="5" font-size="3">job:JOB-20260414-0001</text>
+  <text x="2" y="10" font-size="4">brand:Acme</text>
+  <text x="2" y="15" font-size="4">sku:SKU-0001</text>
+  <text x="2" y="20" font-size="4">jan:4006381333931</text>
+  <text x="2" y="25" font-size="4">qty:24</text>
+  <text x="30" y="28" font-size="2">template:basic-50x30@v1</text>
+</svg>
+
