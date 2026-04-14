@@ -196,8 +196,8 @@ mod tests {
     }
 
     #[test]
-    fn dispatch_uses_svg_for_non_pdf_adapters() {
-        let adapter = FakeAdapter::new(PrinterAdapterKind::Qz);
+    fn dispatch_uses_svg_for_windows_spooler_adapter() {
+        let adapter = FakeAdapter::new(PrinterAdapterKind::WindowsSpooler);
         let barcode_engine = FakeBarcodeEngine;
         let agent = PrintAgent::new(adapter.clone(), barcode_engine);
 
@@ -209,7 +209,7 @@ mod tests {
         assert_eq!(submission.media_type, "image/svg+xml");
         assert!(
             submission.bytes.starts_with(b"<svg"),
-            "non-pdf adapters should keep receiving SVG artifacts"
+            "windows spooler adapters should keep receiving SVG artifacts"
         );
     }
 

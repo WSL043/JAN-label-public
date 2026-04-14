@@ -1,0 +1,25 @@
+{
+  "jobId": "JOB-20260415-0002",
+  "parentSku": "PARENT-0001",
+  "sku": "SKU-0001",
+  "jan": {
+    "raw": "4006381333931",
+    "normalized": "4006381333931",
+    "source": "manual"
+  },
+  "qty": 24,
+  "brand": "Acme",
+  "template": {
+    "id": "basic-50x30",
+    "version": "v1"
+  },
+  "printerProfile": {
+    "id": "winspool-zd421-203dpi",
+    "adapter": "windows-spooler",
+    "paperSize": "50x30-label",
+    "dpi": 203,
+    "scalePolicy": "fixed-100"
+  },
+  "actor": "ops.user",
+  "requestedAt": "2026-04-15T10:00:00Z"
+}

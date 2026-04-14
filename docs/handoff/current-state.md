@@ -21,6 +21,8 @@
   original job と reprint の系譜、parent job、reason を監査ログで表現
 - `crates/printer-adapters` の PDF file adapter
   `application/pdf` artifact を proof file として書き出し、`print-agent` から PDF proof を流せる
+- `crates/printer-adapters` の Windows spooler skeleton
+  printer name と spool path を受け、artifact を staging file として submit できる
 - GitHub Actions
   `CI`, `Pull Request Labeler`, `Sync Labels`, `Release`
 - Codex event-driven workflow
@@ -46,7 +48,6 @@ GitHub Actions の最新成功 run:
 
 ## 3. 未完了
 
-- Windows spooler adapter 実装
 - 実機プリンタの検証記録
 - 開発環境 / CI への実 Zint バイナリ導入
 - Codex による自動修正 PR / CI 修復 / schedule 巡回
@@ -62,10 +63,10 @@ GitHub Actions の最新成功 run:
 
 ## 4. 次の安全な一手
 
-1. Windows spooler adapter の骨格を追加する
+1. 実機プリンタの測定記録を `docs/printer-matrix/` に残す
 2. 開発環境 / CI への実 Zint バイナリ導入方針を固める
 3. Codex の自動修正 PR / CI 修復 / schedule 巡回を必要範囲で足す
-4. 実機プリンタの測定記録を `docs/printer-matrix/` に残す
+4. 初回 `v0.1.0` リリースタグ準備を進める
 
 ## 5. 触る時の注意
 

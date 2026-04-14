@@ -8,7 +8,7 @@
 3. `print-agent` が JAN と importer 正規化ルールを検証する
 4. `barcode` が Zint へ描画依頼する
 5. `render` が printer profile に応じて SVG/PDF を生成する
-6. `printer-adapters` が proof file や printer queue へ送信する
+6. `printer-adapters` が proof file や Windows spool staging file へ送信する
 7. `audit-log` が lineage / parent job / reason を含む実行結果を記録する
 
 ## 2. MVP の出力優先順位
@@ -18,7 +18,7 @@
 - 第 2 段階
   PDF proof
 - 第 3 段階
-  Windows spooler
+  Windows spool staging
 - 第 4 段階
   ZPL / TSPL / QZ
 

@@ -3,6 +3,7 @@ import { join } from "node:path";
 
 const fixtureRoot = join(process.cwd(), "packages", "fixtures");
 const validJobPath = join(fixtureRoot, "label-jobs", "valid-minimal.json");
+const spoolerJobPath = join(fixtureRoot, "label-jobs", "valid-windows-spooler.json");
 const invalidJobPath = join(fixtureRoot, "label-jobs", "invalid-missing-brand.json");
 const goldenPath = join(fixtureRoot, "golden", "basic-label.svg");
 const goldenPdfPath = join(fixtureRoot, "golden", "basic-label.pdf");
@@ -57,6 +58,22 @@ assert(
 assert(
   validJob.printerProfile.scalePolicy === "fixed-100",
   `${validJobPath}: expected proof printer profile to keep fixed-100 scaling`,
+);
+
+const spoolerJob = readJson(spoolerJobPath);
+validateRequiredFields(spoolerJob, spoolerJobPath);
+validateJan(spoolerJob, spoolerJobPath);
+assert(
+  spoolerJob.printerProfile.adapter === "windows-spooler",
+  `${spoolerJobPath}: expected spooler printer profile adapter to stay windows-spooler`,
+);
+assert(
+  spoolerJob.printerProfile.id === "winspool-zd421-203dpi",
+  `${spoolerJobPath}: expected spooler printer profile id to stay winspool-zd421-203dpi`,
+);
+assert(
+  spoolerJob.printerProfile.scalePolicy === "fixed-100",
+  `${spoolerJobPath}: expected spooler printer profile to keep fixed-100 scaling`,
 );
 
 const invalidJob = readJson(invalidJobPath);
