@@ -22,3 +22,10 @@ Windows を最初の実行環境に据えつつ、将来的に macOS / Linux / i
 
 Windows の初期セットアップは [docs/windows-bootstrap.md](docs/windows-bootstrap.md) を参照してください。
 
+## Project Memory
+
+- [AGENTS.md](AGENTS.md)
+- [docs/handoff/current-state.md](docs/handoff/current-state.md)
+- [docs/todo/active.md](docs/todo/active.md)
+- [docs/known-issues.md](docs/known-issues.md)
+- [docs/adr/README.md](docs/adr/README.md)

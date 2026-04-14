@@ -25,13 +25,18 @@ label-platform/
   scripts/
     windows/
   docs/
+    adr/
     architecture.md
     domain-model.md
     github-governance.md
+    handoff/
+    known-issues.md
     mvp-backlog.md
     print-pipeline.md
+    release/
     repo-structure.md
     risk-register.md
+    todo/
     windows-bootstrap.md
     architecture/
     label-specs/
@@ -72,4 +77,3 @@ label-platform/
 - 新しいプリンタ実装は `crates/printer-adapters` 配下に入れ、`render` へ分散させない。
 - UI 専用の変換ロジックで JAN を正規化しない。正規化は Rust 側と schema 側で統制する。
 - fixture を変えた PR は、対応する docs と golden test を同じ PR で更新する。
-
