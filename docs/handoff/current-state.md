@@ -2,35 +2,28 @@
 
 - Updated: 2026-04-15
 - Branch: `main`
-- HEAD: `516dc1e`
+- HEAD: `6e6ec4e`
 - Remote: `origin/main`
 
 ## 1. 完了済み
 
 - Rust workspace と pnpm workspace の土台
 - `domain` / `importer` / `render` / `print-agent` などの最小 crate
-- `crates/barcode` の Zint CLI adapter
-  バイナリパス注入、終了コード / stderr を含むエラー、fake executable テスト
-- `crates/render` の PDF 出力ルート
-  deterministic な最小 PDF writer と golden fixture 比較
-- `crates/importer` の行単位バリデーション
-  canonical row ごとの cell error と JAN 正規化
-- `apps/admin-web` のジョブ作成フォーム
-  parent_sku / sku / jan / qty / brand 入力、template / printer profile 選択、`@label/job-schema` に沿った draft preview
-- `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
-  original job と reprint の系譜、parent job、reason を監査ログで表現
-- `crates/printer-adapters` の PDF file adapter
-  `application/pdf` artifact を proof file として書き出し、`print-agent` から PDF proof を流せる
-- `crates/printer-adapters` の Windows spooler skeleton
-  printer name と spool path を受け、artifact を staging file として submit できる
+- React 管理 UI の最小骨格
 - GitHub Actions
   `CI`, `Pull Request Labeler`, `Sync Labels`, `Release`
-- Codex event-driven workflow
-  same-repo PR 自動レビューと `@codex` PR コメント応答
 - issue forms, labels, PR template, CODEOWNERS
 - Windows 開発環境の bootstrap スクリプト
+- `crates/barcode` の Zint CLI adapter と fake executable テスト
+- `crates/render` の PDF 出力ルートと golden fixture
+- `crates/importer` の行単位バリデーション
+- `apps/admin-web` のジョブ作成フォーム
+- `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
+- `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
+- GitHub 上の Codex 連携
+  `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`
 
-## 2. 直近で通した確認
+## 2. 直近で使っている確認セット
 
 ```powershell
 pnpm fixture:validate
@@ -44,29 +37,26 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24411043235`
+- `CI` run `24411813836` on `main`
+- ローカル Windows で `link.exe` がない場合、`cargo test --workspace` の最終判定は CI を正とする
+
+GitHub 側の整理:
+
+- rollup PR `#11` を 2026-04-14 に `main` へ merge 済み
+- superseded された stacked draft PR `#8`, `#9`, `#10` は close 済み
 
 ## 3. 未完了
 
-- 実機プリンタの検証記録
-- 開発環境 / CI への実 Zint バイナリ導入
-- Codex による自動修正 PR / CI 修復 / schedule 巡回
-
-対応する初期 GitHub issues:
-
-- `#1` Zint CLI barcode adapter
-- `#2` PDF output path in render crate
-- `#3` row-level importer validation
-- `#4` admin-web job creation form
-- `#5` audit lineage and reprint history
-- `#6` PDF printer adapter and proof flow
+- `docs/printer-matrix/` に最低 1 機種分の実測を記録
+- 初回 `v0.1.0` tag / release を発行
+- phase 3 の Codex 自動化
+  schedule sweep, release prep, CI failure の自動修正 PR, self-hosted runner / webhook
 
 ## 4. 次の安全な一手
 
-1. 実機プリンタの測定記録を `docs/printer-matrix/` に残す
-2. 開発環境 / CI への実 Zint バイナリ導入方針を固める
-3. Codex の自動修正 PR / CI 修復 / schedule 巡回を必要範囲で足す
-4. 初回 `v0.1.0` リリースタグ準備を進める
+1. `docs/printer-matrix/template.md` を複製し、実機計測を 1 件記録する
+2. `main` の green CI と release handoff 条件を確認して `v0.1.0` tag を切る
+3. release 後に必要なら Codex の schedule / release-prep automation を追加する
 
 ## 5. 触る時の注意
 
@@ -74,10 +64,11 @@ GitHub Actions の最新成功 run:
 - printer adapter に render 責務を混ぜない
 - fixture 変更だけで済ませず docs を更新する
 - 監査ログを単純な成功履歴に縮退させない
+- 実機測定値が入るまでは PDF proof を release 判定の補助に留める
 
 ## 6. 現在の制約
 
 - GitHub branch protection / ruleset は current plan 制約で未適用
 - GitHub environments はまだ未作成
-- release tag はまだ未発行
-- Zint CLI adapter は実装済みだが、repo / CI に実バイナリはまだ組み込んでいない
+- Zint は repo / CI にまだ組み込んでいない
+- 一部のローカル Windows 環境では `link.exe` 不在により `cargo test --workspace` が失敗する

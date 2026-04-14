@@ -4,6 +4,7 @@
 
 - `CI` が green
 - `docs/todo/active.md` の release 対象が完了
+- `docs/printer-matrix/` に最低 1 件の実測記録がある
 - 実機または PDF proof の確認が終わっている
 
 ## 2. タグ方針
@@ -29,6 +30,11 @@ git tag v0.1.0
 git push origin v0.1.0
 ```
 
+補足:
+
+- ローカル Windows で `link.exe` がなく `cargo test --workspace` が失敗する場合は、そのまま green 扱いにしない
+- その場合でも `cargo check --workspace --tests` は補助確認として回し、最終判定は `main` 上の GitHub Actions `CI` success を使う
+
 ## 4. smoke check
 
 - release ノートが自動生成されたか
@@ -40,4 +46,3 @@ git push origin v0.1.0
 
 - 誤タグなら tag を削除する前に原因を `docs/known-issues.md` に残す
 - main の commit を巻き戻すのではなく、修正 commit と新タグで是正する
-
