@@ -1,0 +1,156 @@
+name: Codex Maintenance
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 1 * * *"
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: codex-maintenance
+  cancel-in-progress: false
+
+jobs:
+  codex-maintenance:
+    runs-on: ubuntu-latest
+    outputs:
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Collect maintenance state
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh run list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --workflow CI \
+            --limit 10 \
+            --json databaseId,status,conclusion,createdAt,headBranch,displayTitle,url \
+            > .codex-maintenance-ci.json
+
+          gh pr list \
+            --repo "${GITHUB_REPOSITORY}" \
+            --state open \
+            --json number,title,isDraft,baseRefName,headRefName,url \
+            > .codex-maintenance-prs.json
+
+          if gh release view v0.1.0 --repo "${GITHUB_REPOSITORY}" --json tagName,url,publishedAt > .codex-maintenance-release.json 2>/dev/null; then
+            :
+          else
+            echo '{"tagName":null,"url":null,"publishedAt":null}' > .codex-maintenance-release.json
+          fi
+
+          matrix_files=$(find docs/printer-matrix -maxdepth 1 -type f -name '*.md' ! -name 'README.md' ! -name 'template.md' | LC_ALL=C sort || true)
+          matrix_count=$(printf '%s\n' "$matrix_files" | sed '/^$/d' | wc -l | tr -d ' ')
+
+          {
+            echo "# Codex Maintenance State"
+            echo
+            echo "- trigger: ${{ github.event_name }}"
+            echo "- run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+            echo
+            echo "## Printer matrix entries"
+            echo "- count: ${matrix_count:-0}"
+            echo "- files:"
+            if [ "${matrix_count:-0}" -gt 0 ]; then
+              printf '  %s\n' "$matrix_files"
+            else
+              echo "  (none)"
+            fi
+            echo
+            echo "## Active todo"
+            cat docs/todo/active.md
+            echo
+            echo "## Release handoff"
+            cat docs/release/handoff.md
+            echo
+            echo "## Known issues"
+            cat docs/known-issues.md
+            echo
+            echo "## Latest CI runs"
+            echo '```json'
+            cat .codex-maintenance-ci.json
+            echo '```'
+            echo
+            echo "## Open pull requests"
+            echo '```json'
+            cat .codex-maintenance-prs.json
+            echo '```'
+            echo
+            echo "## Release tag state"
+            echo '```json'
+            cat .codex-maintenance-release.json
+            echo '```'
+          } > .codex-maintenance-state.md
+
+      - name: Upload maintenance snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: codex-maintenance-state
+          path: .codex-maintenance-state.md
+
+      - name: Verify Codex secret is configured
+        id: preflight
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex maintenance summary
+        if: steps.preflight.outputs.configured == 'true'
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          prompt: |
+            Review `.codex-maintenance-state.md` for ${{ github.repository }}.
+
+            Produce a concise maintenance summary with these headings:
+            - Status
+            - Blockers
+            - Next Actions
+
+            Focus on:
+            - unresolved CI failures or suspicious CI gaps
+            - blockers for `v0.1.0`
+            - whether open pull requests, missing printer measurements, or release state are preventing progress
+
+            If the repository is healthy, say so explicitly.
+            If there are blockers outside the repository, distinguish them from code or config problems.
+
+      - name: Publish Codex summary
+        if: steps.run_codex.outputs.final-message != ''
+        env:
+          CODEX_FINAL_MESSAGE: ${{ steps.run_codex.outputs.final-message }}
+        run: |
+          {
+            echo "# Codex Maintenance"
+            echo
+            printf '%s\n' "$CODEX_FINAL_MESSAGE"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish fallback summary
+        if: steps.preflight.outputs.configured != 'true'
+        run: |
+          {
+            echo "# Codex Maintenance"
+            echo
+            echo "## Status"
+            echo "- OPENAI_API_KEY is not configured, so the Codex summary was skipped."
+            echo
+            echo "## Next Actions"
+            echo "- Review the uploaded \`codex-maintenance-state\` artifact manually."
+          } >> "$GITHUB_STEP_SUMMARY"

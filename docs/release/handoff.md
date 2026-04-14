@@ -34,6 +34,7 @@ git push origin v0.1.0
 
 - ローカル Windows で `link.exe` がなく `cargo test --workspace` が失敗する場合は、そのまま green 扱いにしない
 - その場合でも `cargo check --workspace --tests` は補助確認として回し、最終判定は `main` 上の GitHub Actions `CI` success を使う
+- blocker が曖昧なら `Codex Maintenance` を `workflow_dispatch` で実行し、job summary を release 前確認に使う
 
 ## 4. smoke check
 

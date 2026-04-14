@@ -21,7 +21,7 @@
 - `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
 - `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
 - GitHub 上の Codex 連携
-  `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`
+  `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`, `Codex Maintenance`
 
 ## 2. 直近で使っている確認セット
 
@@ -50,13 +50,13 @@ GitHub 側の整理:
 - `docs/printer-matrix/` に最低 1 機種分の実測を記録
 - 初回 `v0.1.0` tag / release を発行
 - phase 3 の Codex 自動化
-  schedule sweep, release prep, CI failure の自動修正 PR, self-hosted runner / webhook
+  CI failure の自動修正 PR, self-hosted runner / webhook
 
 ## 4. 次の安全な一手
 
 1. `docs/printer-matrix/template.md` を複製し、実機計測を 1 件記録する
-2. `main` の green CI と release handoff 条件を確認して `v0.1.0` tag を切る
-3. release 後に必要なら Codex の schedule / release-prep automation を追加する
+2. 必要なら `Codex Maintenance` を `workflow_dispatch` で実行し、release blocker を再確認する
+3. `main` の green CI と release handoff 条件を確認して `v0.1.0` tag を切る
 
 ## 5. 触る時の注意
 

@@ -15,6 +15,7 @@
 | T-006 | `#6` | P1 | done | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
 | T-007 | `-` | P2 | done | Codex | Windows spooler adapter の骨格実装 | printer profile 経由で submit できる |
 | T-010 | `-` | P2 | done | Codex | CI failure 時の Codex triage workflow を追加 | same-repo PR の失敗 CI に Codex の診断コメントが付く |
+| T-011 | `-` | P3 | done | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
 
 ## Now
 
@@ -27,13 +28,13 @@
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-011 | `-` | P3 | ready | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
+| T-012 | `-` | P3 | pending | Codex + Infra | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
 
 ## Later
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-012 | `-` | P3 | pending | Codex | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
+| T-013 | `-` | P3 | pending | Codex | CI failure から自動修正 PR を起こす workflow を追加 | Codex が fix branch を作り draft PR まで出せる |
 
 ## Blocked
 
