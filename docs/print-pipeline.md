@@ -2,8 +2,9 @@
 
 ## 1. 基本フロー
 
-1. UI で SKU / 親 SKU / 数量 / テンプレート / プリンタを選ぶ
+1. UI で parent SKU / SKU / JAN / 数量 / brand / template / printer profile を選ぶ
 2. `job-schema` に沿ってドラフトを作る
+   `admin-web` は canonical な 13 桁 JAN だけを preview に載せ、12 桁補完は Rust 側へ委譲する
 3. `print-agent` が JAN と importer 正規化ルールを検証する
 4. `barcode` が Zint へ描画依頼する
 5. `render` が SVG/PDF を生成する

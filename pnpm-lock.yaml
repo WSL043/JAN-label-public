@@ -17,6 +17,9 @@ importers:
 
   apps/admin-web:
     dependencies:
+      '@label/job-schema':
+        specifier: workspace:*
+        version: link:../../packages/job-schema
       react:
         specifier: ^19.0.0
         version: 19.2.5

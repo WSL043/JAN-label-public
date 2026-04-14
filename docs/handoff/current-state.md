@@ -1,6 +1,6 @@
 # current-state
 
-- Updated: 2026-04-14
+- Updated: 2026-04-15
 - Branch: `main`
 - HEAD: `516dc1e`
 - Remote: `origin/main`
@@ -15,7 +15,8 @@
   deterministic な最小 PDF writer と golden fixture 比較
 - `crates/importer` の行単位バリデーション
   canonical row ごとの cell error と JAN 正規化
-- React 管理 UI の最小骨格
+- `apps/admin-web` のジョブ作成フォーム
+  parent_sku / sku / jan / qty / brand 入力、template / printer profile 選択、`@label/job-schema` に沿った draft preview
 - GitHub Actions
   `CI`, `Pull Request Labeler`, `Sync Labels`, `Release`
 - Codex event-driven workflow
@@ -37,13 +38,12 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24396716032`
+- `CI` run `24410054548`
 
 ## 3. 未完了
 
 - PDF adapter 実装
 - Windows spooler adapter 実装
-- admin-web のジョブ作成 UI
 - audit lineage / reprint の詳細化
 - 実機プリンタの検証記録
 - 開発環境 / CI への実 Zint バイナリ導入
@@ -60,7 +60,7 @@ GitHub Actions の最新成功 run:
 
 ## 4. 次の安全な一手
 
-1. `apps/admin-web` にジョブ作成フォームを作る
+1. `audit-log` に lineage / reprint 情報を足す
 2. `printer-adapters` に PDF adapter を追加する
 3. 開発環境 / CI への実 Zint バイナリ導入方針を固める
 4. Codex の自動修正 PR / CI 修復 / schedule 巡回を必要範囲で足す
