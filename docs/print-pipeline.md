@@ -9,7 +9,7 @@
 4. `barcode` が Zint へ描画依頼する
 5. `render` が SVG/PDF を生成する
 6. `printer-adapters` が出力先へ送信する
-7. `audit-log` が実行結果を記録する
+7. `audit-log` が lineage / parent job / reason を含む実行結果を記録する
 
 ## 2. MVP の出力優先順位
 
@@ -32,7 +32,7 @@ validated_row = importer.validate_row(row_number, row_values)
 barcode_artifact = zint.render(normalized)
 label_artifact = render.svg(template_version, barcode_artifact, job)
 receipt = adapter.submit(label_artifact)
-audit.record(job_id, receipt, actor, timestamp)
+audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 ```
 
 ## 4. ゴールデンテスト
