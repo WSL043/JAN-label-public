@@ -17,6 +17,7 @@
 | T-010 | `-` | P2 | done | Codex | CI failure 時の Codex triage workflow を追加 | same-repo PR の失敗 CI に Codex の診断コメントが付く |
 | T-011 | `-` | P3 | done | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
 | T-013 | `-` | P3 | done | Codex | CI failure から自動修正 PR を起こす workflow を追加 | Codex が fix branch を作り draft PR まで出せる |
+| T-014 | `-` | P3 | done | Codex | release prep の結果を issue / discussion に定期集約する | schedule 実行結果が GitHub 上の恒久的なスレッドに残る |
 
 ## Now
 
@@ -30,12 +31,13 @@
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
 | T-012 | `-` | P3 | pending | Codex + Infra | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
+| T-015 | `-` | P2 | pending | Codex | `apps/desktop-shell` の Windows 配布シェルを初期化 | Tauri shell か同等の Windows 配布経路が起動し、配布手順を release docs に書ける |
 
 ## Later
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-014 | `-` | P3 | pending | Codex | release prep の結果を issue / discussion に定期集約する | schedule 実行結果が GitHub 上の恒久的なスレッドに残る |
+| T-016 | `-` | P3 | pending | Codex | release prep と printer matrix の結果から `v0.1.x` release notes を補助生成する | maintenance ledger から release note 下書きを出せる |
 
 ## Blocked
 

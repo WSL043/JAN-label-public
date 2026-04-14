@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   contents: read
+  issues: write
   pull-requests: read
 
 concurrency:
@@ -154,3 +155,94 @@ jobs:
             echo "## Next Actions"
             echo "- Review the uploaded \`codex-maintenance-state\` artifact manually."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build ledger summary
+        id: ledger
+        env:
+          CODEX_FINAL_MESSAGE: ${{ steps.run_codex.outputs.final-message }}
+        run: |
+          if [ "${{ steps.preflight.outputs.configured }}" = "true" ] && [ -n "$CODEX_FINAL_MESSAGE" ]; then
+            {
+              echo "## Status"
+              printf '%s\n' "$CODEX_FINAL_MESSAGE"
+            } > .codex-maintenance-ledger.md
+          else
+            {
+              echo "## Status"
+              echo "- OPENAI_API_KEY is not configured, so the Codex summary was skipped."
+              echo
+              echo "## Next Actions"
+              echo "- Review the uploaded \`codex-maintenance-state\` artifact manually."
+            } > .codex-maintenance-ledger.md
+          fi
+
+      - name: Upsert maintenance ledger issue
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require("fs");
+            const title = "[codex] Maintenance Ledger";
+            const issueMarker = "<!-- codex-maintenance-ledger-issue -->";
+            const commentMarker = "<!-- codex-maintenance-ledger-comment -->";
+            const runUrl = `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`;
+            const summary = fs.readFileSync(".codex-maintenance-ledger.md", "utf8").trim();
+
+            const issues = await github.paginate(github.rest.issues.listForRepo, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              state: "open",
+              per_page: 100,
+            });
+
+            let issue = issues.find((item) => !item.pull_request && item.title === title);
+
+            if (!issue) {
+              const { data } = await github.rest.issues.create({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                title,
+                body: `${issueMarker}\nAutomated Codex maintenance summaries are collected here for release-prep and CI hygiene.`,
+              });
+              issue = data;
+            }
+
+            const body = [
+              commentMarker,
+              `Run: ${runUrl}`,
+              "",
+              summary,
+            ].join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.login === "github-actions[bot]" &&
+              comment.body?.startsWith(commentMarker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              core.summary.addRaw(`Ledger issue updated: #${issue.number}`);
+              await core.summary.write();
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: issue.number,
+              body,
+            });
+            core.summary.addRaw(`Ledger issue updated: #${issue.number}`);
+            await core.summary.write();
