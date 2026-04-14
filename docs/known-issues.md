@@ -43,3 +43,10 @@
 - 影響: fork PR や GitHub Actions の PR 作成権限が不足する repo では draft autofix PR まで完了しない
 - 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
 - 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
+
+## K-007 Windows 配布シェルはまだ未初期化
+
+- 状態: open
+- 影響: 現在の `v0.1.0` release は GitHub release / print-core release までは進められても、Windows インストーラ配布物はまだ生成できない
+- 回避: 当面は `admin-web` + `print-agent` + PDF proof / Windows spooler skeleton を開発経路として使う
+- 恒久対応: `apps/desktop-shell` を初期化し、Windows 向け配布フローを release docs と CI に組み込む
