@@ -1,0 +1,289 @@
+name: Codex CI Autofix
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: write
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: codex-ci-autofix-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  codex-ci-autofix:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve PR metadata
+        id: meta
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const pr = context.payload.workflow_run.pull_requests[0];
+            if (!pr) {
+              core.setOutput("skip", "true");
+              core.setOutput("skip_reason", "workflow_run did not resolve to a pull request");
+              return;
+            }
+
+            const { data } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            const sameRepo = data.head.repo.full_name === `${context.repo.owner}/${context.repo.repo}`;
+            const isFixBranch = data.head.ref.startsWith("codex/ci-fix-pr-");
+
+            core.setOutput("skip", sameRepo && !isFixBranch ? "false" : "true");
+            core.setOutput(
+              "skip_reason",
+              !sameRepo
+                ? "autofix only runs for same-repo pull requests"
+                : isFixBranch
+                  ? "autofix does not recurse on Codex-generated fix branches"
+                  : ""
+            );
+            core.setOutput("pr_number", String(pr.number));
+            core.setOutput("base_ref", data.base.ref);
+            core.setOutput("base_sha", data.base.sha);
+            core.setOutput("head_ref", data.head.ref);
+            core.setOutput("head_sha", data.head.sha);
+            core.setOutput("head_repo", data.head.repo.full_name);
+
+      - uses: actions/checkout@v5
+        if: steps.meta.outputs.skip != 'true'
+        with:
+          fetch-depth: 0
+          ref: ${{ steps.meta.outputs.head_ref }}
+
+      - name: Pre-fetch base and head refs for the PR
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          PR_BASE_REF: ${{ steps.meta.outputs.base_ref }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Set up pnpm
+        if: steps.meta.outputs.skip != 'true'
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        if: steps.meta.outputs.skip != 'true'
+        uses: actions/setup-node@v5
+        with:
+          cache: pnpm
+          node-version: lts/*
+
+      - name: Install pnpm dependencies
+        if: steps.meta.outputs.skip != 'true'
+        run: pnpm install --frozen-lockfile
+
+      - name: Set up Rust toolchain
+        if: steps.meta.outputs.skip != 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Prefetch Rust dependencies
+        if: steps.meta.outputs.skip != 'true'
+        run: cargo fetch --locked
+
+      - name: Capture failed logs
+        if: steps.meta.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh run view "${{ github.event.workflow_run.id }}" --repo "${GITHUB_REPOSITORY}" --log-failed > .codex-ci-failed.log; then
+            echo "Failed to collect failed logs for run ${{ github.event.workflow_run.id }}" > .codex-ci-failed.log
+          fi
+
+      - name: Create fix branch
+        if: steps.meta.outputs.skip != 'true'
+        id: branch
+        run: |
+          fix_branch="codex/ci-fix-pr-${{ steps.meta.outputs.pr_number }}-run-${{ github.event.workflow_run.id }}"
+          git switch -c "$fix_branch"
+          echo "fix_branch=$fix_branch" >> "$GITHUB_OUTPUT"
+
+      - name: Verify Codex secret is configured
+        if: steps.meta.outputs.skip != 'true'
+        id: preflight
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex autofix
+        if: steps.preflight.outputs.configured == 'true'
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: workspace-write
+          prompt: |
+            A CI run failed for pull request #${{ steps.meta.outputs.pr_number }} in ${{ github.repository }}.
+
+            You are on a fresh fix branch created from the PR head branch `${{ steps.meta.outputs.head_ref }}`.
+            Failed logs are in `.codex-ci-failed.log`.
+
+            Fix the smallest safe repository change that addresses the CI failure.
+
+            Requirements:
+            - only touch files needed for the failure
+            - keep docs and fixtures aligned if the fix changes behavior
+            - do not push, open a PR, or modify git history beyond the working tree
+            - if no safe automated fix is possible, leave the tree unchanged and explain why
+            - run the narrowest relevant checks you can with the already-installed toolchain and summarize the result
+
+            Base and head context:
+            - base sha: ${{ steps.meta.outputs.base_sha }}
+            - head sha: ${{ steps.meta.outputs.head_sha }}
+
+      - name: Detect Codex changes
+        if: steps.meta.outputs.skip != 'true'
+        id: changes
+        run: |
+          if [ -n "$(git status --short)" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit autofix changes
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix(ci): address PR #$PR_NUMBER failure"
+
+      - name: Push fix branch
+        if: steps.changes.outputs.changed == 'true'
+        run: git push -u origin "${{ steps.branch.outputs.fix_branch }}"
+
+      - name: Build autofix PR body
+        if: steps.changes.outputs.changed == 'true'
+        env:
+          CODEX_FINAL_MESSAGE: ${{ steps.run_codex.outputs.final-message }}
+        run: |
+          cat <<EOF > .codex-autofix-pr-body.md
+          ## Summary
+          - automated Codex fix for failed CI on PR #${{ steps.meta.outputs.pr_number }}
+          - source run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${{ github.event.workflow_run.id }}
+          - target branch: \`${{ steps.meta.outputs.head_ref }}\`
+
+          ## Codex summary
+          ${CODEX_FINAL_MESSAGE:-Codex did not return a summary.}
+          EOF
+
+      - name: Create draft autofix PR
+        if: steps.changes.outputs.changed == 'true'
+        id: create_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+          BASE_REF: ${{ steps.meta.outputs.head_ref }}
+          FIX_BRANCH: ${{ steps.branch.outputs.fix_branch }}
+        run: |
+          if pr_url=$(gh pr create \
+            --repo "${GITHUB_REPOSITORY}" \
+            --base "$BASE_REF" \
+            --head "$FIX_BRANCH" \
+            --draft \
+            --title "[codex] fix PR #$PR_NUMBER CI failure" \
+            --body-file .codex-autofix-pr-body.md 2> .codex-autofix-pr-error.log); then
+            echo "created=true" >> "$GITHUB_OUTPUT"
+            echo "url=$pr_url" >> "$GITHUB_OUTPUT"
+          else
+            echo "created=false" >> "$GITHUB_OUTPUT"
+            echo "url=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upsert autofix status comment
+        if: steps.meta.outputs.pr_number != ''
+        uses: actions/github-script@v8
+        env:
+          AUTOFIX_CREATED: ${{ steps.create_pr.outputs.created }}
+          AUTOFIX_URL: ${{ steps.create_pr.outputs.url }}
+          CODEX_FINAL_MESSAGE: ${{ steps.run_codex.outputs.final-message }}
+          FIX_BRANCH: ${{ steps.branch.outputs.fix_branch }}
+          NO_CHANGES: ${{ steps.changes.outputs.changed != 'true' }}
+          PREFLIGHT_CONFIGURED: ${{ steps.preflight.outputs.configured }}
+          SKIP_REASON: ${{ steps.meta.outputs.skip_reason }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const marker = "<!-- codex-ci-autofix -->";
+            const issue_number = Number("${{ steps.meta.outputs.pr_number }}");
+            const summary = process.env.CODEX_FINAL_MESSAGE?.trim() || "Codex did not return a summary.";
+
+            let statusLine = "- status: no automated fix was produced";
+            if (process.env.SKIP_REASON) {
+              statusLine = `- status: skipped (${process.env.SKIP_REASON})`;
+            } else if (process.env.PREFLIGHT_CONFIGURED !== "true") {
+              statusLine = "- status: skipped because OPENAI_API_KEY is not configured";
+            } else if (process.env.AUTOFIX_CREATED === "true") {
+              statusLine = `- status: draft autofix PR created at ${process.env.AUTOFIX_URL}`;
+            } else if (process.env.NO_CHANGES === "false") {
+              statusLine = `- status: fix branch \`${process.env.FIX_BRANCH}\` was pushed but PR creation failed; review workflow logs`;
+            }
+
+            const body = [
+              marker,
+              "## Codex CI Autofix",
+              statusLine,
+              `- source run: https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.payload.workflow_run.id}`,
+              process.env.FIX_BRANCH ? `- fix branch: \`${process.env.FIX_BRANCH}\`` : null,
+              "",
+              "## Codex summary",
+              summary,
+            ]
+              .filter(Boolean)
+              .join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.login === "github-actions[bot]" &&
+              comment.body?.startsWith(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number,
+              body,
+            });
