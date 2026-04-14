@@ -4,17 +4,22 @@
 
 - `CI` が green
 - `docs/todo/active.md` の release 対象が完了
-- `docs/printer-matrix/` に最低 1 件の実測記録がある
+- `docs/printer-matrix/` に最低 1 件の記録がある
 - 実機または PDF proof の確認が終わっている
 
-初回 `v0.1.0` では、`docs/printer-matrix/` の 1 件目は PDF proof baseline でもよい。  
+初回 baseline としては、`docs/printer-matrix/` の 1 件目が PDF proof でもよい。  
 ただし、これは物理プリンタ検証の代替完了ではなく、release 後も別途記録を追加する。
 
 ## 2. タグ方針
 
 - `vMAJOR.MINOR.PATCH`
-- 初回は `v0.1.0`
+- 現在の最新公開 release は `v0.1.1`
 - テンプレートや printer profile の後方互換破壊は minor 以上で扱う
+
+補足:
+
+- `v0.1.0` の tag push は `Release` workflow の preflight 不備で公開 release まで到達していない
+- 公開済みの初回成功版は `v0.1.1`
 
 ## 3. 手順
 
@@ -29,8 +34,8 @@ pnpm typecheck
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
-git tag v0.1.0
-git push origin v0.1.0
+git tag vNEXT
+git push origin vNEXT
 ```
 
 補足:
@@ -46,7 +51,7 @@ git push origin v0.1.0
 
 - release ノートが自動生成されたか
 - `JAN-Label_*_windows_*` の installer asset が添付されたか
-- 添付の差分が想定どおりか
+- 添付 asset の差分が想定どおりか
 - `docs/known-issues.md` に未解決高優先度が残っていないか
 - printer profile 変更がある場合、検証機種がノートに明記されているか
 

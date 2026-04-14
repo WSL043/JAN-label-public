@@ -14,7 +14,7 @@
 - 状態: open
 - 影響: 今は通るが将来の runner 変更で壊れる可能性がある
 - 回避: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を workflow に設定
-- 恒久対応: `pnpm/action-setup` と `dorny/paths-filter` の後継バージョンを追う
+- 恒久対応: `pnpm/action-setup`, `dorny/paths-filter`, `actions/upload-artifact` の後継バージョンを追う
 
 ## K-003 Zint adapter は実装済みだが実バイナリ導入が未完了
 
@@ -23,12 +23,12 @@
 - 回避: 外部注入の `zint` バイナリパスでローカル確認し、CI は fake executable テストを維持する
 - 恒久対応: Windows / CI で Zint を導入し render / proof 経路まで結線する
 
-## K-004 実機プリンタの測定データがまだない
+## K-004 物理プリンタの実測データがまだない
 
 - 状態: open
-- 影響: 100% スケール検証が PDF proof に偏っており、`v0.1.0` release 条件もまだ満たせない
-- 回避: PDF proof を先に維持する
-- 恒久対応: `docs/printer-matrix/` に最低 1 機種分の実測を記録する
+- 影響: `v0.1.1` は PDF proof baseline で release 済みだが、物理プリンタでの 100% scale / scan 検証は未完了
+- 回避: `docs/printer-matrix/2026-04-15-pdf-proof-baseline.md` を baseline として維持する
+- 恒久対応: `docs/printer-matrix/` に物理プリンタ実測を追加する
 
 ## K-005 ローカル Windows に `link.exe` がないと `cargo test --workspace` が失敗する
 
@@ -44,10 +44,10 @@
 - 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
 - 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
 
-## K-007 Windows 配布シェルは CI/release で build できるがローカル bundle は未検証
+## K-007 Windows 配布シェルは CI / release で build できるがローカル bundle は未検証
 
 - 状態: open
-- 影響: GitHub-hosted `windows-latest` では build/release できても、一部ローカル Windows では `link.exe` 不在により bundle を再現できない
+- 影響: GitHub-hosted `windows-latest` では `v0.1.1` release まで通っても、一部ローカル Windows では `link.exe` 不在により bundle を再現できない
 - 回避: PR では `desktop-shell-windows` job を正とし、tag release は GitHub-hosted Windows runner に任せる
 - 恒久対応: Build Tools 入りの Windows で `pnpm --filter @label/desktop-shell build` を通し、ローカルでも installer を再現できるようにする
 
