@@ -2,7 +2,7 @@
 
 - Updated: 2026-04-15
 - Branch: `main`
-- HEAD: `7eedd75`
+- HEAD: `acbabeb`
 - Remote: `origin/main`
 
 ## 1. 完了済み
@@ -19,6 +19,7 @@
 - `crates/importer` の行単位バリデーション
 - `apps/admin-web` のジョブ作成フォーム
 - `apps/desktop-shell` の最小 Tauri shell scaffold
+- `desktop-shell-windows` CI と tag release 時の Windows installer build 経路
 - `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
 - `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
 - GitHub 上の Codex 連携
@@ -40,7 +41,7 @@ cargo test --workspace
 
 GitHub Actions の最新成功 run:
 
-- `CI` run `24414126798` on `main`
+- `CI` run `24414574908` on `main`
 - ローカル Windows で `link.exe` がない場合、`cargo test --workspace` の最終判定は CI を正とする
 
 GitHub 側の整理:
@@ -52,7 +53,6 @@ GitHub 側の整理:
 
 - `docs/printer-matrix/` に最低 1 機種分の実測を記録
 - 初回 `v0.1.0` tag / release を発行
-- `apps/desktop-shell` の scaffold は入ったが、Windows bundle build はまだ未検証
 - phase 3 の Codex 自動化
   self-hosted runner / webhook
 
@@ -61,7 +61,7 @@ GitHub 側の整理:
 1. `docs/printer-matrix/template.md` を複製し、実機計測を 1 件記録する
 2. 必要なら `Codex Maintenance` を `workflow_dispatch` で実行し、release blocker を再確認する
 3. `main` の green CI と release handoff 条件を確認して `v0.1.0` tag を切る
-4. Windows インストーラ配布が必要なら `apps/desktop-shell` を Build Tools 入り環境で build し、release 経路を固める
+4. tag push 後は Release workflow が Windows installer を添付しているか確認する
 
 ## 5. 触る時の注意
 
@@ -77,4 +77,5 @@ GitHub 側の整理:
 - GitHub environments はまだ未作成
 - Zint は repo / CI にまだ組み込んでいない
 - 一部のローカル Windows 環境では `link.exe` 不在により `cargo test --workspace` が失敗する
+- ローカル Windows に Build Tools がなくても、`desktop-shell-windows` と Release workflow は GitHub-hosted `windows-latest` を正とする
 - GitHub Actions の `OPENAI_API_KEY` secret が未設定だと Codex automation は fallback のみになる

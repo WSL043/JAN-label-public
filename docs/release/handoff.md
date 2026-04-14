@@ -36,11 +36,13 @@ git push origin v0.1.0
 - その場合でも `cargo check --workspace --tests` は補助確認として回し、最終判定は `main` 上の GitHub Actions `CI` success を使う
 - blocker が曖昧なら `Codex Maintenance` を `workflow_dispatch` で実行し、job summary を release 前確認に使う
 - maintenance ledger issue がある場合は、最新コメントも release 前確認に含める
-- Windows インストーラ配布を含める場合は、Build Tools 入り環境で `pnpm --filter @label/desktop-shell build` を追加する
+- `Release` workflow は tag push 後に GitHub-hosted `windows-latest` で `apps/desktop-shell` を build し、NSIS installer を release asset に添付する
+- ローカル Windows に `link.exe` がない場合でも、release 前確認は `desktop-shell-windows` CI success を正としてよい
 
 ## 4. smoke check
 
 - release ノートが自動生成されたか
+- `JAN-Label_*_windows_*` の installer asset が添付されたか
 - 添付の差分が想定どおりか
 - `docs/known-issues.md` に未解決高優先度が残っていないか
 - printer profile 変更がある場合、検証機種がノートに明記されているか

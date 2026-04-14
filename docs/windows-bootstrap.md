@@ -110,4 +110,5 @@ pnpm --filter @label/desktop-shell build
 
 - `apps/desktop-shell` には `admin-web` を包む最小 Tauri 2 shell を配置済み
 - `tauri info` では `frontendDist` と `devUrl` を確認できる
-- ただしこの環境では Visual Studio C++ Build Tools 不足のため `build` までは未検証
+- ローカルでは Visual Studio C++ Build Tools 不足のため `build` までは未検証
+- GitHub Actions の `desktop-shell-windows` job と `Release` workflow は `windows-latest` 上で bundle build を担う

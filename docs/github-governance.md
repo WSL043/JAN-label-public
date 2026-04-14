@@ -36,6 +36,7 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - `fixture-validation`
 - `web-format-lint`
 - `web-typecheck`
+- `desktop-shell-windows`
 - `docs-guard`
 
 `golden-tests` が失敗した PR は merge 不可です。
@@ -104,6 +105,7 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - printer profile の互換性破壊は minor 以上で扱う
 - 本番プリンタ向け adapter 追加は release notes に検証機種を明記する
 - `v*` タグ push 時は `.github/workflows/release.yml` が GitHub Release を自動作成する
+- `Release` workflow は `apps/desktop-shell` を `windows-latest` で build し、Windows installer を release asset に添付する
 
 ## 8. セキュリティと監査
 
