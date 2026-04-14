@@ -25,6 +25,7 @@
 - GitHub 上の Codex 連携
   `Codex PR Review`, `Codex PR Comment`, `Codex CI Triage`, `Codex Maintenance`, `Codex CI Autofix`
 - `Codex Maintenance` は GitHub issue の maintenance ledger に要約を残せる
+- `Codex Maintenance` は fallback 時も `.codex-maintenance-state.md` artifact を添付できる
   現在の ledger issue は `#16`
 
 ## 2. 直近で使っている確認セット
