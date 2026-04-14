@@ -26,6 +26,13 @@
 ## K-004 実機プリンタの測定データがまだない
 
 - 状態: open
-- 影響: 100% スケール検証が PDF proof に偏っている
+- 影響: 100% スケール検証が PDF proof に偏っており、`v0.1.0` release 条件もまだ満たせない
 - 回避: PDF proof を先に維持する
 - 恒久対応: `docs/printer-matrix/` に最低 1 機種分の実測を記録する
+
+## K-005 ローカル Windows に `link.exe` がないと `cargo test --workspace` が失敗する
+
+- 状態: open
+- 影響: ローカルでは full test を完走できなくても、CI 上は green という差が出る
+- 回避: `cargo check --workspace --tests` を補助で回しつつ、GitHub Actions の `rust-test` / `golden-tests` を正として確認する
+- 恒久対応: Windows Build Tools を導入し、`link.exe` が解決できる開発環境手順を整える

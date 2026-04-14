@@ -1,0 +1,158 @@
+name: Codex CI Triage
+
+on:
+  workflow_run:
+    workflows:
+      - CI
+    types:
+      - completed
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: codex-ci-triage-${{ github.event.workflow_run.id }}
+  cancel-in-progress: false
+
+jobs:
+  codex-ci-triage:
+    if: github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      pr_number: ${{ steps.meta.outputs.pr_number }}
+      final_message: ${{ steps.run_codex.outputs.final-message }}
+    steps:
+      - name: Resolve PR metadata
+        id: meta
+        uses: actions/github-script@v8
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const pr = context.payload.workflow_run.pull_requests[0];
+            if (!pr) {
+              core.setOutput("skip", "true");
+              return;
+            }
+
+            const { data } = await github.rest.pulls.get({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              pull_number: pr.number,
+            });
+
+            core.setOutput("skip", "false");
+            core.setOutput("pr_number", String(pr.number));
+            core.setOutput("base_ref", data.base.ref);
+            core.setOutput("base_sha", data.base.sha);
+            core.setOutput("head_sha", data.head.sha);
+            core.setOutput("head_repo", data.head.repo.full_name);
+
+      - uses: actions/checkout@v5
+        if: steps.meta.outputs.skip != 'true' && steps.meta.outputs.head_repo == github.repository
+        with:
+          fetch-depth: 0
+          ref: refs/pull/${{ steps.meta.outputs.pr_number }}/merge
+
+      - name: Pre-fetch base and head refs for the PR
+        if: steps.meta.outputs.skip != 'true' && steps.meta.outputs.head_repo == github.repository
+        env:
+          PR_BASE_REF: ${{ steps.meta.outputs.base_ref }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+        run: |
+          git fetch --no-tags origin \
+            "$PR_BASE_REF" \
+            "+refs/pull/$PR_NUMBER/head"
+
+      - name: Capture failed logs
+        if: steps.meta.outputs.skip != 'true' && steps.meta.outputs.head_repo == github.repository
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if ! gh run view "${{ github.event.workflow_run.id }}" --repo "${GITHUB_REPOSITORY}" --log-failed > .codex-ci-failed.log; then
+            echo "Failed to collect failed logs for run ${{ github.event.workflow_run.id }}" > .codex-ci-failed.log
+          fi
+
+      - name: Verify Codex secret is configured
+        if: steps.meta.outputs.skip != 'true' && steps.meta.outputs.head_repo == github.repository
+        id: preflight
+        env:
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+        run: |
+          if [ -z "$OPENAI_API_KEY" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo "configured=true" >> "$GITHUB_OUTPUT"
+
+      - name: Run Codex triage
+        if: steps.preflight.outputs.configured == 'true'
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.OPENAI_API_KEY }}
+          sandbox: read-only
+          prompt: |
+            Analyze the failed CI run for pull request #${{ steps.meta.outputs.pr_number }} in ${{ github.repository }}.
+
+            Use the local checkout, git history, and `.codex-ci-failed.log`.
+            Focus on:
+            - which job or command failed
+            - the likely root cause
+            - the minimal code or config fix, or the next concrete debugging step if the fix is not obvious
+
+            Keep the response concise and action-oriented.
+            If the failure is outside the repository or not actionable from the diff, say that explicitly.
+
+            Base and head context:
+            - base sha: ${{ steps.meta.outputs.base_sha }}
+            - head sha: ${{ steps.meta.outputs.head_sha }}
+
+  post-triage:
+    runs-on: ubuntu-latest
+    needs: codex-ci-triage
+    if: needs.codex-ci-triage.outputs.final_message != ''
+    steps:
+      - name: Upsert Codex triage comment
+        uses: actions/github-script@v8
+        env:
+          CODEX_FINAL_MESSAGE: ${{ needs.codex-ci-triage.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const marker = "<!-- codex-ci-triage -->";
+            const body = `${marker}\n${process.env.CODEX_FINAL_MESSAGE}`;
+            const { owner, repo } = context.repo;
+            const issue_number = Number("${{ needs.codex-ci-triage.outputs.pr_number }}");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number,
+              per_page: 100,
+            });
+
+            const existing = comments.find((comment) =>
+              comment.user?.login === "github-actions[bot]" &&
+              comment.body?.startsWith(marker)
+            );
+
+            if (existing) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: existing.id,
+                body,
+              });
+              return;
+            }
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body,
+            });

@@ -3,18 +3,6 @@
 継続開発で今見るべき作業キューです。  
 長期計画は `docs/mvp-backlog.md`、日々の実行順はこのファイルを正とします。
 
-## Now
-
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-008 | `-` | P2 | pending | Codex | `docs/printer-matrix` に実測表を追加 | 最低 1 機種分の測定値が入る |
-
-## Next
-
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-009 | `-` | P2 | pending | Codex | 初回 `v0.1.0` リリースタグ発行 | Release workflow が 1 回成功する |
-
 ## Done
 
 | id | issue | priority | status | owner | task | done when |
@@ -26,9 +14,30 @@
 | T-005 | `#5` | P1 | done | Codex | `audit-log` に lineage / reprint 情報を追加 | 再印刷の系譜を表現できる |
 | T-006 | `#6` | P1 | done | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
 | T-007 | `-` | P2 | done | Codex | Windows spooler adapter の骨格実装 | printer profile 経由で submit できる |
+| T-010 | `-` | P2 | done | Codex | CI failure 時の Codex triage workflow を追加 | same-repo PR の失敗 CI に Codex の診断コメントが付く |
+
+## Now
+
+| id | issue | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-008 | `-` | P2 | blocked | Operator + Codex | `docs/printer-matrix` に実測表を追加 | 最低 1 機種分の測定値が commit される |
+| T-009 | `-` | P2 | blocked | Codex | 初回 `v0.1.0` リリースタグ発行 | `main` が green で Release workflow が 1 回成功する |
+
+## Next
+
+| id | issue | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-011 | `-` | P3 | ready | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
+
+## Later
+
+| id | issue | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- | --- |
+| T-012 | `-` | P3 | pending | Codex | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
 
 ## Blocked
 
 | id | blocker | task | unblock condition |
 | --- | --- | --- | --- |
 | B-001 | GitHub plan 制約 | `main` branch protection / ruleset の本適用 | GitHub Pro / Team 以上へ変更 |
+| B-002 | 実機プリンタの測定データ未取得 | T-008, T-009 | `docs/printer-matrix/template.md` を使った実測記録が入る |
