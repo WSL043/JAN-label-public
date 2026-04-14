@@ -7,6 +7,9 @@
 - `docs/printer-matrix/` に最低 1 件の実測記録がある
 - 実機または PDF proof の確認が終わっている
 
+初回 `v0.1.0` では、`docs/printer-matrix/` の 1 件目は PDF proof baseline でもよい。  
+ただし、これは物理プリンタ検証の代替完了ではなく、release 後も別途記録を追加する。
+
 ## 2. タグ方針
 
 - `vMAJOR.MINOR.PATCH`
