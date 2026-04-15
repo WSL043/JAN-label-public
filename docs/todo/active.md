@@ -48,13 +48,13 @@ Priority order for post-`v0.1.2` branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| None | - | clear | Codex | No active implementation blockers remain for the `v0.2.0` batch | Cut and verify the release on a Windows host with the required linker/toolchain installed |
+| None | - | clear | Codex | No active implementation blockers remain for the `v0.2.0` batch | Cut and verify the release on the GitHub Windows runner or another managed Windows host |
 
 ## Next
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-045c | P1 | pending | Codex | Cut `v0.2.0` operator workstation release | Windows desktop build, release notes draft, readiness artifact, and release workflow all pass for `v0.2.0` |
+| T-045c | P1 | pending | Codex | Cut `v0.2.0` operator workstation release | GitHub Windows CI, release notes draft, readiness artifact, and release workflow all pass for `v0.2.0` |
 | T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
 | T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |

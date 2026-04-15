@@ -102,4 +102,4 @@
 ## K-032 local Windows host may be missing the MSVC linker toolchain
 - status: open
 - impact: `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml` and Tauri desktop builds fail immediately if `link.exe` is unavailable on the host
-- response: install Visual Studio Build Tools with the C++ workload before treating Windows desktop build/test failures as code regressions
+- response: prefer GitHub Actions Windows runners for release verification; only install Visual Studio Build Tools with the C++ workload when local Tauri build/test is explicitly required

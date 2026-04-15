@@ -3,8 +3,8 @@
 - Updated: 2026-04-16
 - Branch: `codex/v020-workstation-redesign`
 - Release base: `v0.1.3` (`0e22216`)
-- Active PR: `pending`
-- Branch relation to `origin/main` on 2026-04-16: local integration branch for the `v0.2.0` workstation release batch; not yet published
+- Active PR: `#31` `[codex] implement v0.2.0 workstation release batch`
+- Branch relation to `origin/main` on 2026-04-16: published integration branch for the `v0.2.0` workstation release batch; draft PR is open against `main`
 
 ## Shipping Now
 
@@ -101,6 +101,15 @@ Passed on this batch:
 - `pnpm --filter @label/admin-web build`
 - `cargo fmt --all --check`
 - `pnpm release:notes --version v0.2.0`
+- GitHub Actions `CI` workflow on PR `#31`
+  - `fixture-validation`
+  - `web-format-lint`
+  - `web-typecheck`
+  - `rust-format`
+  - `rust-lint`
+  - `rust-test`
+  - `golden-tests`
+  - `desktop-shell-windows`
 
 Operational note:
 
@@ -110,7 +119,8 @@ Operational note:
   - `cargo test --workspace`
   - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
   - `pnpm release:readiness --version v0.2.0`
-- `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated; the readiness report is currently `fail` only because the Windows desktop toolchain is incomplete on this host.
+- GitHub Actions has already passed the Windows desktop build/test path for PR `#31`, so local MSVC toolchain absence is no longer a release blocker as long as the remote Windows runner remains green.
+- `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
 
 ## Release Status
 
@@ -125,7 +135,7 @@ Operational note:
 
 ## Next Main Tasks
 
-1. `T-045c`: cut and verify the `v0.2.0` operator workstation release on a Windows host with the required MSVC linker/toolchain available
+1. `T-045c`: cut and verify the `v0.2.0` operator workstation release using the GitHub Windows runner as the primary verification host
 2. `T-041`: local template catalog governance hardening
 3. `T-044`: audit transaction hardening
 
