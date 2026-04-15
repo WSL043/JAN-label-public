@@ -49,6 +49,7 @@ Priority order for the next release branch work.
 | --- | --- | --- | --- | --- | --- |
 | T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
+| T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |
 | T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 
 ## Blocked
