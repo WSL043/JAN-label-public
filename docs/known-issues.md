@@ -75,3 +75,11 @@
 - status: open
 - 影響: structured editor と Rust preview は live JSON を見られるが、proof / print dispatch はまだ packaged manifest の `template_version` を使う
 - 対応: template catalog write-back と authored template proof route を `T-032a` / `T-033a` で実装する
+
+## K-021 template catalog mismatch が queue / submit をすり抜ける
+- status: resolved
+- 解消: unknown live `template_version` がある draft は `admin-web` 側で queue / manual / batch submit を止めるようにした
+
+## K-022 approved proof artifact の品質チェックが弱い
+- status: resolved
+- 解消: `desktop-shell` が approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証するようにした

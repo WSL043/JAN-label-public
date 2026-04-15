@@ -19,7 +19,7 @@ print 実行時の必須条件:
 - proof dispatch ledger に対応する proof dispatch がある
 - packaged template catalog に対象 `template_version` がある
 - `templateVersion + sku + brand + jan(normalized) + qty + lineage` が approved proof と一致する
-- approved proof ledger の `artifactPath` が実在する
+- approved proof ledger の `artifactPath` が proof output dir 配下の non-empty PDF として実在し、PDF header を読める
 - audit ledger が writable である
 
 lineage ルール:
@@ -84,6 +84,7 @@ lineage ルール:
 - local canvas preview は近似表示
 - Rust preview は live template JSON を描画する
 - desktop template catalog が dispatch で使える `template_version` の正になる
+- unknown live `template_version` がある draft は queue / manual / batch submit を止める
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
 - つまり authoring preview と本番 dispatch の write-back はまだ未接続
 

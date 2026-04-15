@@ -22,6 +22,7 @@
   - legacy proof seed UI
   - bridge status と structured warning 表示
   - desktop template catalog sync と unknown `template_version` の事前表示
+  - catalog mismatch 時の queue / manual / batch submit block
   - structured template editor
   - local canvas preview
   - Rust renderer preview button
@@ -47,6 +48,7 @@
   - print / proof dispatch 前に audit ledger writable を preflight する
   - dispatch 後の audit persistence failure を fatal として扱う
   - approved proof 由来の lineage を backend で補完し、explicit lineage / reprint parent の不一致を拒否する
+  - approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証する
 - `admin-web`
   - structured template editor の CSS と workbench レイアウトを実装
   - local canvas と Rust preview を並べて確認できる
@@ -55,6 +57,7 @@
   - batch retry が `submitted` 行を再送してしまう不具合を修正
   - template validation に duplicate / out-of-bounds / unsupported placeholder / preview-only placeholder を追加
   - desktop template catalog を読み、unknown `template_version` を proof / print 前に可視化する
+  - catalog mismatch がある draft は queue / manual / batch submit まで block する
 
 ## 3. 現在の release 境界
 
@@ -63,8 +66,10 @@
 - `jobLineageId` 未指定の print request は approved proof lineage で backend 補完する
 - explicit `jobLineageId` / `reprintOfJobId` は approved proof lineage と一致しない限り reject する
 - packaged `template_version` の存在確認は `desktop-shell` が行い、`admin-web` はその catalog を先読みして mismatch を表示する
+- unknown live `template_version` がある間は `admin-web` 側でも queue / manual / batch submit を止める
 - proof / print dispatch は audit ledger が writable でない限り開始しない
 - dispatch 後の audit persistence failure は success 扱いにしない
+- approved proof artifact は proof output dir 配下の non-empty PDF で、PDF header を読める必要がある
 - `warningDetails[]` の `code / severity / message` を UI が正として扱う
 - Rust preview は live template JSON を描画する
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う

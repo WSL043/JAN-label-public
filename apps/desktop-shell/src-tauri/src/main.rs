@@ -5,6 +5,7 @@ mod audit_store;
 use std::collections::HashSet;
 use std::env;
 use std::fs;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use audit_log::{
@@ -566,14 +567,7 @@ impl PrintBridgeConfig {
             &expected_template_version,
             &expected_subject,
         )?;
-        let proof_output_path = PathBuf::from(approved_proof.artifact_path);
-        if !proof_output_path.exists() {
-            return Err(format!(
-                "source proof job '{}' was not found at '{}'",
-                source_proof_job_id,
-                proof_output_path.display()
-            ));
-        }
+        validate_existing_proof_artifact_path(self, source_proof_job_id, &approved_proof.artifact_path)?;
 
         let expected_lineage = approved_proof.job_lineage_id.0.clone();
         if let Some(explicit_lineage) = optional_trimmed_non_empty(request.job_lineage_id.clone()) {
@@ -1181,6 +1175,51 @@ fn validate_legacy_seed_artifact_path(
             canonical_proof_dir.display()
         ));
     }
+    Ok(canonical_artifact)
+}
+
+fn validate_existing_proof_artifact_path(
+    config: &PrintBridgeConfig,
+    proof_job_id: &str,
+    artifact_path: &str,
+) -> Result<PathBuf, String> {
+    let canonical_artifact =
+        validate_legacy_seed_artifact_path(config, artifact_path).map_err(|error| {
+            format!("source proof job '{proof_job_id}' has invalid artifactPath: {error}")
+        })?;
+    let metadata = fs::metadata(&canonical_artifact).map_err(|err| {
+        format!(
+            "failed to read source proof artifact '{}': {err}",
+            canonical_artifact.display()
+        )
+    })?;
+    if metadata.len() == 0 {
+        return Err(format!(
+            "source proof job '{proof_job_id}' points to empty PDF '{}'",
+            canonical_artifact.display()
+        ));
+    }
+
+    let mut file = fs::File::open(&canonical_artifact).map_err(|err| {
+        format!(
+            "failed to open source proof artifact '{}': {err}",
+            canonical_artifact.display()
+        )
+    })?;
+    let mut header = [0_u8; 5];
+    let bytes_read = file.read(&mut header).map_err(|err| {
+        format!(
+            "failed to read source proof artifact '{}': {err}",
+            canonical_artifact.display()
+        )
+    })?;
+    if bytes_read < header.len() || header != *b"%PDF-" {
+        return Err(format!(
+            "source proof job '{proof_job_id}' does not point to a readable PDF header at '{}'",
+            canonical_artifact.display()
+        ));
+    }
+
     Ok(canonical_artifact)
 }
 
@@ -1832,6 +1871,112 @@ mod tests {
             request.job_lineage_id.as_deref(),
             Some("JOB-20260415-PROOF")
         );
+    }
+
+    #[test]
+    fn print_bridge_config_rejects_empty_source_proof_file() {
+        let temp_root = env::temp_dir().join("jan-label-proof-empty-artifact");
+        let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
+        fs::write(&proof_path, b"").expect("write empty proof fixture");
+        let config = PrintBridgeConfig {
+            print_output_dir: proof_dir,
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
+            id: "pdf-a4-proof".to_string(),
+            adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
+        }));
+
+        let err = config
+            .validate_and_normalize_request(&mut request)
+            .expect_err("empty proof artifact should block print");
+
+        assert!(err.contains("empty PDF"));
+    }
+
+    #[test]
+    fn print_bridge_config_rejects_non_pdf_source_proof_header() {
+        let temp_root = env::temp_dir().join("jan-label-proof-invalid-header");
+        let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
+        fs::write(&proof_path, b"not-a-pdf").expect("write invalid proof fixture");
+        let config = PrintBridgeConfig {
+            print_output_dir: proof_dir,
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
+            id: "pdf-a4-proof".to_string(),
+            adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
+        }));
+
+        let err = config
+            .validate_and_normalize_request(&mut request)
+            .expect_err("invalid proof artifact header should block print");
+
+        assert!(err.contains("readable PDF header"));
     }
 
     #[test]

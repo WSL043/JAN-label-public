@@ -113,6 +113,7 @@ const NON_BLOCKING_WARNING_PATTERNS: ReadonlyArray<RegExp> = [
   /will be created/i,
 ];
 const DEFAULT_TEMPLATE_FIELD_COLOR = "#14120f";
+const TEMPLATE_CATALOG_BLOCK_PREFIX = "Template catalog mismatch:";
 const RUST_RENDER_PLACEHOLDERS = [
   "job_id",
   "sku",
@@ -994,6 +995,14 @@ function resolveTemplateFromSourceValue(
   };
 }
 
+function buildTemplateCatalogBlockMessage(issue: string): string {
+  return `${TEMPLATE_CATALOG_BLOCK_PREFIX} ${issue}`;
+}
+
+function isTemplateCatalogBlockedQueuedRow(row: QueuedRow): boolean {
+  return Boolean(row.dispatchError?.startsWith(TEMPLATE_CATALOG_BLOCK_PREFIX));
+}
+
 function resolvePrinterFromSourceValue(
   raw: string,
   fallback: PrinterProfile | null,
@@ -1741,6 +1750,7 @@ function buildDraftFromRow(input: {
   sourceRow: DataRow;
   sourceData: DataSource | null;
   mapping: ColumnMapping;
+  templateCatalogIssue: string | null;
   templateRef: LabelTemplateRef | null;
   printerProfile: PrinterProfile | null;
   templateRefs: LabelTemplateRef[];
@@ -1848,6 +1858,9 @@ function buildDraftFromRow(input: {
   }
   if (!actor) {
     errors.push("Actor is required.");
+  }
+  if (input.templateCatalogIssue) {
+    errors.push(input.templateCatalogIssue);
   }
 
   const getValue = (key: FieldKey) => {
@@ -1961,6 +1974,7 @@ function validateDraft(
   templateRef: LabelTemplateRef | null,
   printerProfile: PrinterProfile | null,
   execution: PrintExecutionIntent,
+  templateCatalogIssue: string | null,
 ): { draft: PrintJobDraft | null; errors: FormErrors } {
   const errors: FormErrors = {};
   const parentSku = form.parentSku.trim();
@@ -1997,6 +2011,7 @@ function validateDraft(
     }
   }
   if (!templateRef) errors.templateId = "Template selection is required.";
+  if (templateCatalogIssue) errors.templateId = templateCatalogIssue;
   if (!printerProfile) errors.printerProfileId = "Printer profile selection is required.";
 
   if (Object.keys(errors).length > 0 || !templateRef || !printerProfile) {
@@ -2205,6 +2220,10 @@ export function App() {
     }
     return candidates;
   }, [availableTemplateOptions, templateReference, templateReferenceIsKnown]);
+  const templateCatalogIssue =
+    templateReference && !templateReferenceIsKnown
+      ? `template_version '${templateVersionOf(templateReference)}' is not present in the desktop template catalog. Proof/print dispatch is blocked until the packaged or local catalog is updated.`
+      : null;
 
   const { draft, errors } = validateDraft(
     form,
@@ -2212,18 +2231,9 @@ export function App() {
     resolvedTemplateRef,
     selectedPrinterProfile ?? null,
     executionIntent,
+    templateCatalogIssue,
   );
-  const templateCatalogIssue =
-    templateReference && !templateReferenceIsKnown
-      ? `template_version '${templateVersionOf(templateReference)}' is not present in the desktop template catalog. Proof/print dispatch will reject it until the packaged manifest is updated.`
-      : null;
-  const effectiveErrors = templateCatalogIssue
-    ? {
-        ...errors,
-        templateId: templateCatalogIssue,
-      }
-    : errors;
-  const visibleErrors = showErrors ? effectiveErrors : {};
+  const visibleErrors = showErrors ? errors : {};
   const templatePreviewBindings = useMemo(
     () =>
       buildTemplatePreviewBindings({
@@ -2261,6 +2271,7 @@ export function App() {
         sourceRow,
         sourceData,
         mapping: fieldMapping,
+        templateCatalogIssue,
         templateRef: resolvedTemplateRef,
         templateRefs: templateCandidates,
         printerProfiles,
@@ -2274,6 +2285,7 @@ export function App() {
     executionIntent,
     fieldMapping,
     form.actor,
+    templateCatalogIssue,
     resolvedTemplateRef,
     selectedPrinterProfile,
     sourceRows,
@@ -2297,9 +2309,11 @@ export function App() {
   const queuedFailedRowsCount = queuedRows.filter(
     (entry) => entry.submissionStatus === "failed",
   ).length;
-  const canSubmitQueuedRows = queuedRows.some(
-    (entry) => entry.submissionStatus === "ready" || entry.submissionStatus === "failed",
-  );
+  const canSubmitQueuedRows =
+    !templateCatalogIssue &&
+    queuedRows.some(
+      (entry) => entry.submissionStatus === "ready" || entry.submissionStatus === "failed",
+    );
   const isQueueReady = sourceRows.length > 0 && readyRowsCount > 0;
   const sourceSummary = sourceData
     ? `${sourceData.rows.length} rows / ${sourceData.headers.length} columns (${sourceData.source})`
@@ -2390,6 +2404,58 @@ export function App() {
       setForm((current) => ({ ...current, executionAllowWithoutProof: false }));
     }
   }, [allowWithoutProofEnabled, form.executionAllowWithoutProof]);
+
+  useEffect(() => {
+    setQueuedRows((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+      if (templateCatalogIssue) {
+        const blockMessage = buildTemplateCatalogBlockMessage(templateCatalogIssue);
+        let changed = false;
+        const next = current.map((row) => {
+          if (
+            row.submissionStatus === "ready" ||
+            row.submissionStatus === "submitting" ||
+            isTemplateCatalogBlockedQueuedRow(row)
+          ) {
+            const alreadyBlocked =
+              row.submissionStatus === "failed" && row.dispatchError === blockMessage;
+            if (alreadyBlocked) {
+              return row;
+            }
+            changed = true;
+            return {
+              ...row,
+              submissionStatus: "failed" as const,
+              dispatchResult: null,
+              dispatchError: blockMessage,
+            };
+          }
+          return row;
+        });
+        return changed ? next : current;
+      }
+
+      let changed = false;
+      const next = current.map((row) => {
+        if (
+          row.submissionStatus === "failed" &&
+          isTemplateCatalogBlockedQueuedRow(row) &&
+          row.dispatchResult === null
+        ) {
+          changed = true;
+          return {
+            ...row,
+            submissionStatus: "ready" as const,
+            dispatchError: null,
+          };
+        }
+        return row;
+      });
+      return changed ? next : current;
+    });
+  }, [templateCatalogIssue]);
 
   function updateField<Key extends keyof FormState>(key: Key, value: FormState[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
@@ -3035,6 +3101,14 @@ export function App() {
       });
       return;
     }
+    if (templateCatalogIssue) {
+      setManualSubmit({
+        phase: "error",
+        message: templateCatalogIssue,
+        result: null,
+      });
+      return;
+    }
     if (isBridgeSubmitBlocked || bridgeSubmitBlockMessage) {
       setManualSubmit({
         phase: "error",
@@ -3080,6 +3154,14 @@ export function App() {
       setBatchSubmit({
         phase: "error",
         message: bridgeSubmitBlockMessage ?? "Batch submit is blocked by bridge safety checks.",
+        results: [],
+      });
+      return;
+    }
+    if (templateCatalogIssue) {
+      setBatchSubmit({
+        phase: "error",
+        message: templateCatalogIssue,
         results: [],
       });
       return;

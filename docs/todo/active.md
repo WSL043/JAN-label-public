@@ -12,10 +12,12 @@
 | T-026d | P1 | done | Codex + Sub-Agent | bridge warning を構造化する | `warningDetails` を `code / severity / message` で返し、UI block 判定も移行 |
 | T-026e | P1 | done | Codex + Sub-Agent | XLSX 数値セル JAN の hardening | scientific / decimal / ambiguous 12-digit numeric JAN を block、13-digit numeric は warning |
 | T-026f | P1 | done | Codex + Sub-Agent | batch retry の重複再送を止める | failed / ready のみ再送し、submitted 行は再印刷しない |
+| T-026g | P1 | done | Codex + Sub-Agent | template catalog mismatch を queue / submit blocker にする | unknown live `template_version` では manual / batch / queued retry を止める |
 | T-027a | P1 | done | Codex + Sub-Agent | proof ledger と review API を `desktop-shell` に追加 | `approve_proof` / `reject_proof` / `search_audit_log` が使える |
 | T-027b | P1 | done | Codex + Sub-Agent | `admin-web` に proof inbox / review UI を追加 | pending proof の approve / reject と approved proof pinning ができる |
 | T-027c | P1 | done | Codex + Sub-Agent | approved proof と print payload の strict match を実装 | `templateVersion + sku + brand + jan(normalized) + qty + lineage` を満たさない print を拒否 |
 | T-027d | P1 | done | Codex + Sub-Agent | proof lineage authority を backend に移す | approved proof lineage と不一致の explicit lineage / `reprintOfJobId` を拒否し、未指定 lineage は backend で補完する |
+| T-027e | P1 | done | Codex + Sub-Agent | approved proof artifact validation を PDF 妥当性まで引き上げる | missing / empty / bad-header proof artifact で print を拒否する |
 | T-028a | P1 | done | Codex + Sub-Agent | dispatch / proof の local ledger 永続化 | `dispatch-ledger.json` / `proof-ledger.json` に保存される |
 | T-028b | P1 | done | Codex + Sub-Agent | `admin-web` に audit search UI を追加 | local ledger の検索、proof status 表示、proof pinning ができる |
 | T-028c | P2 | done | Codex + Sub-Agent | legacy proof seed / migration を実装 | `validate_legacy_proof_seed` / `seed_legacy_proofs` と seed UI で pending seed ができる |

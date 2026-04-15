@@ -27,6 +27,7 @@
 - 現時点の proof / print dispatch は packaged manifest の `template_version` を使う。editor の生 JSON は preview 用であり、本番反映は別タスク
 - proof / print dispatch の最終 gate は `apps/desktop-shell` を正とする
 - packaged template catalog の存在確認は `apps/desktop-shell` を正とする
+- live template draft の `template_version` が desktop catalog に無い間は queue / proof / print submit に進めない
 
 ## 3. 変更時の最低確認
 
