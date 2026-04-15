@@ -9,6 +9,7 @@
 - status: open
 - impact: current baseline is PDF proof only; 100% scale, scan, and mm validation on real printers is not committed yet
 - response: commit physical printer measurements under `docs/printer-matrix/`
+- release impact for PDF-only milestone: non-blocker; defer to `T-031` milestone
 
 ## K-005 local Windows can intermittently fail `cargo test --workspace` with `os error 5`
 - status: open
@@ -19,6 +20,7 @@
 - status: open
 - impact: cloud-side Codex fallback automation cannot fully run
 - response: configure the repository secret
+- release impact for PDF-only milestone: non-blocker; defer to `T-030` milestone
 
 ## K-009 browser preview mode is submit-disabled
 - status: open
@@ -57,12 +59,17 @@
 - status: resolved
 - resolution: `desktop-shell` now validates path, directory scope, non-empty PDF content, and `%PDF-` header before print
 
-## K-023 audit backup list / restore UI is missing
+## K-023 audit backup restore is still manual
 - status: open
-- impact: backup bundles are produced, but list/restore is still manual
-- response: implement `T-028f`
+- impact: backup bundles are produced and can now be listed, but restore remains manual
+- response: implement `T-028f-restore`
 
 ## K-024 local template catalog is local-filesystem only
 - status: open
 - impact: packaged/local overlay works for a single operator machine, but there is no shared catalog, no restore UI, and no multi-writer coordination. A malformed local manifest can also block catalog/dispatch resolution until the local files are repaired.
 - response: keep it scoped to local desktop operation for this release and harden governance under `T-041`
+
+## K-025 PDF-only release boundary is documented
+- status: watch
+- impact: release tasks beyond PDF proof/print could be mistaken as blockers
+- response: use a `PDF-only` lane for this milestone and gate release on printed proofs, lineage-gated approval, and local audit controls only

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use audit_log::{
     AuditActor, AuditExportRequest, AuditExportResult, AuditLedgerSnapshot, AuditQuery,
+    AuditArtifactInfo,
     AuditRetentionRequest, AuditRetentionResult, AuditSearchResult, DispatchMatchSubject,
     PersistedDispatchRecord, ProofRecord, PrintJobId, PrintJobLineageId,
 };
@@ -117,6 +118,15 @@ fn export_audit_ledger(request: Option<AuditExportRequest>) -> Result<AuditExpor
 fn trim_audit_ledger(request: AuditRetentionRequest) -> Result<AuditRetentionResult, String> {
     let config = PrintBridgeConfig::load();
     config.audit_store().trim(request)
+}
+
+#[command]
+fn list_audit_backup_bundles() -> Result<AuditBackupListResult, String> {
+    let config = PrintBridgeConfig::load();
+    let backup_dir = config.audit_store().backup_dir();
+    let bundles = collect_audit_backup_bundles(&backup_dir)
+        .map_err(|error| format!("failed to list audit backups from '{}': {error}", backup_dir.display()))?;
+    Ok(AuditBackupListResult { bundles })
 }
 
 #[command]
@@ -506,6 +516,27 @@ struct TemplateCatalogWritebackResult {
     manifest_path: String,
     default_template_version: String,
     action: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditBackupEntry {
+    file_name: String,
+    file_path: String,
+    created_at_utc: String,
+    size_bytes: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditBackupListResult {
+    bundles: Vec<AuditBackupEntry>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditBundleEnvelope {
+    artifact: AuditArtifactInfo,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1060,6 +1091,68 @@ fn template_catalog_manifest_path_if_exists() -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+fn collect_audit_backup_bundles(backup_dir: &Path) -> Result<Vec<AuditBackupEntry>, String> {
+    if !backup_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut bundles = fs::read_dir(backup_dir)
+        .map_err(|error| {
+            format!(
+                "failed to read audit backup directory '{}': {error}",
+                backup_dir.display()
+            )
+        })?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if !entry
+                .file_type()
+                .ok()?
+                .is_file()
+            {
+                return None;
+            }
+
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+
+            let metadata = fs::metadata(&path).ok()?;
+            let mut artifact = read_audit_bundle_artifact(&path).unwrap_or_else(|| AuditArtifactInfo {
+                file_name: entry
+                    .file_name()
+                    .to_string_lossy()
+                    .into_owned(),
+                file_path: path.to_string_lossy().into_owned(),
+                created_at_utc: String::new(),
+                size_bytes: metadata.len(),
+            });
+            artifact.file_path = path.to_string_lossy().into_owned();
+            artifact.size_bytes = metadata.len();
+            Some(AuditBackupEntry {
+                file_name: artifact.file_name,
+                file_path: artifact.file_path,
+                created_at_utc: artifact.created_at_utc,
+                size_bytes: artifact.size_bytes,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    bundles.sort_by(|a, b| {
+        b.created_at_utc
+            .cmp(&a.created_at_utc)
+            .then_with(|| b.file_name.cmp(&a.file_name))
+    });
+    Ok(bundles)
+}
+
+fn read_audit_bundle_artifact(path: &Path) -> Option<AuditArtifactInfo> {
+    let raw = fs::read_to_string(path).ok()?;
+    let envelope: AuditBundleEnvelope = serde_json::from_str(&raw).ok()?;
+    Some(envelope.artifact)
 }
 
 fn sanitize_template_filename(raw: &str) -> String {
@@ -1625,6 +1718,7 @@ fn main() {
             search_audit_log,
             export_audit_ledger,
             trim_audit_ledger,
+            list_audit_backup_bundles,
             approve_proof,
             reject_proof,
             template_catalog_command,
@@ -1644,6 +1738,7 @@ mod tests {
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
         save_template_to_local_catalog, TemplateCatalogWritebackRequest,
+        list_audit_backup_bundles,
         BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
         TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
@@ -1954,6 +2049,84 @@ mod tests {
         assert_eq!(dispatch_only.scope, AuditLedgerScope::Dispatch);
         assert_eq!(dispatch_only.dispatch_count, 2);
         assert_eq!(dispatch_only.proof_count, 0);
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_audit_backup_bundles_returns_empty_when_none_exist() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-audit-backups-empty");
+        let _ = fs::remove_dir_all(&root);
+        env::set_var(ENV_AUDIT_LOG_DIR, root.join("audit"));
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let response = list_audit_backup_bundles().expect("list backups should succeed");
+        assert!(response.bundles.is_empty());
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn list_audit_backup_bundles_includes_created_bundles_with_metadata() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-audit-backups-listing");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-DISP-BACKUP-001",
+                "print",
+                "2026-04-15T09:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-DISP-BACKUP-002",
+                "print",
+                "2026-04-15T10:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+
+        let applied = trim_audit_ledger(AuditRetentionRequest {
+            scope: Some(audit_log::AuditLedgerScope::Dispatch),
+            max_age_days: None,
+            max_entries: Some(1),
+            dry_run: false,
+        })
+        .expect("trim should generate backup bundle");
+        let backup_file = applied.backup.expect("backup should be emitted");
+        assert!(Path::new(&backup_file.file_path).exists());
+
+        let response = list_audit_backup_bundles().expect("list backups should succeed");
+        let observed = response
+            .bundles
+            .into_iter()
+            .find(|bundle| bundle.file_name == backup_file.file_name)
+            .expect("backup bundle should be listed");
+        assert_eq!(observed.size_bytes, backup_file.size_bytes);
+        assert!(!observed.created_at_utc.is_empty());
+        assert!(Path::new(&observed.file_path).exists());
 
         restore_env_vars(backup);
         let _ = fs::remove_dir_all(&root);

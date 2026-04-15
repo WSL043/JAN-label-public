@@ -21,6 +21,8 @@ Priority order for the next release branch work.
 | T-028c | P2 | done | Codex + Sub-Agent | Legacy proof seed / migration | Validate and seed pending proofs from CSV/XLSX |
 | T-028d | P1 | done | Codex + Sub-Agent | Audit persistence fatal on dispatch | Dispatch refuses to run when audit persistence cannot be trusted |
 | T-028e | P1 | done | Codex + Sub-Agent | Audit export / retention / backup | Scoped export, dry-run trim, apply trim, and backup bundles work |
+| T-028f-list | P2 | done | Codex + Sub-Agent | Audit backup bundle listing | `admin-web` and `desktop-shell` can list retention backup bundles with metadata |
+| T-029 | P2 | done | Codex + Sub-Agent | Operator runbook and stop/restart/escalation rules | PDF-only operator checklist and release handoff are documented |
 | T-032b | P1 | done | Codex + Sub-Agent | Structured editor UX and preview workbench | Editor, local canvas, and Rust preview are usable together |
 | T-032c | P1 | done | Codex + Sub-Agent | Desktop template catalog sync | `admin-web` reads desktop catalog and blocks unknown template routes |
 | T-032a | P1 | done | Codex + Sub-Agent | Local template catalog write-back | Live template JSON can be saved into the desktop local catalog |
@@ -37,10 +39,9 @@ Priority order for the next release branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-029 | P2 | pending | Codex + Operator | Operator runbook and stop/restart/escalation rules | A real operator can execute and recover the flow without tribal knowledge |
-| T-028f | P2 | pending | Codex + Sub-Agent | Audit backup list / restore flow | Backup bundles can be listed, inspected, and restored with docs and UI support |
+| T-028f-restore | P2 | pending | Codex + Sub-Agent | Audit backup restore flow | Backup bundles can be restored from the desktop UI or documented operator procedure |
 | T-016 | P3 | pending | Codex | Release notes automation | Release notes can be generated from the maintenance ledger with low manual cleanup |
-| T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
+| T-043 | P3 | pending | Codex + Sub-Agent | Release checklist automation | The release branch can emit a concise machine-readable readiness report |
 
 ## Next
 
@@ -48,11 +49,17 @@ Priority order for the next release branch work.
 | --- | --- | --- | --- | --- | --- |
 | T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
-| T-043 | P3 | pending | Codex + Sub-Agent | Release checklist automation | The release branch can emit a concise machine-readable readiness report |
+| T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 
 ## Blocked
 
-| id | priority | status | owner | task | unblock condition |
+None for PDF-only release milestone.  
+`T-030` and `T-031` are moved to PDF-only deferral below.
+
+
+## PDF-Only Deferred
+
+| id | priority | status | owner | task | release scope |
 | --- | --- | --- | --- | --- | --- |
-| T-030 | P1 | blocked | Operator + Codex | Configure GitHub Actions `OPENAI_API_KEY` | Repository secret is set |
-| T-031 | P1 | blocked | Operator + Codex | Physical printer matrix and measurement | 100% scale / scan / mm measurement is committed under `docs/printer-matrix/` |
+| T-030 | P1 | deferred | Operator + Codex | Configure GitHub Actions `OPENAI_API_KEY` | Non-blocker for PDF-only release; next milestone (cloud/CI automation hardening) |
+| T-031 | P1 | deferred | Operator + Codex | Physical printer matrix and measurement | Non-blocker for PDF-only release; next milestone (physical print validation) |

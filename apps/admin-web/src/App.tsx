@@ -15,6 +15,7 @@ import { templateVersionOf, toDispatchRequest } from "@label/job-schema";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { CSSProperties, ChangeEvent, FormEvent } from "react";
 import {
+  type AuditArtifactInfo,
   type AuditExportResult,
   type AuditLedgerScope,
   type AuditRetentionResult,
@@ -33,6 +34,7 @@ import {
   fetchPrintBridgeStatus,
   fetchTemplateCatalog,
   isTauriConnected,
+  listAuditBackupBundles,
   previewTemplateDraft,
   rejectProof,
   saveTemplateToLocalCatalog,
@@ -189,6 +191,12 @@ type AuditSearchState = {
   entries: AuditSearchEntry[];
   message: string;
   lastUpdatedAt: string | null;
+};
+type AuditBackupBundlePhase = SubmitPhase | "loading" | "ready" | "unavailable";
+type AuditBackupBundleState = {
+  phase: AuditBackupBundlePhase;
+  bundles: AuditArtifactInfo[];
+  message: string;
 };
 type AuditMaintenanceState = SubmitState & {
   detail: string | null;
@@ -1271,6 +1279,26 @@ function formatSavedAt(value: string | null): string {
   return parsed.toLocaleString();
 }
 
+function formatAuditBundleSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    return "-";
+  }
+  if (sizeBytes === 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let unitIndex = 0;
+  let bytes = sizeBytes;
+  while (bytes >= 1024 && unitIndex < units.length - 1) {
+    bytes /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return `${bytes.toFixed(0)} ${units[unitIndex]}`;
+  }
+  return `${bytes.toFixed(bytes >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
 function toDateTimeLocalInput(value: string | null | undefined): string {
   if (!value) {
     return "";
@@ -2228,6 +2256,11 @@ export function App() {
   const [auditMaxAgeDays, setAuditMaxAgeDays] = useState("30");
   const [auditMaxEntries, setAuditMaxEntries] = useState("500");
   const [auditDryRun, setAuditDryRun] = useState(true);
+  const [auditBackupBundles, setAuditBackupBundles] = useState<AuditBackupBundleState>({
+    phase: "idle",
+    message: "Audit backups have not been loaded yet.",
+    bundles: [],
+  });
   const [auditExportState, setAuditExportState] = useState<AuditMaintenanceState>({
     phase: "idle",
     message: "",
@@ -3098,12 +3131,59 @@ export function App() {
       });
       if (!result.dryRun) {
         void refreshAuditSearch(auditQuery);
+        void refreshAuditBackupBundles();
       }
     } catch (error) {
       setAuditTrimState({
         phase: "error",
         message: `Audit retention failed: ${formatErrorMessage(error)}`,
         detail: null,
+      });
+    }
+  });
+
+  const refreshAuditBackupBundles = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditBackupBundles({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        bundles: [],
+      });
+      return;
+    }
+
+    setAuditBackupBundles((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Loading audit backup bundles...",
+      bundles: current.bundles,
+    }));
+
+    try {
+      const bundles = await listAuditBackupBundles();
+      const sorted = [...bundles].sort((left, right) => {
+        if (!left.createdAtUtc && !right.createdAtUtc) {
+          return 0;
+        }
+        if (!left.createdAtUtc) {
+          return 1;
+        }
+        if (!right.createdAtUtc) {
+          return -1;
+        }
+        return right.createdAtUtc.localeCompare(left.createdAtUtc);
+      });
+      setAuditBackupBundles({
+        phase: "ready",
+        message: `Loaded ${sorted.length} backup bundle${sorted.length === 1 ? "" : "s"}.`,
+        bundles: sorted,
+      });
+    } catch (error) {
+      setAuditBackupBundles({
+        phase: "error",
+        message: `Audit backup bundle list failed: ${formatErrorMessage(error)}`,
+        bundles: [],
       });
     }
   });
@@ -3130,6 +3210,12 @@ export function App() {
         message:
           "Browser preview mode / desktop bridge unavailable. Using bundled template catalog fallback.",
       });
+      setAuditBackupBundles({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        bundles: [],
+      });
       return;
     }
 
@@ -3148,6 +3234,7 @@ export function App() {
       });
       void refreshTemplateCatalog();
       void refreshAuditSearch();
+      void refreshAuditBackupBundles();
     } catch (error) {
       setBridgeStatus({
         phase: "error",
@@ -5050,6 +5137,76 @@ export function App() {
             <p className="status-ok">{auditTrimState.message}</p>
           ) : null}
           {auditTrimState.detail ? <p className="data-summary">{auditTrimState.detail}</p> : null}
+        </div>
+        <div className="proof-note">
+          <strong>Audit backup bundles</strong>
+          <p>
+            List backup JSON bundles written by retention runs from the desktop audit backup
+            directory.
+          </p>
+          <div className="toolbar">
+            <button
+              className="button-secondary"
+              type="button"
+              onClick={() => {
+                void refreshAuditBackupBundles();
+              }}
+              disabled={
+                auditBackupBundles.phase === "loading" ||
+                auditBackupBundles.phase === "unavailable" ||
+                !isTauriConnected()
+              }
+            >
+              {auditBackupBundles.phase === "loading"
+                ? "Loading backups..."
+                : "Refresh backup bundles"}
+            </button>
+          </div>
+          {auditBackupBundles.message ? (
+            <p
+              className={
+                auditBackupBundles.phase === "error"
+                  ? "status-fail"
+                  : auditBackupBundles.phase === "success" || auditBackupBundles.phase === "ready"
+                    ? "status-ok"
+                    : "notice-text"
+              }
+            >
+              {auditBackupBundles.message}
+            </p>
+          ) : null}
+          {auditBackupBundles.phase === "ready" ? (
+            auditBackupBundles.bundles.length > 0 ? (
+              <div className="data-grid">
+                <div className="data-grid-header">
+                  <strong>Backup bundle list</strong>
+                  <span>{auditBackupBundles.bundles.length}</span>
+                </div>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>File</th>
+                      <th>Created</th>
+                      <th>Size</th>
+                      <th>Path</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {auditBackupBundles.bundles.map((bundle) => (
+                      <tr key={bundle.filePath}>
+                        <td>{bundle.fileName}</td>
+                        <td>{formatSavedAt(bundle.createdAtUtc)}</td>
+                        <td>{formatAuditBundleSize(bundle.sizeBytes)}</td>
+                        <td className="data-summary">{bundle.filePath}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="data-summary">No backup bundles found.</p>
+            )
+          ) : null}
         </div>
         <div className="proof-note">
           <strong>Legacy proof seed</strong>

@@ -6,6 +6,7 @@ const PRINT_BRIDGE_STATUS_COMMAND = "print_bridge_status";
 const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
 const EXPORT_AUDIT_LEDGER_COMMAND = "export_audit_ledger";
 const TRIM_AUDIT_LEDGER_COMMAND = "trim_audit_ledger";
+const LIST_AUDIT_BACKUP_BUNDLES_COMMAND = "list_audit_backups";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
@@ -286,6 +287,15 @@ export async function trimAuditLedger(
     );
   }
   return invoke<AuditRetentionResult>(TRIM_AUDIT_LEDGER_COMMAND, { request });
+}
+
+export async function listAuditBackupBundles(): Promise<AuditArtifactInfo[]> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to list audit backup bundles.",
+    );
+  }
+  return invoke<AuditArtifactInfo[]>(LIST_AUDIT_BACKUP_BUNDLES_COMMAND, {});
 }
 
 export async function approveProof(request: ProofReviewRequest): Promise<ProofRecord> {

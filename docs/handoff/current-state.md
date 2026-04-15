@@ -19,6 +19,7 @@
   - manual draft, batch queue, retry, and bridge-status-aware submit blocking
   - CSV/XLSX import with alias mapping and numeric JAN hardening
   - proof inbox, audit search, audit export, and audit retention controls
+  - audit backup bundle listing
   - structured template editor, local canvas preview, and Rust renderer preview
   - desktop template catalog sync, source display, and save-to-local-catalog action
 - `apps/desktop-shell`
@@ -27,6 +28,7 @@
   - `search_audit_log`
   - `export_audit_ledger`
   - `trim_audit_ledger`
+  - `list_audit_backup_bundles`
   - `approve_proof` / `reject_proof`
   - `template_catalog_command`
   - `save_template_to_local_catalog`
@@ -60,6 +62,11 @@
 - Unknown `template_version` blocks queue/manual/batch submit in `admin-web`.
 - Saved local templates are now authoritative for proof/print dispatch when their `template_version` is selected.
 - Audit export, retention dry-run/apply, and JSON backup bundles are working locally.
+- Audit backup bundles can now be listed in `admin-web`; restore remains manual.
+- PDF-only release boundary for this milestone:
+  - Proof/queue flow uses local artifacts and PDF outputs only.
+  - Windows spooler / physical printer scan validation is out of scope for now.
+  - `T-030` (OPENAI_API_KEY secret) and `T-031` (physical printer matrix + scan check) are explicitly marked **non-blockers** for the PDF-only gate.
 
 ## Validation
 
@@ -81,18 +88,20 @@ Operational note:
 
 ## Release Estimate
 
-- Earliest code-side release candidate: `2026-04-17` to `2026-04-18`
-- Realistic target: around `2026-04-20`
-- Main external blocker: `T-031` physical printer measurement and scan confirmation
+- Earliest PDF-only release candidate: `2026-04-16`
+- Realistic PDF-only release target: `2026-04-16` to `2026-04-17`
+- Deferred non-PDF milestones:
+  - `T-030` GitHub Actions secret setup
+  - `T-031` physical printer matrix and scan confirmation
 
 ## Next Main Tasks
 
-1. `T-029`: operator runbook, stop/restart rules, and escalation guidance
-2. `T-028f`: audit backup listing and restore flow
-3. Release packaging / notes hardening
+1. `T-028f-restore`: audit backup restore flow
+2. `T-016`: release notes / packaging hardening
+3. `T-043`: release checklist automation
 4. `T-012`: self-hosted runner / webhook operations
 
-## External Blockers
+## External Deferrals
 
-- `T-030`: GitHub repository secret `OPENAI_API_KEY`
-- `T-031`: physical printer matrix and measurement commit in `docs/printer-matrix/`
+- `T-030`: GitHub repository secret `OPENAI_API_KEY` (non-blocker for PDF-only release)
+- `T-031`: physical printer matrix and measurement commit in `docs/printer-matrix/` (non-blocker for PDF-only release)

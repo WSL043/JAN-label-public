@@ -87,7 +87,13 @@ Notes:
 ## 8. Release Direction
 
 - Next release must keep PDF output stable.
+- For PDF-only release, stable release criteria are limited to:
+  - deterministic SVG/PDF render
+  - proof review → approve/reject loop
+  - print gated by approved proof lineage/subject
+  - local audit persistence, export, and retention
+  - local template catalog save-and-dispatch parity
 - Template authoring must support save-to-catalog, preview, and proof/print dispatch parity.
 - Excel / CSV import must remain usable without a strict external database schema.
 - Proof review, audit search, export, and retention are part of the operator baseline.
-- Physical printer measurement and scan validation remain external release blockers until recorded in `docs/printer-matrix/`.
+- Physical printer measurement / scan validation (`T-031`) and GitHub secret setup (`T-030`) are deferred to a non-PDF-only milestone.
