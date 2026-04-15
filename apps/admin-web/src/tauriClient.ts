@@ -7,6 +7,7 @@ const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
+const TEMPLATE_CATALOG_COMMAND = "template_catalog_command";
 const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
 const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
 
@@ -164,6 +165,17 @@ export type TemplateDraftPreviewResult = {
   fieldCount: number;
 };
 
+export type TemplateCatalogEntry = {
+  version: string;
+  labelName: string;
+  description?: string;
+};
+
+export type TemplateCatalogResult = {
+  defaultTemplateVersion: string;
+  templates: TemplateCatalogEntry[];
+};
+
 export function isTauriConnected(): boolean {
   return isTauri();
 }
@@ -222,6 +234,15 @@ export async function previewTemplateDraft(
     );
   }
   return invoke<TemplateDraftPreviewResult>(PREVIEW_TEMPLATE_DRAFT_COMMAND, { request });
+}
+
+export async function fetchTemplateCatalog(): Promise<TemplateCatalogResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to read template catalog.",
+    );
+  }
+  return invoke<TemplateCatalogResult>(TEMPLATE_CATALOG_COMMAND, {});
 }
 
 export async function validateLegacyProofSeed(

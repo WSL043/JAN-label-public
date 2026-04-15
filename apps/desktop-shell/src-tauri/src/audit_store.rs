@@ -52,6 +52,22 @@ impl AuditStore {
         Self { root }
     }
 
+    pub fn assert_dispatch_ledger_writable(&self) -> Result<(), String> {
+        self.with_lock(|| {
+            let records = self.load_dispatch_records()?;
+            self.save_dispatch_records(&records)
+        })
+    }
+
+    pub fn assert_dispatch_and_proof_ledgers_writable(&self) -> Result<(), String> {
+        self.with_lock(|| {
+            let dispatches = self.load_dispatch_records()?;
+            let proofs = self.load_proof_records()?;
+            self.save_dispatch_records(&dispatches)?;
+            self.save_proof_records(&proofs)
+        })
+    }
+
     pub fn record_dispatch(&self, record: PersistedDispatchRecord) -> Result<(), String> {
         self.with_lock(|| {
             let mut records = self.load_dispatch_records()?;

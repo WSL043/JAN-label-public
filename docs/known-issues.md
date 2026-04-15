@@ -64,14 +64,12 @@
 - 対応: 一時 target は検証前に削除する
 
 ## K-018 approved proof lineage の drift 余地
-- status: open
-- 影響: UI 側の lineage 補完は audit search 依存で、approved proof が直近検索に無い場合の扱いが弱い
-- 対応: backend 側で request lineage の整合をさらに強制する
+- status: resolved
+- 解消: `desktop-shell` が approved proof lineage を backend で補完し、explicit lineage / `reprintOfJobId` の不一致を reject するようにした
 
 ## K-019 print 成功でも audit persistence failure を non-fatal にしている
-- status: open
-- 影響: 出力は成功しても ledger 欠落が起きうる
-- 対応: audit write failure を release blocker として扱うか、明示的な operator alert に変える
+- status: resolved
+- 解消: dispatch 前の ledger writable preflight と、dispatch 後の audit persistence failure の fatal 化を入れた
 
 ## K-020 template editor の write-back 未接続
 - status: open

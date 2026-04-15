@@ -21,6 +21,7 @@
   - proof inbox / audit search / approved proof pinning
   - legacy proof seed UI
   - bridge status と structured warning 表示
+  - desktop template catalog sync と unknown `template_version` の事前表示
   - structured template editor
   - local canvas preview
   - Rust renderer preview button
@@ -29,6 +30,7 @@
   - `print_bridge_status`
   - `search_audit_log`
   - `approve_proof` / `reject_proof`
+  - `template_catalog_command`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
   - `preview_template_draft`
 
@@ -41,6 +43,10 @@
   - golden SVG / PDF を再生成
 - `desktop-shell`
   - `preview_template_draft` で live template JSON を Rust renderer に通せる
+  - packaged template catalog を `template_catalog_command` で `admin-web` に配布する
+  - print / proof dispatch 前に audit ledger writable を preflight する
+  - dispatch 後の audit persistence failure を fatal として扱う
+  - approved proof 由来の lineage を backend で補完し、explicit lineage / reprint parent の不一致を拒否する
 - `admin-web`
   - structured template editor の CSS と workbench レイアウトを実装
   - local canvas と Rust preview を並べて確認できる
@@ -48,11 +54,17 @@
   - template editor は packaged manifest にはまだ書き戻らないことを明示
   - batch retry が `submitted` 行を再送してしまう不具合を修正
   - template validation に duplicate / out-of-bounds / unsupported placeholder / preview-only placeholder を追加
+  - desktop template catalog を読み、unknown `template_version` を proof / print 前に可視化する
 
 ## 3. 現在の release 境界
 
 - strict proof-to-print gate は `templateVersion + sku + brand + jan(normalized) + qty + lineage`
 - print 時の proof artifact 確認は approved proof ledger の `artifactPath` を使う
+- `jobLineageId` 未指定の print request は approved proof lineage で backend 補完する
+- explicit `jobLineageId` / `reprintOfJobId` は approved proof lineage と一致しない限り reject する
+- packaged `template_version` の存在確認は `desktop-shell` が行い、`admin-web` はその catalog を先読みして mismatch を表示する
+- proof / print dispatch は audit ledger が writable でない限り開始しない
+- dispatch 後の audit persistence failure は success 扱いにしない
 - `warningDetails[]` の `code / severity / message` を UI が正として扱う
 - Rust preview は live template JSON を描画する
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う

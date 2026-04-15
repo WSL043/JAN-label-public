@@ -16,7 +16,10 @@ use barcode::ZintCli;
 use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
 use printer_adapters::{PdfFileAdapter, WindowsSpoolerAdapter};
-use render::{parse_template_source, render_svg_with_template, RenderLabelRequest};
+use render::{
+    parse_template_source, render_svg_with_template, resolve_template, template_catalog,
+    RenderLabelRequest,
+};
 use serde::Serialize;
 use tauri::command;
 
@@ -33,10 +36,12 @@ const DEFAULT_WINDOWS_PRINTER_NAME: &str = "Default Printer";
 
 #[command]
 fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, String> {
+    let mut request = request;
     let config = PrintBridgeConfig::load();
+    config.validate_and_normalize_request(&mut request)?;
+    config.ensure_audit_store_ready_for_request(&request)?;
     let is_proof = matches!(request.execution.as_ref(), Some(ExecutionIntent::Proof(_)));
     let job_id = request.job_id.clone();
-    config.validate_request(&request)?;
     let request_for_audit = request.clone();
 
     if is_proof {
@@ -68,9 +73,7 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
             };
             let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
             let result = agent.dispatch(request)?;
-            if let Err(error) = config.record_dispatch(&request_for_audit, &result) {
-                log_non_fatal_audit_error("print dispatch", &result.audit.job_id, &error);
-            }
+            config.record_dispatch(&request_for_audit, &result)?;
             Ok(result)
         }
         BridgePrintAdapter::WindowsSpooler => {
@@ -83,9 +86,7 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
             };
             let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
             let result = agent.dispatch(request)?;
-            if let Err(error) = config.record_dispatch(&request_for_audit, &result) {
-                log_non_fatal_audit_error("print dispatch", &result.audit.job_id, &error);
-            }
+            config.record_dispatch(&request_for_audit, &result)?;
             Ok(result)
         }
     }
@@ -126,6 +127,24 @@ fn validate_legacy_proof_seed(
 fn seed_legacy_proofs(request: LegacyProofSeedRequest) -> Result<LegacyProofSeedResult, String> {
     let config = PrintBridgeConfig::load();
     config.process_legacy_proof_seed(request, true)
+}
+
+#[command]
+fn template_catalog_command() -> Result<TemplateCatalogResult, String> {
+    let catalog = template_catalog().map_err(|error| error.to_string())?;
+    Ok(TemplateCatalogResult {
+        default_template_version: catalog.default_template_version,
+        templates: catalog
+            .templates
+            .into_iter()
+            .filter(|entry| entry.enabled)
+            .map(|entry| TemplateCatalogEntryResult {
+                version: entry.version,
+                label_name: entry.label_name,
+                description: entry.description,
+            })
+            .collect(),
+    })
 }
 
 #[command]
@@ -303,6 +322,22 @@ struct TemplateDraftPreviewResult {
     page_width_mm: f64,
     page_height_mm: f64,
     field_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogResult {
+    default_template_version: String,
+    templates: Vec<TemplateCatalogEntryResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogEntryResult {
+    version: String,
+    label_name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    description: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -497,8 +532,9 @@ impl PrintBridgeConfig {
         }
     }
 
-    fn validate_request(&self, request: &DispatchRequest) -> Result<(), String> {
+    fn validate_and_normalize_request(&self, request: &mut DispatchRequest) -> Result<(), String> {
         let Some(ExecutionIntent::Print(print)) = request.execution.as_ref() else {
+            ensure_template_version_available(&resolve_template_version_for_request(request)?)?;
             return Ok(());
         };
 
@@ -509,6 +545,7 @@ impl PrintBridgeConfig {
         }
 
         if print.allow_without_proof {
+            ensure_template_version_available(&resolve_template_version_for_request(request)?)?;
             return Ok(());
         }
 
@@ -522,6 +559,7 @@ impl PrintBridgeConfig {
                     .to_string()
             })?;
         let expected_template_version = resolve_template_version_for_request(request)?;
+        ensure_template_version_available(&expected_template_version)?;
         let expected_subject = build_dispatch_match_subject(request)?;
         let approved_proof = self.audit_store().ensure_approved_proof_matches(
             source_proof_job_id,
@@ -537,7 +575,37 @@ impl PrintBridgeConfig {
             ));
         }
 
+        let expected_lineage = approved_proof.job_lineage_id.0.clone();
+        if let Some(explicit_lineage) = optional_trimmed_non_empty(request.job_lineage_id.clone()) {
+            if explicit_lineage != expected_lineage {
+                return Err(format!(
+                    "request lineage '{}' does not match approved proof lineage '{}'",
+                    explicit_lineage, expected_lineage
+                ));
+            }
+        } else if let Some(reprint_parent_job_id) =
+            optional_trimmed_non_empty(request.reprint_of_job_id.clone())
+        {
+            if reprint_parent_job_id != expected_lineage {
+                return Err(format!(
+                    "reprintOfJobId '{}' does not match approved proof lineage '{}'",
+                    reprint_parent_job_id, expected_lineage
+                ));
+            }
+        } else {
+            request.job_lineage_id = Some(expected_lineage);
+        }
+
         Ok(())
+    }
+
+    fn ensure_audit_store_ready_for_request(&self, request: &DispatchRequest) -> Result<(), String> {
+        let audit_store = self.audit_store();
+        if matches!(request.execution.as_ref(), Some(ExecutionIntent::Proof(_))) {
+            audit_store.assert_dispatch_and_proof_ledgers_writable()
+        } else {
+            audit_store.assert_dispatch_ledger_writable()
+        }
     }
 
     fn record_dispatch(
@@ -1116,8 +1184,10 @@ fn validate_legacy_seed_artifact_path(
     Ok(canonical_artifact)
 }
 
-fn log_non_fatal_audit_error(context: &str, job_id: &str, error: &str) {
-    eprintln!("warning: {context} for job '{job_id}' completed, but audit persistence failed: {error}");
+fn ensure_template_version_available(template_version: &str) -> Result<(), String> {
+    resolve_template(template_version)
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 fn map_event_kind(event: &print_agent::PrintDispatchAuditEvent) -> audit_log::AuditEventKind {
@@ -1229,6 +1299,7 @@ fn main() {
             search_audit_log,
             approve_proof,
             reject_proof,
+            template_catalog_command,
             preview_template_draft,
             validate_legacy_proof_seed,
             seed_legacy_proofs
@@ -1242,10 +1313,11 @@ mod tests {
     use super::{
         available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
-        sanitize_path_component, BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus,
-        TemplateDraftPreviewRequest, TemplateDraftPreviewSample, ENV_ALLOW_PRINT_WITHOUT_PROOF,
-        ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER, ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR,
-        ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
+        sanitize_path_component, template_catalog_command, BridgePrintAdapter, PrintBridgeConfig,
+        PrintBridgeStatus, TemplateDraftPreviewRequest, TemplateDraftPreviewSample,
+        ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
+        ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR, ENV_WINDOWS_PRINTER_NAME,
+        ENV_ZINT_BINARY_PATH,
     };
     use crate::audit_store::ProofReviewRequest;
     use audit_log::{AuditQuery, ProofRecord, PrintJobId, PrintJobLineageId};
@@ -1326,6 +1398,15 @@ mod tests {
         .expect_err("invalid jan should be rejected");
 
         assert!(error.contains("jan"));
+    }
+
+    #[test]
+    fn template_catalog_command_exposes_packaged_templates() {
+        let catalog = template_catalog_command().expect("catalog command should succeed");
+
+        assert_eq!(catalog.default_template_version, "basic-50x30@v1");
+        assert_eq!(catalog.templates.len(), 1);
+        assert_eq!(catalog.templates[0].version, "basic-50x30@v1");
     }
 
     #[test]
@@ -1664,7 +1745,7 @@ mod tests {
             windows_printer_name: "Default Printer".to_string(),
             allow_print_without_proof: false,
         };
-        let request = sample_dispatch_request(Some(DispatchPrinterProfile {
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
             id: "pdf-a4-proof".to_string(),
             adapter: "pdf".to_string(),
             paper_size: "A4".to_string(),
@@ -1693,7 +1774,7 @@ mod tests {
             .expect("proof should be approved");
 
         let err = config
-            .validate_request(&request)
+            .validate_and_normalize_request(&mut request)
             .expect_err("missing proof artifact should block print");
 
         assert!(err.contains("source proof job 'JOB-20260415-PROOF'"));
@@ -1716,7 +1797,7 @@ mod tests {
             windows_printer_name: "Default Printer".to_string(),
             allow_print_without_proof: false,
         };
-        let request = sample_dispatch_request(Some(DispatchPrinterProfile {
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
             id: "pdf-a4-proof".to_string(),
             adapter: "pdf".to_string(),
             paper_size: "A4".to_string(),
@@ -1745,8 +1826,12 @@ mod tests {
             .expect("proof should be approved");
 
         config
-            .validate_request(&request)
+            .validate_and_normalize_request(&mut request)
             .expect("existing proof artifact should allow print");
+        assert_eq!(
+            request.job_lineage_id.as_deref(),
+            Some("JOB-20260415-PROOF")
+        );
     }
 
     #[test]
@@ -1797,10 +1882,142 @@ mod tests {
         request.qty = 2;
 
         let err = config
-            .validate_request(&request)
+            .validate_and_normalize_request(&mut request)
             .expect_err("mismatched payload should block print");
 
         assert!(err.contains("qty"));
+    }
+
+    #[test]
+    fn print_bridge_config_rejects_explicit_lineage_mismatch_against_approved_proof() {
+        let temp_root = env::temp_dir().join("jan-label-proof-lineage-mismatch");
+        let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
+        fs::write(&proof_path, b"%PDF-1.4\nproof\n").expect("write proof fixture");
+        let config = PrintBridgeConfig {
+            print_output_dir: proof_dir,
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
+            id: "pdf-a4-proof".to_string(),
+            adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
+        }));
+        request.job_lineage_id = Some("JOB-20260415-OTHER".to_string());
+
+        let err = config
+            .validate_and_normalize_request(&mut request)
+            .expect_err("mismatched lineage should block print");
+
+        assert!(err.contains("approved proof lineage"));
+    }
+
+    #[test]
+    fn print_bridge_config_rejects_reprint_parent_that_does_not_match_approved_proof_lineage() {
+        let temp_root = env::temp_dir().join("jan-label-proof-reprint-lineage-mismatch");
+        let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
+        fs::write(&proof_path, b"%PDF-1.4\nproof\n").expect("write proof fixture");
+        let config = PrintBridgeConfig {
+            print_output_dir: proof_dir,
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
+            id: "pdf-a4-proof".to_string(),
+            adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
+        }));
+        request.reprint_of_job_id = Some("JOB-20260415-PRINT-0001".to_string());
+
+        let err = config
+            .validate_and_normalize_request(&mut request)
+            .expect_err("reprint parent mismatch should block print");
+
+        assert!(err.contains("reprintOfJobId"));
+    }
+
+    #[test]
+    fn print_bridge_config_preflight_rejects_unwritable_audit_store() {
+        let temp_root = env::temp_dir().join("jan-label-audit-preflight");
+        let _ = fs::remove_dir_all(&temp_root);
+        fs::create_dir_all(&temp_root).expect("create root dir");
+        let audit_file = temp_root.join("audit-file");
+        fs::write(&audit_file, b"not-a-directory").expect("write blocking audit file");
+        let config = PrintBridgeConfig {
+            print_output_dir: temp_root.join("proofs"),
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: audit_file,
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+
+        let err = config
+            .ensure_audit_store_ready_for_request(&sample_proof_dispatch_request())
+            .expect_err("audit preflight should fail when audit root is a file");
+
+        assert!(err.contains("failed to create audit lock directory"));
     }
 
     #[test]

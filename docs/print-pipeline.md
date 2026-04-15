@@ -7,7 +7,8 @@
 3. row を `ready / pending / error` に仕分ける
 4. ready row を snapshot して manual / batch submit に送る
 5. `desktop-shell` の `dispatch_print_job` を呼ぶ
-6. Rust 側で JAN 正規化、proof gate、printer route、adapter、audit 記録を処理する
+6. `desktop-shell` で packaged template catalog、proof gate、audit writable を確認する
+7. Rust 側で JAN 正規化、lineage 正規化、printer route、adapter、audit 記録を処理する
 
 ## 2. print gate
 
@@ -16,8 +17,16 @@ print 実行時の必須条件:
 - `sourceProofJobId` がある
 - approved proof ledger に対象 proof がある
 - proof dispatch ledger に対応する proof dispatch がある
+- packaged template catalog に対象 `template_version` がある
 - `templateVersion + sku + brand + jan(normalized) + qty + lineage` が approved proof と一致する
 - approved proof ledger の `artifactPath` が実在する
+- audit ledger が writable である
+
+lineage ルール:
+
+- `jobLineageId` 未指定なら `desktop-shell` が approved proof lineage を補完する
+- explicit `jobLineageId` は approved proof lineage と一致しない限り reject する
+- explicit `reprintOfJobId` も approved proof lineage と一致しない限り reject する
 
 `allowWithoutProof` は bypass 用には使わない。
 
@@ -63,15 +72,18 @@ print 実行時の必須条件:
 
 現在の authoring 導線:
 
-1. `admin-web` の structured template editor で page / border / field を編集する
-2. local canvas preview で近似確認する
-3. 必要なら `preview_template_draft` を呼んで Rust renderer の SVG preview を確認する
-4. 問題がなければ template asset / JSON を export して引き継ぐ
+1. `admin-web` は desktop-shell から packaged template catalog を読み、選択可能な template を同期する
+2. `admin-web` の structured template editor で page / border / field を編集する
+3. local canvas preview で近似確認する
+4. 必要なら `preview_template_draft` を呼んで Rust renderer の SVG preview を確認する
+5. live JSON の `template_version` が packaged catalog に無い場合は mismatch を表示する
+6. 問題がなければ template asset / JSON を export して引き継ぐ
 
 重要:
 
 - local canvas preview は近似表示
 - Rust preview は live template JSON を描画する
+- desktop template catalog が dispatch で使える `template_version` の正になる
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
 - つまり authoring preview と本番 dispatch の write-back はまだ未接続
 

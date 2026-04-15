@@ -15,9 +15,12 @@
 | T-027a | P1 | done | Codex + Sub-Agent | proof ledger と review API を `desktop-shell` に追加 | `approve_proof` / `reject_proof` / `search_audit_log` が使える |
 | T-027b | P1 | done | Codex + Sub-Agent | `admin-web` に proof inbox / review UI を追加 | pending proof の approve / reject と approved proof pinning ができる |
 | T-027c | P1 | done | Codex + Sub-Agent | approved proof と print payload の strict match を実装 | `templateVersion + sku + brand + jan(normalized) + qty + lineage` を満たさない print を拒否 |
+| T-027d | P1 | done | Codex + Sub-Agent | proof lineage authority を backend に移す | approved proof lineage と不一致の explicit lineage / `reprintOfJobId` を拒否し、未指定 lineage は backend で補完する |
 | T-028a | P1 | done | Codex + Sub-Agent | dispatch / proof の local ledger 永続化 | `dispatch-ledger.json` / `proof-ledger.json` に保存される |
 | T-028b | P1 | done | Codex + Sub-Agent | `admin-web` に audit search UI を追加 | local ledger の検索、proof status 表示、proof pinning ができる |
 | T-028c | P2 | done | Codex + Sub-Agent | legacy proof seed / migration を実装 | `validate_legacy_proof_seed` / `seed_legacy_proofs` と seed UI で pending seed ができる |
+| T-028d | P1 | done | Codex + Sub-Agent | audit persistence failure を release blocker にする | dispatch 前に ledger writable を preflight し、dispatch 後の audit persistence failure も fatal にする |
+| T-032c | P1 | done | Codex + Sub-Agent | packaged template catalog を desktop-shell から配布する | `admin-web` が desktop catalog を読み、unknown `template_version` を submit 前に明示する |
 | T-032b | P1 | done | Codex + Sub-Agent | structured template editor の UX と preview 基線を実装 | workbench CSS、local canvas、Rust preview 導線が揃う |
 | T-033b | P1 | done | Codex + Sub-Agent | render parity を改善 | border visible、background / border / field color が SVG / PDF に反映される |
 | T-034 | P1 | done | Codex + Sub-Agent | template schema / manifest と manifest 駆動 render | `packages/templates` と `crates/render` の schema 契約が揃う |

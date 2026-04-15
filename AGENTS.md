@@ -25,6 +25,8 @@
 - legacy proof の移行は pending seed まで。自動 approve はしない
 - template editor のローカル canvas は近似表示。出力可否の判断は Rust preview / proof で行う
 - 現時点の proof / print dispatch は packaged manifest の `template_version` を使う。editor の生 JSON は preview 用であり、本番反映は別タスク
+- proof / print dispatch の最終 gate は `apps/desktop-shell` を正とする
+- packaged template catalog の存在確認は `apps/desktop-shell` を正とする
 
 ## 3. 変更時の最低確認
 

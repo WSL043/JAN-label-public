@@ -20,11 +20,13 @@ import {
   type LegacyProofSeedRequest,
   type LegacyProofSeedResult,
   type PrintBridgeStatus,
+  type TemplateCatalogResult,
   type TemplateDraftPreviewRequest,
   type TemplateDraftPreviewResult,
   approveProof,
   dispatchPrintJob,
   fetchPrintBridgeStatus,
+  fetchTemplateCatalog,
   isTauriConnected,
   previewTemplateDraft,
   rejectProof,
@@ -45,7 +47,7 @@ const operatorNotes = [
   "Operators can map uploaded columns to draft fields so spreadsheets do not need perfect structure.",
 ];
 
-const templateOptions: Array<LabelTemplateRef & { label: string; size: string }> = [
+const templateOptions: TemplateOption[] = [
   {
     id: "basic-50x30",
     version: "v1",
@@ -53,6 +55,12 @@ const templateOptions: Array<LabelTemplateRef & { label: string; size: string }>
     size: "50mm x 30mm",
   },
 ];
+
+type TemplateOption = LabelTemplateRef & {
+  label: string;
+  size: string;
+  description?: string | null;
+};
 
 const printerProfiles: Array<PrinterProfile & { label: string }> = [
   {
@@ -153,6 +161,13 @@ type BridgeStatusPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
 type BridgeStatusState = {
   phase: BridgeStatusPhase;
   status: PrintBridgeStatus | null;
+  message: string;
+};
+type TemplateCatalogPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type TemplateCatalogState = {
+  phase: TemplateCatalogPhase;
+  templates: TemplateOption[];
+  defaultTemplateVersion: string | null;
   message: string;
 };
 type LegacyProofSeedPhase = "idle" | "validating" | "seeding" | "success" | "error";
@@ -1026,7 +1041,10 @@ function parseTemplateRef(spec: TemplateSpec | null): LabelTemplateRef | null {
   if (!spec) {
     return null;
   }
-  const versionValue = readString(spec, "template_version");
+  return parseTemplateVersionValue(readString(spec, "template_version"));
+}
+
+function parseTemplateVersionValue(versionValue: string): LabelTemplateRef | null {
   const at = versionValue.lastIndexOf("@");
   if (at <= 0 || at >= versionValue.length - 1) {
     return null;
@@ -1035,6 +1053,22 @@ function parseTemplateRef(spec: TemplateSpec | null): LabelTemplateRef | null {
     id: versionValue.slice(0, at).trim(),
     version: versionValue.slice(at + 1).trim(),
   };
+}
+
+function toTemplateOptionsFromCatalog(catalog: TemplateCatalogResult): TemplateOption[] {
+  return catalog.templates.reduce<TemplateOption[]>((options, entry) => {
+    const ref = parseTemplateVersionValue(entry.version);
+    if (!ref) {
+      return options;
+    }
+    options.push({
+      ...ref,
+      label: entry.labelName,
+      size: entry.version,
+      description: entry.description ?? null,
+    });
+    return options;
+  }, []);
 }
 
 function templateMeta(spec: TemplateSpec | null): LabelTemplateMeta | null {
@@ -1090,11 +1124,12 @@ function formatQueuedRowResult(row: QueuedRow): string {
 function pickTemplateRef(
   formTemplateId: string,
   parsedTemplate: LabelTemplateRef | null,
+  templates: LabelTemplateRef[],
 ): LabelTemplateRef | null {
   if (parsedTemplate) {
     return parsedTemplate;
   }
-  return templateOptions.find((option) => option.id === formTemplateId) ?? null;
+  return templates.find((option) => option.id === formTemplateId) ?? null;
 }
 
 type ParsedCsv = { headers: string[]; rows: string[][] };
@@ -2062,6 +2097,12 @@ export function App() {
     status: null,
     message: "Checking desktop bridge availability...",
   });
+  const [templateCatalogState, setTemplateCatalogState] = useState<TemplateCatalogState>({
+    phase: "idle",
+    templates: templateOptions,
+    defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+    message: "Using bundled template catalog fallback.",
+  });
   const [auditQuery, setAuditQuery] = useState("");
   const [auditSearch, setAuditSearch] = useState<AuditSearchState>({
     phase: "idle",
@@ -2114,9 +2155,26 @@ export function App() {
     () => parseTemplateEditorModel(parsedTemplate.spec),
     [parsedTemplate.spec],
   );
+  const availableTemplateOptions = useMemo(
+    () =>
+      templateCatalogState.templates.length > 0 ? templateCatalogState.templates : templateOptions,
+    [templateCatalogState.templates],
+  );
+  const knownTemplateVersions = useMemo(
+    () => new Set(availableTemplateOptions.map((option) => templateVersionOf(option))),
+    [availableTemplateOptions],
+  );
+  const templateReferenceIsKnown = templateReference
+    ? knownTemplateVersions.has(templateVersionOf(templateReference))
+    : false;
   const resolvedTemplateRef = useMemo(
-    () => pickTemplateRef(form.templateId, templateReference),
-    [form.templateId, templateReference],
+    () =>
+      pickTemplateRef(
+        form.templateId,
+        templateReferenceIsKnown ? templateReference : null,
+        availableTemplateOptions,
+      ),
+    [availableTemplateOptions, form.templateId, templateReference, templateReferenceIsKnown],
   );
   const selectedPrinterProfile = useMemo(
     () => printerProfiles.find((option) => option.id === form.printerProfileId),
@@ -2126,12 +2184,17 @@ export function App() {
   const templateOptionLabel = resolvedTemplateRef
     ? `${resolvedTemplateRef.id} / ${resolvedTemplateRef.version}`
     : "Missing";
+  const selectedTemplateOption =
+    availableTemplateOptions.find(
+      (option) =>
+        option.id === resolvedTemplateRef?.id && option.version === resolvedTemplateRef?.version,
+    ) ?? null;
   const templateCandidates = useMemo(() => {
-    const candidates: LabelTemplateRef[] = templateOptions.map((entry) => ({
+    const candidates: LabelTemplateRef[] = availableTemplateOptions.map((entry) => ({
       id: entry.id,
       version: entry.version,
     }));
-    if (templateReference) {
+    if (templateReference && templateReferenceIsKnown) {
       const exists = candidates.some(
         (option) =>
           option.id === templateReference.id && option.version === templateReference.version,
@@ -2141,7 +2204,7 @@ export function App() {
       }
     }
     return candidates;
-  }, [templateReference]);
+  }, [availableTemplateOptions, templateReference, templateReferenceIsKnown]);
 
   const { draft, errors } = validateDraft(
     form,
@@ -2150,8 +2213,17 @@ export function App() {
     selectedPrinterProfile ?? null,
     executionIntent,
   );
-  const visibleErrors = showErrors ? errors : {};
-  const template = templateOptions.find((option) => option.id === resolvedTemplateRef?.id);
+  const templateCatalogIssue =
+    templateReference && !templateReferenceIsKnown
+      ? `template_version '${templateVersionOf(templateReference)}' is not present in the desktop template catalog. Proof/print dispatch will reject it until the packaged manifest is updated.`
+      : null;
+  const effectiveErrors = templateCatalogIssue
+    ? {
+        ...errors,
+        templateId: templateCatalogIssue,
+      }
+    : errors;
+  const visibleErrors = showErrors ? effectiveErrors : {};
   const templatePreviewBindings = useMemo(
     () =>
       buildTemplatePreviewBindings({
@@ -2706,6 +2778,13 @@ export function App() {
           "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
         lastUpdatedAt: null,
       });
+      setTemplateCatalogState({
+        phase: "unavailable",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message:
+          "Browser preview mode / desktop bridge unavailable. Using bundled template catalog fallback.",
+      });
       return;
     }
 
@@ -2722,12 +2801,52 @@ export function App() {
         status,
         message: `Bridge ready. Active adapter: ${status.printAdapterKind}`,
       });
+      void refreshTemplateCatalog();
       void refreshAuditSearch();
     } catch (error) {
       setBridgeStatus({
         phase: "error",
         status: null,
         message: `Bridge status check failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  });
+
+  const refreshTemplateCatalog = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setTemplateCatalogState({
+        phase: "unavailable",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message:
+          "Browser preview mode / desktop bridge unavailable. Using bundled template catalog fallback.",
+      });
+      return;
+    }
+
+    setTemplateCatalogState((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Reading desktop template catalog...",
+    }));
+
+    try {
+      const catalog = await fetchTemplateCatalog();
+      const options = toTemplateOptionsFromCatalog(catalog);
+      setTemplateCatalogState({
+        phase: "ready",
+        templates: options.length > 0 ? options : templateOptions,
+        defaultTemplateVersion: catalog.defaultTemplateVersion,
+        message: `Loaded ${catalog.templates.length} packaged template entr${
+          catalog.templates.length === 1 ? "y" : "ies"
+        }.`,
+      });
+    } catch (error) {
+      setTemplateCatalogState({
+        phase: "error",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message: `Template catalog sync failed: ${formatErrorMessage(error)}`,
       });
     }
   });
@@ -3515,7 +3634,7 @@ export function App() {
                     Template from spec ({templateReference.id}@{templateReference.version})
                   </option>
                 ) : null}
-                {templateOptions.map((option) => (
+                {availableTemplateOptions.map((option) => (
                   <option key={option.id} value={option.id}>
                     {option.label}
                   </option>
@@ -3523,6 +3642,9 @@ export function App() {
               </select>
               {visibleErrors.templateId ? (
                 <small className="error-text">{visibleErrors.templateId}</small>
+              ) : null}
+              {templateCatalogState.phase !== "ready" ? (
+                <small className="hint-text">{templateCatalogState.message}</small>
               ) : null}
             </label>
 
@@ -3701,7 +3823,9 @@ export function App() {
             <div>
               <span>Template route</span>
               <strong>{templateOptionLabel}</strong>
-              <small>{template ? template.size : "template route inferred"}</small>
+              <small>
+                {selectedTemplateOption ? selectedTemplateOption.size : "template route inferred"}
+              </small>
             </div>
             <div>
               <span>Output route</span>
@@ -4091,6 +4215,12 @@ export function App() {
                     <small>{templateValidation.message ?? "Schema route looks aligned."}</small>
                   </div>
                 </div>
+                {templateCatalogIssue ? (
+                  <div className="proof-note">
+                    <strong>Catalog mismatch</strong>
+                    <p>{templateCatalogIssue}</p>
+                  </div>
+                ) : null}
                 {templateUsesPreviewOnlyPlaceholder ? (
                   <div className="proof-note">
                     <strong>Preview-only placeholder detected</strong>
