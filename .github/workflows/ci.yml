@@ -135,7 +135,7 @@ jobs:
         with:
           dotnet-version: 8.0.x
       - run: dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
-      - run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained false
+      - run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
       - uses: actions/upload-artifact@v7
         with:
           name: jan-label-native-shell
