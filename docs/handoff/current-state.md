@@ -3,7 +3,7 @@
 - Updated: 2026-04-16
 - Branch: `codex/t041-classic-workstation-governance`
 - Release base: `v0.2.0` (`0b6827e`)
-- Active PR: `none`
+- Active PR: `#33`
 - Branch relation to `origin/main` on 2026-04-16: `codex/t041-classic-workstation-governance` is ahead of `origin/main` with local template catalog governance diagnostics, repair guidance, single-writer operating rules, and a classic desktop-tool workstation chrome pass
 
 ## Shipping Now
