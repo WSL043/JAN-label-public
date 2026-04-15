@@ -1386,16 +1386,21 @@ mod tests {
     use super::{
         available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
-        sanitize_path_component, template_catalog_command, BridgePrintAdapter, PrintBridgeConfig,
-        PrintBridgeStatus, TemplateDraftPreviewRequest, TemplateDraftPreviewSample,
+        sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
+        BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
+        TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
         ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR, ENV_WINDOWS_PRINTER_NAME,
         ENV_ZINT_BINARY_PATH,
     };
-    use crate::audit_store::ProofReviewRequest;
-    use audit_log::{AuditQuery, ProofRecord, PrintJobId, PrintJobLineageId};
+    use crate::audit_store::{AuditStore, ProofReviewRequest};
+    use audit_log::{
+        AuditActor, AuditExportRequest, AuditLedgerScope, AuditQuery, AuditRetentionRequest,
+        DispatchMatchSubject, PersistedDispatchRecord, ProofRecord, PrintAuditRecord, PrintJobId,
+        PrintJobLineageId,
+    };
     use print_agent::{DispatchPrinterProfile, DispatchRequest, ExecutionIntent, PrintExecution};
-    use std::{env, fs, path::PathBuf, sync::Mutex};
+    use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
 
@@ -1480,6 +1485,135 @@ mod tests {
         assert_eq!(catalog.default_template_version, "basic-50x30@v1");
         assert_eq!(catalog.templates.len(), 1);
         assert_eq!(catalog.templates[0].version, "basic-50x30@v1");
+    }
+
+    #[test]
+    fn export_audit_ledger_command_supports_scope_filtering() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-audit-export-command");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-DISP-EXPORT-001",
+                "print",
+                "2026-04-15T09:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+        store
+            .register_pending_proof(sample_pending_proof_record("JOB-PROOF-EXPORT-001"))
+            .expect("proof should persist");
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-PROOF-EXPORT-001",
+                "proof",
+                "2026-04-15T09:05:00Z",
+                None,
+            ))
+            .expect("proof dispatch should persist");
+
+        let all_export = export_audit_ledger(None)
+            .expect("audit export without scope should default to all");
+        assert_eq!(all_export.scope, AuditLedgerScope::All);
+        assert_eq!(all_export.dispatch_count, 2);
+        assert_eq!(all_export.proof_count, 1);
+
+        let proof_only = export_audit_ledger(Some(AuditExportRequest {
+            scope: Some(AuditLedgerScope::Proof),
+        }))
+        .expect("proof-only export should succeed");
+        assert_eq!(proof_only.scope, AuditLedgerScope::Proof);
+        assert_eq!(proof_only.dispatch_count, 0);
+        assert_eq!(proof_only.proof_count, 1);
+
+        let dispatch_only = export_audit_ledger(Some(AuditExportRequest {
+            scope: Some(AuditLedgerScope::Dispatch),
+        }))
+        .expect("dispatch-only export should succeed");
+        assert_eq!(dispatch_only.scope, AuditLedgerScope::Dispatch);
+        assert_eq!(dispatch_only.dispatch_count, 2);
+        assert_eq!(dispatch_only.proof_count, 0);
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn trim_audit_ledger_command_respects_dry_run_and_backup() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-audit-trim-command");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-DISP-TRIM-001",
+                "print",
+                "2026-04-15T09:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-DISP-TRIM-002",
+                "print",
+                "2026-04-15T10:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+
+        let dry_run = trim_audit_ledger(AuditRetentionRequest {
+            scope: Some(AuditLedgerScope::Dispatch),
+            max_age_days: None,
+            max_entries: Some(1),
+            dry_run: true,
+        })
+        .expect("dry run trim should succeed");
+        assert_eq!(dry_run.removed_dispatch_count, 1);
+        assert!(dry_run.backup.is_none());
+
+        let snapshot = store.snapshot().expect("snapshot should still have two rows");
+        assert_eq!(snapshot.dispatches.len(), 2);
+
+        let applied = trim_audit_ledger(AuditRetentionRequest {
+            scope: Some(AuditLedgerScope::Dispatch),
+            max_age_days: None,
+            max_entries: Some(1),
+            dry_run: false,
+        })
+        .expect("trim should succeed");
+        assert_eq!(applied.removed_dispatch_count, 1);
+        assert!(applied.backup.is_some());
+        let backup_file = applied
+            .backup
+            .expect("backup should be returned");
+        assert!(Path::new(&backup_file.file_path).exists());
+        assert!(backup_file.file_name.ends_with(".json"));
+
+        let snapshot = store.snapshot().expect("snapshot should contain one row");
+        assert_eq!(snapshot.dispatches.len(), 1);
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2293,6 +2427,54 @@ mod tests {
             resolve_print_adapter_for_host("windows-spooler", false),
             BridgePrintAdapter::Pdf
         );
+    }
+
+    fn sample_dispatch_record(
+        job_id: &str,
+        mode: &str,
+        occurred_at: &str,
+        parent_job_id: Option<&str>,
+    ) -> PersistedDispatchRecord {
+        PersistedDispatchRecord {
+            audit: PrintAuditRecord {
+                job_id: PrintJobId(job_id.to_string()),
+                job_lineage_id: PrintJobLineageId(job_id.to_string()),
+                parent_job_id: parent_job_id.map(|value| PrintJobId(value.to_string())),
+                actor: AuditActor {
+                    user_id: "audit-bot".to_string(),
+                    display_name: "Audit Bot".to_string(),
+                },
+                event: audit_log::AuditEventKind::Submitted,
+                occurred_at: occurred_at.to_string(),
+                reason: None,
+            },
+            mode: mode.to_string(),
+            template_version: "basic-50x30@v1".to_string(),
+            match_subject: DispatchMatchSubject {
+                sku: "SKU-001".to_string(),
+                brand: "Acme".to_string(),
+                jan_normalized: "4006381333931".to_string(),
+                qty: 1,
+            },
+            artifact_media_type: "application/pdf".to_string(),
+            artifact_byte_size: 1024,
+            submission_adapter_kind: "pdf".to_string(),
+            submission_external_job_id: format!("{job_id}-submission"),
+        }
+    }
+
+    fn sample_pending_proof_record(job_id: &str) -> ProofRecord {
+        ProofRecord::pending(
+            PrintJobId(job_id.to_string()),
+            PrintJobLineageId(job_id.to_string()),
+            AuditActor {
+                user_id: "proof.user".to_string(),
+                display_name: "Proof User".to_string(),
+            },
+            "2026-04-15T09:00:00Z".to_string(),
+            format!("proofs/{job_id}-proof.pdf"),
+            Some("review".to_string()),
+        )
     }
 
     fn backup_env_vars(keys: &[&str]) -> Vec<(String, Option<String>)> {

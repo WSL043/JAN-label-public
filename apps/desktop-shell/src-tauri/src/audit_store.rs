@@ -630,7 +630,7 @@ fn build_backup_bundle(
     let file_name = format!(
         "audit-retention-{}-{}.json",
         scope_file_token(scope),
-        compact_timestamp_token(&created_at_utc)
+        compact_timestamp_token_with_nanos(&created_at_utc)
     );
     let artifact = AuditArtifactInfo {
         file_name: file_name.clone(),
@@ -659,6 +659,14 @@ fn scope_file_token(scope: AuditLedgerScope) -> &'static str {
 
 fn compact_timestamp_token(value: &str) -> String {
     value.chars().filter(|value| value.is_ascii_digit()).collect()
+}
+
+fn compact_timestamp_token_with_nanos(value: &str) -> String {
+    format!(
+        "{}-{}",
+        compact_timestamp_token(value),
+        timestamp_nanos()
+    )
 }
 
 fn matches_search(entry: &AuditSearchEntry, search_text: Option<&str>) -> bool {
@@ -1332,6 +1340,45 @@ mod tests {
             .expect("proof export should succeed");
         assert_eq!(proof_only.dispatch_count, 0);
         assert_eq!(proof_only.proof_count, 1);
+    }
+
+    #[test]
+    fn export_defaults_to_all_scope_when_scope_is_missing() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-DEFAULT",
+                "JOB-PRINT-DEFAULT",
+                None,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("dispatch should persist");
+
+        let result = store
+            .export(AuditExportRequest::default())
+            .expect("export should default to all scope");
+
+        assert_eq!(result.scope, AuditLedgerScope::All);
+        assert_eq!(result.dispatch_count, 1);
+        assert_eq!(result.proof_count, 0);
+    }
+
+    #[test]
+    fn trim_rejects_request_with_no_retention_criteria() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+
+        let err = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::Dispatch),
+                max_age_days: None,
+                max_entries: None,
+                dry_run: false,
+            })
+            .expect_err("missing retention criteria should be rejected");
+
+        assert!(err.contains("requires maxAgeDays, maxEntries"));
     }
 
     #[test]
