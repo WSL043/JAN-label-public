@@ -1628,6 +1628,10 @@ fn overlay_json_files(overlay_dir: &Path, manifest_file_name: &str) -> Result<Ve
     Ok(files)
 }
 
+fn contains_parent_traversal(path: &str) -> bool {
+    path.split('/').any(|segment| segment == "..")
+}
+
 fn duplicate_template_versions(entries: &[TemplateManifestEntry]) -> Vec<(String, usize)> {
     let mut counts = HashMap::new();
     for entry in entries {
