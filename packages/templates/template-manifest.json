@@ -1,0 +1,13 @@
+{
+  "schema_version": "template-manifest-v1",
+  "default_template_version": "basic-50x30@v1",
+  "templates": [
+    {
+      "version": "basic-50x30@v1",
+      "path": "basic-50x30@v1.json",
+      "label_name": "basic-label",
+      "enabled": true,
+      "description": "Default basic label template used by fixture suite."
+    }
+  ]
+}

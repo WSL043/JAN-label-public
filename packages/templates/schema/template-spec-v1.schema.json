@@ -1,0 +1,96 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jan-label.local/schemas/template-spec-v1.schema.json",
+  "title": "Template Specification",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "template_version", "label_name", "page", "fields"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^template-spec-v[0-9]+$"
+    },
+    "template_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "label_name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "page": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["width_mm", "height_mm"],
+      "properties": {
+        "width_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "height_mm": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "background_fill": {
+          "type": "string",
+          "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+        }
+      }
+    },
+    "border": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "visible": {
+          "type": "boolean"
+        },
+        "color": {
+          "type": "string",
+          "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+        },
+        "width_mm": {
+          "type": "number",
+          "minimum": 0
+        }
+      }
+    },
+    "fields": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["name", "x_mm", "y_mm", "font_size_mm", "template"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "x_mm": {
+            "type": "number",
+            "minimum": 0
+          },
+          "y_mm": {
+            "type": "number",
+            "minimum": 0
+          },
+          "font_size_mm": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "template": {
+            "type": "string",
+            "minLength": 1
+          },
+          "color": {
+            "type": "string",
+            "pattern": "^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$"
+          }
+        }
+      }
+    }
+  }
+}

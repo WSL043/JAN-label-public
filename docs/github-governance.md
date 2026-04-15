@@ -101,6 +101,8 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - 自動修正 PR は same-repo PR のみに限定し、fork PR は triage comment のみに留める
 - self-hosted runner / webhook 化は次段階で追加する
 - self-hosted runner を使う場合は persistent な `codex-home` を検討してよいが、最初から必須にはしない
+- GitHub 側 Codex は PR review / PR comment / CI triage / autofix の運用担当とし、最終的な実装統合と品質責任はローカル Codex が持つ
+- GitHub 側で新しいタスクや重要判断が発生した場合は、同日中に `docs/todo/active.md` と `docs/handoff/current-state.md` を同期し、必要なら `docs/adr/` に判断を残す
 
 ## 7. release tagging
 

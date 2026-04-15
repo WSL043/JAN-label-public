@@ -55,6 +55,44 @@
         "version": { "type": "string", "minLength": 1 }
       }
     },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "properties": {
+        "mode": {
+          "type": "string",
+          "enum": ["proof", "print"]
+        },
+        "requestedBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "notes": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expiresAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "approvedBy": {
+          "type": "string",
+          "minLength": 1
+        },
+        "approvedAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sourceProofJobId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "allowWithoutProof": {
+          "type": "boolean"
+        }
+      }
+    },
     "printerProfile": {
       "type": "object",
       "additionalProperties": false,

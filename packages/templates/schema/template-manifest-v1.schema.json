@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://jan-label.local/schemas/template-manifest-v1.schema.json",
+  "title": "Template Manifest",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["schema_version", "default_template_version", "templates"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "pattern": "^template-manifest-v[0-9]+$"
+    },
+    "default_template_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "templates": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": ["version", "path", "label_name"],
+        "properties": {
+          "version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
+          "label_name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          }
+        }
+      }
+    }
+  }
+}

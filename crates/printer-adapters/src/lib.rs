@@ -43,12 +43,24 @@ impl PrinterAdapter for PdfFileAdapter {
     }
 
     fn submit(&self, artifact: &PrintArtifact) -> Result<SubmissionReceipt, AdapterError> {
+        if self.output_path.trim().is_empty() {
+            return Err(AdapterError {
+                message: "pdf adapter requires a non-empty output_path".to_string(),
+            });
+        }
+
         if artifact.media_type != "application/pdf" {
             return Err(AdapterError {
                 message: format!(
                     "pdf adapter requires application/pdf artifact, got '{}'",
                     artifact.media_type
                 ),
+            });
+        }
+
+        if artifact.bytes.is_empty() {
+            return Err(AdapterError {
+                message: "pdf adapter rejects empty artifacts".to_string(),
             });
         }
 
@@ -73,9 +85,30 @@ impl PrinterAdapter for WindowsSpoolerAdapter {
     }
 
     fn submit(&self, artifact: &PrintArtifact) -> Result<SubmissionReceipt, AdapterError> {
+        if self.spool_path.trim().is_empty() {
+            return Err(AdapterError {
+                message: "windows spooler adapter requires a non-empty spool_path".to_string(),
+            });
+        }
+
         if self.printer_name.trim().is_empty() {
             return Err(AdapterError {
                 message: "windows spooler adapter requires a printer_name".to_string(),
+            });
+        }
+
+        if artifact.media_type != "image/svg+xml" {
+            return Err(AdapterError {
+                message: format!(
+                    "windows spooler adapter requires image/svg+xml artifact, got '{}'",
+                    artifact.media_type
+                ),
+            });
+        }
+
+        if artifact.bytes.is_empty() {
+            return Err(AdapterError {
+                message: "windows spooler adapter rejects empty artifacts".to_string(),
             });
         }
 
@@ -164,6 +197,27 @@ mod tests {
     }
 
     #[test]
+    fn pdf_file_adapter_rejects_empty_artifacts() {
+        let temp_dir = TestDir::new();
+        let adapter = PdfFileAdapter {
+            output_path: temp_dir
+                .path()
+                .join("empty.pdf")
+                .to_string_lossy()
+                .into_owned(),
+        };
+
+        let err = adapter
+            .submit(&PrintArtifact {
+                media_type: "application/pdf".to_string(),
+                bytes: Vec::new(),
+            })
+            .expect_err("pdf adapter should reject empty artifacts");
+
+        assert_eq!(err.message, "pdf adapter rejects empty artifacts");
+    }
+
+    #[test]
     fn windows_spooler_adapter_stages_artifact_for_named_printer() {
         let temp_dir = TestDir::new();
         let spool_path = temp_dir.path().join("spool").join("job-0001.bin");
@@ -216,6 +270,32 @@ mod tests {
         assert_eq!(
             err.message,
             "windows spooler adapter requires a printer_name"
+        );
+    }
+
+    #[test]
+    fn windows_spooler_adapter_rejects_non_svg_artifacts() {
+        let temp_dir = TestDir::new();
+        let adapter = WindowsSpoolerAdapter {
+            printer_name: "ZDesigner ZD421".to_string(),
+            spool_path: temp_dir
+                .path()
+                .join("spool")
+                .join("job-0003.bin")
+                .to_string_lossy()
+                .into_owned(),
+        };
+
+        let err = adapter
+            .submit(&PrintArtifact {
+                media_type: "application/pdf".to_string(),
+                bytes: b"%PDF-1.4".to_vec(),
+            })
+            .expect_err("windows spooler adapter should reject non-svg artifacts");
+
+        assert_eq!(
+            err.message,
+            "windows spooler adapter requires image/svg+xml artifact, got 'application/pdf'"
         );
     }
 

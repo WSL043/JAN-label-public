@@ -1,50 +1,74 @@
 # active-todo
 
-継続開発で今見るべき作業キューです。  
-長期計画は `docs/mvp-backlog.md`、日々の実行順はこのファイルを正とします。
+Priority order for post-`v0.1.2` branch work.
 
 ## Done
 
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-001 | `#1` | P0 | done | Codex | Zint CLI adapter を `crates/barcode` に実装 | 実バイナリパスを受けて render 呼び出しをテストできる |
-| T-002 | `#2` | P0 | done | Codex | `render` に PDF 出力ルートを追加 | SVG と並んで PDF fixture を比較できる |
-| T-003 | `#3` | P1 | done | Codex | `importer` の行単位バリデーションを実装 | 列だけでなくセル値エラーを返せる |
-| T-004 | `#4` | P1 | done | Codex | `admin-web` にジョブ作成フォームを追加 | parent_sku, sku, jan, qty, brand を入力できる |
-| T-005 | `#5` | P1 | done | Codex | `audit-log` に lineage / reprint 情報を追加 | 再印刷の系譜を表現できる |
-| T-006 | `#6` | P1 | done | Codex | `printer-adapters` に PDF adapter を追加 | print-agent から proof 出力できる |
-| T-007 | `-` | P2 | done | Codex | Windows spooler adapter の骨格実装 | printer profile 経由で submit できる |
-| T-008 | `-` | P2 | done | Codex | `docs/printer-matrix` に baseline 記録を追加 | 初回 release gate を満たす記録が commit される |
-| T-009 | `-` | P2 | done | Codex | 初回 release tag 発行 | `v0.1.1` Release workflow が成功し Windows installer が添付される |
-| T-010 | `-` | P2 | done | Codex | CI failure 時の Codex triage workflow を追加 | same-repo PR の失敗 CI に Codex の診断コメントが付く |
-| T-011 | `-` | P3 | done | Codex | Codex maintenance schedule / release-prep automation を追加 | schedule か workflow_dispatch で unresolved CI / release blocker を要約できる |
-| T-013 | `-` | P3 | done | Codex | CI failure から自動修正 PR を起こす workflow を追加 | Codex が fix branch を作り draft PR まで出せる |
-| T-014 | `-` | P3 | done | Codex | release prep の結果を issue / discussion に定期集約する | schedule 実行結果が GitHub 上の恒久的なスレッドに残る |
-| T-015 | `-` | P2 | done | Codex | `apps/desktop-shell` の Windows 配布シェルを初期化 | `desktop-shell-windows` CI と Release workflow で Windows bundle 経路を検証できる |
+| id | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- |
+| T-026 | P1 | done | Codex + Sub-Agent | Connect `admin-web` to `desktop-shell` bridge | Manual and batch submit run through the desktop bridge |
+| T-026d | P1 | done | Codex + Sub-Agent | Structured bridge warnings | `warningDetails[]` exposes `code / severity / message` and UI blocks high-risk submit |
+| T-026e | P1 | done | Codex + Sub-Agent | XLSX numeric JAN hardening | Scientific / decimal / ambiguous 12-digit numeric JAN is blocked; 13-digit numeric JAN warns |
+| T-026f | P1 | done | Codex + Sub-Agent | Batch retry hardening | Only `ready` and `failed` rows re-submit; `submitted` rows do not |
+| T-026g | P1 | done | Codex + Sub-Agent | Template catalog mismatch submit blocker | Unknown live `template_version` blocks queue/manual/batch submit |
+| T-027a | P1 | done | Codex + Sub-Agent | Proof ledger and review API | `approve_proof`, `reject_proof`, and audit search are available |
+| T-027b | P1 | done | Codex + Sub-Agent | Proof inbox UI | Pending proofs can be approved/rejected and approved proofs can be pinned |
+| T-027c | P1 | done | Codex + Sub-Agent | Strict approved-proof match for print | Print is rejected unless proof subject and lineage match |
+| T-027d | P1 | done | Codex + Sub-Agent | Proof lineage authority in backend | Explicit lineage and `reprintOfJobId` must match approved proof lineage |
+| T-027e | P1 | done | Codex + Sub-Agent | Approved proof artifact validation | Missing, empty, and invalid PDF proof artifacts are rejected |
+| T-028a | P1 | done | Codex + Sub-Agent | Local audit ledgers | Dispatch and proof ledgers persist locally |
+| T-028b | P1 | done | Codex + Sub-Agent | Audit search UI | Local ledger search and proof status visibility are available |
+| T-028c | P2 | done | Codex + Sub-Agent | Legacy proof seed / migration | Validate and seed pending proofs from CSV/XLSX |
+| T-028d | P1 | done | Codex + Sub-Agent | Audit persistence fatal on dispatch | Dispatch refuses to run when audit persistence cannot be trusted |
+| T-028e | P1 | done | Codex + Sub-Agent | Audit export / retention / backup | Scoped export, dry-run trim, apply trim, and backup bundles work |
+| T-028f-list | P2 | done | Codex + Sub-Agent | Audit backup bundle listing | `admin-web` and `desktop-shell` can list retention backup bundles with metadata |
+| T-029 | P2 | done | Codex + Sub-Agent | Operator runbook and stop/restart/escalation rules | PDF-only operator checklist and release handoff are documented |
+| T-045 | P1 | done | Codex + Sub-Agent | Cut PDF-only release `v0.1.2` | Tag, GitHub Release workflow, and Windows installer asset are published |
+| T-032b | P1 | done | Codex + Sub-Agent | Structured editor UX and preview workbench | Editor, local canvas, and Rust preview are usable together |
+| T-032c | P1 | done | Codex + Sub-Agent | Desktop template catalog sync | `admin-web` reads desktop catalog and blocks unknown template routes |
+| T-032a | P1 | done | Codex + Sub-Agent | Local template catalog write-back | Live template JSON can be saved into the desktop local catalog |
+| T-033a | P1 | done | Codex + Sub-Agent | Authored template proof/print route parity | Saved local templates are used for validation and actual proof/print render |
+| T-033b | P1 | done | Codex + Sub-Agent | Render parity | Border/background/color handling is aligned in SVG/PDF |
+| T-034 | P1 | done | Codex + Sub-Agent | Template schema and manifest core | `packages/templates` and `crates/render` share manifest/schema rules |
+| T-035 | P1 | done | Codex + Sub-Agent | Template asset export/import | Template source, form state, mapping, and draft snapshot move together |
+| T-037 | P1 | done | Codex + Sub-Agent | Tauri dispatch contracts | `dispatch_print_job` and `print_bridge_status` contracts are aligned |
+| T-038 | P1 | done | Codex + Sub-Agent | Printer route and proof gate hardening | Adapter route and proof gate checks are enforced in bridge/backend |
+| T-039 | P1 | done | Codex + Sub-Agent | Import / retry / batch UX hardening | Queue snapshot, retry lineage, lazy XLSX import, and submit state are stable |
+| T-040 | P1 | done | Codex + Sub-Agent | Render/schema hardening | SVG attribute safety and template color constraints are enforced |
+| T-046a | P1 | done | Codex + Sub-Agent | Desktop shell UX reset | `admin-web` uses a rail/workspace/inspector/status-bar shell instead of a single long webpage layout |
+| T-046 | P1 | done | Codex + Sub-Agent | Queue and audit desktop grid tooling | Queue/audit lanes support desktop-oriented sort, filter, page navigation, and submit-time mutation guards |
+| T-047 | P1 | done | Codex + Sub-Agent | Template authoring interaction hardening | Template lane separates structure/fields/review/catalog concerns and compose/template review makes live-vs-staged-vs-dispatch authority explicit |
+| T-045b | P1 | done | Codex + Sub-Agent | Cut `v0.1.3` desktop shell release | Tag, GitHub Release workflow, and Windows installer asset are published for the desktop UI reset |
+| T-028f-restore | P2 | done | Codex | Audit backup restore flow | Backup bundles can be restored from the desktop UI through `restore_audit_backup_bundle` with conflict-safe merge semantics |
+| T-016 | P3 | done | Codex | Release notes automation | `pnpm release:notes --version <version>` writes `docs/release/<version>.md` from handoff, git summary, and Maintenance Ledger context |
+| T-043 | P3 | done | Codex | Release checklist automation | `pnpm release:readiness --version <version>` writes machine-readable release readiness artifacts and the release workflow uploads them |
+| T-048 | P1 | done | Codex | `v0.2.0` operator workstation redesign | `admin-web` uses a dark-neutral, dense three-pane workstation with lane-aware inspector focus across compose/template/queue/audit |
 
 ## Now
 
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-017 | `-` | P1 | blocked | Operator + Codex | GitHub Actions に `OPENAI_API_KEY` secret を設定 | `Codex PR Review`, `Codex Maintenance`, `Codex CI Autofix` が fallback ではなく cloud 実行される |
-| T-018 | `-` | P1 | blocked | Operator + Codex | `docs/printer-matrix` に物理プリンタ実測を追加 | mm 実測値と barcode scan 結果が 1 機種分 commit される |
+| id | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- |
+| None | - | clear | Codex | No active implementation blockers remain for the `v0.2.0` batch | Cut and verify the release on the GitHub Windows runner or another managed Windows host |
 
 ## Next
 
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-012 | `-` | P3 | pending | Codex + Infra | self-hosted runner または webhook ベースの Codex agent 化 | persistent な `CODEX_HOME` か外部 webhook で半常駐運用できる |
-
-## Later
-
-| id | issue | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- | --- |
-| T-016 | `-` | P3 | pending | Codex | release prep と printer matrix の結果から `v0.1.x` release notes を補助生成する | maintenance ledger から release note 下書きを出せる |
+| id | priority | status | owner | task | done when |
+| --- | --- | --- | --- | --- | --- |
+| T-045c | P1 | pending | Codex | Cut `v0.2.0` operator workstation release | GitHub Windows CI, release notes draft, readiness artifact, and release workflow all pass for `v0.2.0` |
+| T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
+| T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
+| T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |
+| T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 
 ## Blocked
 
-| id | blocker | task | unblock condition |
-| --- | --- | --- | --- |
-| B-001 | GitHub plan 制約 | `main` branch protection / ruleset の本適用 | GitHub Pro / Team 以上へ変更 |
-| B-002 | repository secret 値がこのローカル環境にない | T-017 | Operator が `OPENAI_API_KEY` を用意して GitHub repository secret に設定する |
-| B-003 | 実機プリンタ / スキャナへのアクセスが未確保 | T-018 | 対象プリンタで 100% scale 印刷と scan を実施できる |
+None for PDF-only release milestone.  
+`T-030` and `T-031` are moved to PDF-only deferral below.
+
+
+## PDF-Only Deferred
+
+| id | priority | status | owner | task | release scope |
+| --- | --- | --- | --- | --- | --- |
+| T-030 | P1 | deferred | Operator + Codex | Configure GitHub Actions `OPENAI_API_KEY` | Non-blocker for PDF-only release; next milestone (cloud/CI automation hardening) |
+| T-031 | P1 | deferred | Operator + Codex | Physical printer matrix and measurement | Non-blocker for PDF-only release; next milestone (physical print validation) |

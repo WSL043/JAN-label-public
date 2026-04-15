@@ -1,0 +1,60 @@
+{
+  "schema_version": "template-spec-v1",
+  "template_version": "basic-50x30@v1",
+  "label_name": "basic-label",
+  "description": "Current basic label template used by fixtures",
+  "page": {
+    "width_mm": 50.0,
+    "height_mm": 30.0,
+    "background_fill": "#ffffff"
+  },
+  "border": {
+    "visible": true,
+    "color": "#000000",
+    "width_mm": 0.2
+  },
+  "fields": [
+    {
+      "name": "job",
+      "x_mm": 2.0,
+      "y_mm": 5.0,
+      "font_size_mm": 3.0,
+      "template": "job:{job_id}"
+    },
+    {
+      "name": "brand",
+      "x_mm": 2.0,
+      "y_mm": 10.0,
+      "font_size_mm": 4.0,
+      "template": "brand:{brand}"
+    },
+    {
+      "name": "sku",
+      "x_mm": 2.0,
+      "y_mm": 15.0,
+      "font_size_mm": 4.0,
+      "template": "sku:{sku}"
+    },
+    {
+      "name": "jan",
+      "x_mm": 2.0,
+      "y_mm": 20.0,
+      "font_size_mm": 4.0,
+      "template": "jan:{jan}"
+    },
+    {
+      "name": "qty",
+      "x_mm": 2.0,
+      "y_mm": 25.0,
+      "font_size_mm": 4.0,
+      "template": "qty:{qty}"
+    },
+    {
+      "name": "template_version",
+      "x_mm": 30.0,
+      "y_mm": 28.0,
+      "font_size_mm": 2.0,
+      "template": "template:{template_version}"
+    }
+  ]
+}

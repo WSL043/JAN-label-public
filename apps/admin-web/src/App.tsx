@@ -1,27 +1,68 @@
-import type { LabelTemplateRef, PrintJobDraft, PrinterProfile } from "@label/job-schema";
-import { useState } from "react";
-import type { FormEvent } from "react";
+﻿import type {
+  DispatchActor,
+  DispatchRequest,
+  DispatchRequestOptions,
+  ExecutionMode,
+  LabelTemplateRef,
+  PrintDispatchResult,
+  PrintExecutionContext,
+  PrintExecutionIntent,
+  PrintJobDraft,
+  PrinterProfile,
+  ProofExecutionContext,
+} from "@label/job-schema";
+import { templateVersionOf, toDispatchRequest } from "@label/job-schema";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
+import type { CSSProperties, ChangeEvent, FormEvent } from "react";
+import {
+  type AuditArtifactInfo,
+  type AuditBackupRestoreResult,
+  type AuditExportResult,
+  type AuditLedgerScope,
+  type AuditRetentionResult,
+  type AuditSearchEntry,
+  type BridgeWarning,
+  type LegacyProofSeedRequest,
+  type LegacyProofSeedResult,
+  type PrintBridgeStatus,
+  type SaveTemplateToLocalCatalogResult,
+  type TemplateCatalogResult,
+  type TemplateDraftPreviewRequest,
+  type TemplateDraftPreviewResult,
+  approveProof,
+  dispatchPrintJob,
+  exportAuditLedger,
+  fetchPrintBridgeStatus,
+  fetchTemplateCatalog,
+  isTauriConnected,
+  listAuditBackupBundles,
+  previewTemplateDraft,
+  rejectProof,
+  restoreAuditBackupBundle,
+  saveTemplateToLocalCatalog,
+  searchAuditLog,
+  seedLegacyProofs,
+  trimAuditLedger,
+  validateLegacyProofSeed,
+} from "./tauriClient";
 
-const corePillars = [
-  "Print correctness stays in Rust, not the UI.",
-  "The admin screen only assembles a draft and operator intent.",
-  "Printer differences stay behind printer profiles and adapters.",
-];
-
-const operatorNotes = [
-  "JAN normalization remains in Rust. This form does not invent a checksum.",
-  "Template and printer profile are selected explicitly to keep output routing deterministic.",
-  "The preview payload stays aligned with @label/job-schema so GitHub review can reason about it.",
-];
-
-const templateOptions: Array<LabelTemplateRef & { label: string; size: string }> = [
+const templateOptions: TemplateOption[] = [
   {
     id: "basic-50x30",
     version: "v1",
     label: "Basic 50 x 30",
     size: "50mm x 30mm",
+    catalogSource: "packaged",
   },
 ];
+const packagedTemplateVersions = new Set(templateOptions.map((entry) => templateVersionOf(entry)));
+
+type TemplateOption = LabelTemplateRef & {
+  label: string;
+  size: string;
+  description?: string | null;
+  catalogSource?: "packaged" | "local" | "unknown";
+};
 
 const printerProfiles: Array<PrinterProfile & { label: string }> = [
   {
@@ -34,6 +75,156 @@ const printerProfiles: Array<PrinterProfile & { label: string }> = [
   },
 ];
 
+const STORAGE_KEYS = {
+  template: "label-admin-web.templateDraft.v1",
+  mapping: "label-admin-web.columnMapping.v1",
+  source: "label-admin-web.sourceReview.v1",
+};
+const TEMPLATE_ASSET_KIND = "admin-template-asset";
+const TEMPLATE_ASSET_SCHEMA_VERSION = "template-asset-v1";
+
+const TEMPLATE_SCHEMA_VERSION = "template-spec-v1";
+const MAX_PERSISTED_SOURCE_ROWS = 200;
+const LEGACY_PROOF_SEED_REQUIRED_COLUMNS = [
+  "proofJobId",
+  "artifactPath",
+  "templateVersion",
+  "sku",
+  "brand",
+  "jan",
+  "qty",
+  "requestedByUserId",
+  "requestedByDisplayName",
+  "requestedAt",
+  "jobLineageId",
+  "notes",
+] as const;
+const HIGH_RISK_BRIDGE_WARNING_PATTERNS: ReadonlyArray<RegExp> = [
+  /zint.*absolute path/i,
+  /absolute path ['"].+?['"], but the file does not exist/i,
+  /env.*zint.*does not exist/i,
+  /not set; defaulting to 'default printer' while windows-spooler is selected/i,
+  /may not be supported on non-windows hosts/i,
+  /is set to .* but does not exist/i,
+  /not available on this host; defaulting/i,
+  /is unsupported; defaulting/i,
+  /allow_print_without_proof is enabled/i,
+];
+const NON_BLOCKING_WARNING_PATTERNS: ReadonlyArray<RegExp> = [
+  /is not set; defaulting/i,
+  /will be created/i,
+];
+const DEFAULT_TEMPLATE_FIELD_COLOR = "#14120f";
+const TEMPLATE_CATALOG_BLOCK_PREFIX = "Template catalog mismatch:";
+const RUST_RENDER_PLACEHOLDERS = [
+  "job_id",
+  "sku",
+  "brand",
+  "jan",
+  "qty",
+  "template_version",
+] as const;
+const LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS = ["parent_sku"] as const;
+const TEMPLATE_PREVIEW_PLACEHOLDERS = [
+  ...RUST_RENDER_PLACEHOLDERS,
+  ...LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS,
+] as const;
+
+type PersistedItem<T> = {
+  data: T;
+  savedAt: string;
+};
+
+type PersistedTemplateStatus = {
+  savedAt: string | null;
+  status: "none" | "ok" | "stale" | "invalid";
+  message: string | null;
+};
+
+type PersistedSourceStatus = {
+  savedAt: string | null;
+  status: "none" | "ok" | "invalid";
+  message: string | null;
+  rowsTruncated: boolean;
+};
+type PreparedRowStatus = "ready" | "pending" | "error";
+type QueuedRowStatus = "ready" | "submitting" | "submitted" | "failed";
+type SubmitPhase = "idle" | "submitting" | "success" | "error";
+type SubmitState = {
+  phase: SubmitPhase;
+  message: string;
+};
+type ManualSubmitState = SubmitState & {
+  result: PrintDispatchResult | null;
+};
+type BatchSubmitState = SubmitState & {
+  results: PrintDispatchResult[];
+};
+type BridgeStatusPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type BridgeStatusState = {
+  phase: BridgeStatusPhase;
+  status: PrintBridgeStatus | null;
+  message: string;
+};
+type TemplateCatalogPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type TemplateCatalogState = {
+  phase: TemplateCatalogPhase;
+  templates: TemplateOption[];
+  defaultTemplateVersion: string | null;
+  message: string;
+};
+type LegacyProofSeedPhase = "idle" | "validating" | "seeding" | "success" | "error";
+type TemplateRenderPreviewPhase = "idle" | "rendering" | "ready" | "error" | "unavailable";
+type AuditSearchPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type AuditSearchState = {
+  phase: AuditSearchPhase;
+  entries: AuditSearchEntry[];
+  message: string;
+  lastUpdatedAt: string | null;
+};
+type AuditBackupBundlePhase = SubmitPhase | "loading" | "ready" | "unavailable";
+type AuditBackupBundleState = {
+  phase: AuditBackupBundlePhase;
+  bundles: AuditArtifactInfo[];
+  message: string;
+};
+type AuditMaintenanceState = SubmitState & {
+  detail: string | null;
+};
+type AuditRestoreState = SubmitState & {
+  filePath: string | null;
+  result: AuditBackupRestoreResult | null;
+};
+type ProofReviewAction = "approve" | "reject" | null;
+type ProofReviewState = SubmitState & {
+  proofJobId: string | null;
+  action: ProofReviewAction;
+};
+type LegacyProofSeedState = {
+  phase: LegacyProofSeedPhase;
+  message: string;
+  result: LegacyProofSeedResult | null;
+};
+type TemplateRenderPreviewState = {
+  phase: TemplateRenderPreviewPhase;
+  message: string;
+  result: TemplateDraftPreviewResult | null;
+};
+type WorkspaceMode = "compose" | "templates" | "queue" | "audit";
+type TemplateWorkspaceMode = "structure" | "fields" | "review" | "catalog";
+type ActivityTone = "neutral" | "ok" | "warning" | "error";
+type ActivityItem = {
+  id: string;
+  label: string;
+  message: string;
+  tone: ActivityTone;
+};
+type QueueViewFilter = "all" | QueuedRowStatus;
+type QueueSortMode = "row-asc" | "row-desc" | "job-asc" | "status";
+type AuditModeFilter = "all" | "proof" | "print";
+type AuditProofFilter = "all" | "pending" | "approved" | "rejected" | "missing" | "other";
+type AuditSortMode = "occurred-desc" | "occurred-asc" | "mode" | "proof-status";
+
 type FormState = {
   parentSku: string;
   sku: string;
@@ -43,26 +234,243 @@ type FormState = {
   templateId: string;
   printerProfileId: string;
   actor: string;
+  executionMode: ExecutionMode;
+  executionRequestedBy: string;
+  executionNotes: string;
+  executionApprovedBy: string;
+  executionApprovedAt: string;
+  executionSourceProofJobId: string;
+  executionAllowWithoutProof: boolean;
 };
 
-type DraftSession = {
-  jobId: string;
-  requestedAt: string;
+type DraftSession = { jobId: string; requestedAt: string };
+type TemplateAssetFormState = {
+  parentSku?: string;
+  sku?: string;
+  jan?: string;
+  qty?: string;
+  brand?: string;
+  templateId?: string;
+  printerProfileId?: string;
+  actor?: string;
+  executionMode?: ExecutionMode;
+  executionRequestedBy?: string;
+  executionNotes?: string;
+  executionApprovedBy?: string;
+  executionApprovedAt?: string;
+  executionSourceProofJobId?: string;
+  executionAllowWithoutProof?: boolean;
+};
+type TemplateAssetPayload = {
+  kind: typeof TEMPLATE_ASSET_KIND;
+  schema_version: typeof TEMPLATE_ASSET_SCHEMA_VERSION;
+  exportedAt: string;
+  templateSource: string;
+  formState?: TemplateAssetFormState;
+  fieldMapping?: unknown;
+  draftSnapshot?: PrintJobDraft | null;
+};
+type FormErrorKey =
+  | keyof FormState
+  | "executionApprovedAt"
+  | "executionRequestedBy"
+  | "executionApprovedBy"
+  | "executionSourceProofJobId"
+  | "executionNotes";
+type FormErrors = Partial<Record<FormErrorKey, string>>;
+type FieldKey = "parentSku" | "sku" | "jan" | "qty" | "brand";
+type TemplateSpec = Record<string, unknown>;
+type TemplatePageEditor = {
+  widthMm: number;
+  heightMm: number;
+  backgroundFill: string;
+};
+type TemplateBorderEditor = {
+  visible: boolean;
+  color: string;
+  widthMm: number;
+};
+type TemplateFieldEditor = {
+  name: string;
+  xMm: number;
+  yMm: number;
+  fontSizeMm: number;
+  template: string;
+  color: string;
+};
+type TemplateEditorModel = {
+  labelName: string;
+  description: string;
+  templateVersion: string;
+  page: TemplatePageEditor;
+  border: TemplateBorderEditor;
+  fields: TemplateFieldEditor[];
+};
+type XlsxCellMeta = {
+  isNumeric: boolean;
+  scientific: boolean;
+  decimal: boolean;
+};
+type XlsxSourceMeta = {
+  cellMetaRows: XlsxCellMeta[][];
+};
+type DataSource = {
+  fileName: string;
+  source: "csv" | "xlsx";
+  headers: string[];
+  rows: string[][];
+  xlsxMeta?: XlsxSourceMeta | null;
+};
+type DataRow = Record<string, string>;
+type ColumnMapping = Record<FieldKey, string>;
+type PreparedRow = {
+  rowIndex: number;
+  sourceRow: DataRow;
+  draft: PrintJobDraft | null;
+  errors: string[];
+  warnings: string[];
+  status: PreparedRowStatus;
+  pendingReason: string | null;
+};
+type QueuedRow = PreparedRow & {
+  submissionStatus: QueuedRowStatus;
+  dispatchResult: PrintDispatchResult | null;
+  dispatchError: string | null;
+  retryLineageJobId: string | null;
+};
+type LabelTemplateMeta = {
+  schemaVersion: string;
+  templateVersion: string;
+  labelName: string;
+  description: string;
 };
 
-type FormErrors = Partial<Record<keyof FormState, string>>;
+const defaultTemplateSpec: TemplateSpec = {
+  schema_version: "template-spec-v1",
+  template_version: "basic-50x30@v1",
+  label_name: "basic-label",
+  description: "Editable template spec used by the operator-facing draft builder.",
+  page: { width_mm: 50, height_mm: 30, background_fill: "#ffffff" },
+  fields: [
+    {
+      name: "job",
+      x_mm: 2,
+      y_mm: 5,
+      font_size_mm: 3,
+      template: "job:{job_id}",
+    },
+    {
+      name: "brand",
+      x_mm: 2,
+      y_mm: 10,
+      font_size_mm: 4,
+      template: "brand:{brand}",
+    },
+    { name: "sku", x_mm: 2, y_mm: 15, font_size_mm: 4, template: "sku:{sku}" },
+    { name: "jan", x_mm: 2, y_mm: 20, font_size_mm: 4, template: "jan:{jan}" },
+    { name: "qty", x_mm: 2, y_mm: 25, font_size_mm: 4, template: "qty:{qty}" },
+  ],
+};
+
+const fieldAliases: Record<FieldKey, string[]> = {
+  parentSku: [
+    "parentsku",
+    "parent_sku",
+    "parent-sku",
+    "parentitem",
+    "parent_item",
+    "main_sku",
+    "mainsku",
+    "product_parent",
+  ],
+  sku: ["sku", "itemsku", "item_sku", "item-sku", "product_code", "item_code", "sku_code"],
+  jan: ["jan", "ean", "jan_code", "jancode", "barcode", "bar_code", "upc"],
+  qty: ["qty", "quantity", "qty_ordered", "count", "num", "num_piece", "amount"],
+  brand: ["brand", "maker", "manufacturer", "label", "company", "brand_name"],
+};
+const TEMPLATE_SOURCE_ALIASES = [
+  "template",
+  "template_id",
+  "template-id",
+  "templateversion",
+  "template_version",
+  "template-version",
+];
+const PRINTER_SOURCE_ALIASES = [
+  "printer_profile",
+  "printer-profile",
+  "printerprofile",
+  "printer_id",
+  "printer-id",
+  "printer",
+];
+const ENABLED_SOURCE_ALIASES = [
+  "enabled",
+  "enable",
+  "is_enabled",
+  "is-enabled",
+  "active",
+  "is_active",
+  "isactive",
+];
+const LEGACY_PROOF_JOB_ID_ALIASES = ["proofjobid", "proof_job_id", "proof-job-id", "jobid"];
+const LEGACY_ARTIFACT_PATH_ALIASES = ["artifactpath", "artifact_path", "proofpath", "proof_path"];
+const LEGACY_TEMPLATE_VERSION_ALIASES = ["templateversion", "template_version", "template-version"];
+const LEGACY_REQUESTED_BY_USER_ID_ALIASES = [
+  "requestedbyuserid",
+  "requested_by_user_id",
+  "requested-by-user-id",
+  "requestedby",
+];
+const LEGACY_REQUESTED_BY_DISPLAY_NAME_ALIASES = [
+  "requestedbydisplayname",
+  "requested_by_display_name",
+  "requested-by-display-name",
+  "requestedbyname",
+];
+const LEGACY_REQUESTED_AT_ALIASES = ["requestedat", "requested_at", "requested-at"];
+const LEGACY_JOB_LINEAGE_ID_ALIASES = ["joblineageid", "job_lineage_id", "job-lineage-id"];
+const AUDIT_SEARCH_RESULT_LIMIT = 120;
+const LEGACY_NOTES_ALIASES = ["notes", "note", "memo"];
+
+const requiredFieldList: Array<{ key: FieldKey; label: string }> = [
+  { key: "parentSku", label: "Parent SKU" },
+  { key: "sku", label: "SKU" },
+  { key: "jan", label: "JAN" },
+  { key: "qty", label: "Quantity" },
+  { key: "brand", label: "Brand" },
+];
+
+let sessionNonce = 0;
 
 function createSession(): DraftSession {
   const requestedAt = new Date().toISOString();
-  return {
-    requestedAt,
-    jobId: createJobId(requestedAt),
-  };
+  return { requestedAt, jobId: createJobId(requestedAt, ++sessionNonce) };
 }
 
-function createJobId(requestedAt: string): string {
+function createJobId(requestedAt: string, nonce: number): string {
   const digits = requestedAt.replace(/\D/g, "");
-  return `JOB-${digits.slice(0, 8)}-${digits.slice(8, 14)}`;
+  return `JOB-${digits.slice(0, 8)}-${digits.slice(8, 14)}-${String(nonce).padStart(4, "0")}`;
+}
+
+function makeBatchJobId(requestedAt: string, rowIndex: number): string {
+  return `${createJobId(requestedAt, rowIndex + 1)}-${String(rowIndex + 1).padStart(3, "0")}`;
+}
+
+function createRetriedDraft(
+  draft: PrintJobDraft,
+  rowIndex: number,
+): { draft: PrintJobDraft; lineageJobId: string; retryReason: string } {
+  const requestedAt = new Date().toISOString();
+  return {
+    draft: {
+      ...draft,
+      jobId: makeBatchJobId(requestedAt, rowIndex),
+      requestedAt,
+    },
+    lineageJobId: draft.jobId,
+    retryReason: `retry after failed queued submit from ${draft.jobId}`,
+  };
 }
 
 function createInitialFormState(): FormState {
@@ -75,12 +483,1692 @@ function createInitialFormState(): FormState {
     templateId: templateOptions[0].id,
     printerProfileId: printerProfiles[0].id,
     actor: "ops.user",
+    executionMode: "proof",
+    executionRequestedBy: "",
+    executionNotes: "",
+    executionApprovedBy: "",
+    executionApprovedAt: "",
+    executionSourceProofJobId: "",
+    executionAllowWithoutProof: false,
+  };
+}
+
+function sanitizeTemplateString(raw: string): string {
+  try {
+    return JSON.stringify(JSON.parse(raw), null, 2);
+  } catch {
+    return raw;
+  }
+}
+
+function readString(spec: TemplateSpec, key: string): string {
+  const value = spec[key];
+  return typeof value === "string" ? value : "";
+}
+
+function readNumber(spec: TemplateSpec, key: string): number | null {
+  const value = spec[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(spec: TemplateSpec, key: string): boolean | null {
+  const value = spec[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeTemplateColor(raw: string, fallback = DEFAULT_TEMPLATE_FIELD_COLOR): string {
+  const value = raw.trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value) ? value : fallback;
+}
+
+function parseTemplateEditorModel(spec: TemplateSpec | null): TemplateEditorModel | null {
+  if (!spec) {
+    return null;
+  }
+
+  const pageSpec = isPlainObject(spec.page) ? (spec.page as TemplateSpec) : {};
+  const borderSpec = isPlainObject(spec.border) ? (spec.border as TemplateSpec) : {};
+  const fields = Array.isArray(spec.fields) ? spec.fields : [];
+
+  return {
+    labelName: readString(spec, "label_name"),
+    description: readString(spec, "description"),
+    templateVersion: readString(spec, "template_version"),
+    page: {
+      widthMm: readNumber(pageSpec, "width_mm") ?? 50,
+      heightMm: readNumber(pageSpec, "height_mm") ?? 30,
+      backgroundFill: normalizeTemplateColor(readString(pageSpec, "background_fill"), "#ffffff"),
+    },
+    border: {
+      visible: readBoolean(borderSpec, "visible") ?? false,
+      color: normalizeTemplateColor(readString(borderSpec, "color"), "#000000"),
+      widthMm: readNumber(borderSpec, "width_mm") ?? 0.2,
+    },
+    fields: fields.map((field, index) => {
+      const candidate = isPlainObject(field) ? (field as TemplateSpec) : {};
+      return {
+        name: readString(candidate, "name") || `field_${index + 1}`,
+        xMm: readNumber(candidate, "x_mm") ?? 0,
+        yMm: readNumber(candidate, "y_mm") ?? 0,
+        fontSizeMm: readNumber(candidate, "font_size_mm") ?? 3,
+        template: readString(candidate, "template") || "{sku}",
+        color: normalizeTemplateColor(readString(candidate, "color")),
+      };
+    }),
+  };
+}
+
+function createTemplateField(partial: Partial<TemplateFieldEditor> = {}): TemplateFieldEditor {
+  return {
+    name: partial.name ?? "text",
+    xMm: partial.xMm ?? 2,
+    yMm: partial.yMm ?? 2,
+    fontSizeMm: partial.fontSizeMm ?? 3,
+    template: partial.template ?? "text:{sku}",
+    color: partial.color ?? DEFAULT_TEMPLATE_FIELD_COLOR,
+  };
+}
+
+function updateTemplateSpecSource(
+  raw: string,
+  mutate: (spec: TemplateSpec) => void,
+): { next: string | null; error: string | null } {
+  const parsed = parseTemplateSpec(raw);
+  if (parsed.error || !parsed.spec) {
+    return {
+      next: null,
+      error: parsed.error ?? "Template JSON must be valid before using the structured editor.",
+    };
+  }
+  const nextSpec = structuredClone(parsed.spec);
+  mutate(nextSpec);
+  return {
+    next: sanitizeTemplateString(JSON.stringify(nextSpec)),
+    error: null,
+  };
+}
+
+function buildTemplatePreviewBindings(input: {
+  draft: PrintJobDraft | null;
+  form: FormState;
+  session: DraftSession;
+  resolvedTemplateRef: LabelTemplateRef | null;
+}): Record<(typeof TEMPLATE_PREVIEW_PLACEHOLDERS)[number], string> {
+  const normalizedJan = input.draft?.jan.normalized || input.form.jan.trim();
+  return {
+    job_id: input.draft?.jobId || input.session.jobId,
+    parent_sku: input.draft?.parentSku || input.form.parentSku.trim() || "PARENT-SKU",
+    sku: input.draft?.sku || input.form.sku.trim() || "SKU-0001",
+    jan: normalizedJan || "4901234567894",
+    qty: input.draft ? String(input.draft.qty) : input.form.qty.trim() || "1",
+    brand: input.draft?.brand || input.form.brand.trim() || "Brand",
+    template_version:
+      (input.draft?.template ? templateVersionOf(input.draft.template) : null) ||
+      (input.resolvedTemplateRef ? templateVersionOf(input.resolvedTemplateRef) : null) ||
+      "basic-50x30@v1",
+  };
+}
+
+function buildTemplateDraftPreviewRequest(input: {
+  templateSource: string;
+  draft: PrintJobDraft | null;
+  form: FormState;
+  session: DraftSession;
+}): TemplateDraftPreviewRequest {
+  const qtyValue = input.draft?.qty ?? Number.parseInt(input.form.qty.trim(), 10);
+  return {
+    templateSource: input.templateSource,
+    sample: {
+      jobId: input.draft?.jobId || input.session.jobId,
+      sku: input.draft?.sku || input.form.sku.trim() || "SKU-0001",
+      brand: input.draft?.brand || input.form.brand.trim() || "Brand",
+      jan: input.draft?.jan.normalized || input.form.jan.trim() || "4901234567894",
+      qty: Number.isFinite(qtyValue) && qtyValue > 0 ? qtyValue : 1,
+    },
+  };
+}
+
+function renderTemplatePreviewText(template: string, bindings: Record<string, string>): string {
+  const rendered = template.replace(/\{([^}]+)\}/g, (_, key: string) => {
+    const value = bindings[key];
+    return value && value.trim().length > 0 ? value : `{${key}}`;
+  });
+  return rendered.trim() || template;
+}
+
+function extractTemplatePlaceholders(template: string): string[] {
+  const placeholders = new Set<string>();
+  for (const match of template.matchAll(/\{([^}]+)\}/g)) {
+    const token = match[1]?.trim();
+    if (token) {
+      placeholders.add(token);
+    }
+  }
+  return Array.from(placeholders);
+}
+
+function validateStructuredTemplateSemantics(spec: TemplateSpec): string[] {
+  const model = parseTemplateEditorModel(spec);
+  if (!model) {
+    return ["template JSON could not be mapped into the structured editor model."];
+  }
+
+  const issues: string[] = [];
+  const names = new Set<string>();
+
+  for (const field of model.fields) {
+    if (names.has(field.name)) {
+      issues.push(`field '${field.name}' is duplicated.`);
+    }
+    names.add(field.name);
+
+    if (field.xMm > model.page.widthMm || field.yMm > model.page.heightMm) {
+      issues.push(
+        `field '${field.name}' is outside the page bounds (${field.xMm}mm, ${field.yMm}mm on ${model.page.widthMm}mm x ${model.page.heightMm}mm).`,
+      );
+    }
+
+    for (const token of extractTemplatePlaceholders(field.template)) {
+      if ((RUST_RENDER_PLACEHOLDERS as readonly string[]).includes(token)) {
+        continue;
+      }
+      if ((LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS as readonly string[]).includes(token)) {
+        issues.push(
+          `field '${field.name}' uses preview-only placeholder '{${token}}'; Rust proof/PDF output will not substitute it.`,
+        );
+        continue;
+      }
+      issues.push(`field '${field.name}' uses unsupported placeholder '{${token}}'.`);
+    }
+  }
+
+  return issues;
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function normalizeTemplateAssetFormState(raw: unknown): Partial<FormState> {
+  const candidate = isPlainObject(raw) ? raw : null;
+  if (!candidate) {
+    return {};
+  }
+  const normalized: Partial<FormState> = {};
+  if (typeof candidate.parentSku === "string") normalized.parentSku = candidate.parentSku;
+  if (typeof candidate.sku === "string") normalized.sku = candidate.sku;
+  if (typeof candidate.jan === "string") normalized.jan = candidate.jan;
+  if (typeof candidate.qty === "string") normalized.qty = candidate.qty;
+  if (typeof candidate.brand === "string") normalized.brand = candidate.brand;
+  if (typeof candidate.templateId === "string") normalized.templateId = candidate.templateId;
+  if (typeof candidate.printerProfileId === "string")
+    normalized.printerProfileId = candidate.printerProfileId;
+  if (typeof candidate.actor === "string") normalized.actor = candidate.actor;
+  if (candidate.executionMode === "proof" || candidate.executionMode === "print") {
+    normalized.executionMode = candidate.executionMode;
+  }
+  if (typeof candidate.executionRequestedBy === "string") {
+    normalized.executionRequestedBy = candidate.executionRequestedBy;
+  }
+  if (typeof candidate.executionNotes === "string")
+    normalized.executionNotes = candidate.executionNotes;
+  if (typeof candidate.executionApprovedBy === "string")
+    normalized.executionApprovedBy = candidate.executionApprovedBy;
+  if (typeof candidate.executionApprovedAt === "string")
+    normalized.executionApprovedAt = candidate.executionApprovedAt;
+  if (typeof candidate.executionSourceProofJobId === "string") {
+    normalized.executionSourceProofJobId = candidate.executionSourceProofJobId;
+  }
+  if (typeof candidate.executionAllowWithoutProof === "boolean") {
+    normalized.executionAllowWithoutProof = candidate.executionAllowWithoutProof;
+  }
+  return normalized;
+}
+
+function parseDraftSnapshot(raw: unknown): PrintJobDraft | null {
+  if (!isPlainObject(raw)) return null;
+  const draft = raw as Partial<PrintJobDraft>;
+  if (typeof draft.jobId !== "string" || draft.jobId.length === 0) return null;
+  if (typeof draft.parentSku !== "string") return null;
+  if (typeof draft.sku !== "string") return null;
+  if (!isPlainObject(draft.jan)) return null;
+  if (typeof draft.jan.raw !== "string" || typeof draft.jan.normalized !== "string") return null;
+  if (!["manual", "import"].includes(draft.jan.source ?? "")) return null;
+  if (typeof draft.qty !== "number" || !Number.isFinite(draft.qty)) return null;
+  if (typeof draft.brand !== "string") return null;
+  if (
+    !isPlainObject(draft.template) ||
+    typeof draft.template.id !== "string" ||
+    typeof draft.template.version !== "string"
+  )
+    return null;
+  if (!isPlainObject(draft.printerProfile)) return null;
+  if (typeof draft.actor !== "string") return null;
+  if (typeof draft.requestedAt !== "string") return null;
+  return draft as PrintJobDraft;
+}
+
+function parseTemplateAsset(rawText: string):
+  | {
+      ok: true;
+      templateSource: string;
+      formState: Partial<FormState> | null;
+      fieldMapping: ColumnMapping | null;
+      draftSnapshot: PrintJobDraft | null;
+      error: null;
+    }
+  | { ok: false; error: string } {
+  const parsed = safeParseJson<unknown>(rawText);
+  if (parsed === null) {
+    return { ok: false, error: "Template import failed: invalid JSON." };
+  }
+
+  if (!isPlainObject(parsed)) {
+    return {
+      ok: false,
+      error: "Template import failed: expected a JSON object.",
+    };
+  }
+
+  const candidate = parsed;
+  const likelyAsset =
+    candidate.kind === TEMPLATE_ASSET_KIND ||
+    candidate.schema_version === TEMPLATE_ASSET_SCHEMA_VERSION ||
+    candidate.formState !== undefined ||
+    candidate.fieldMapping !== undefined;
+
+  let templateSource: string | null = null;
+  if (likelyAsset) {
+    const templateText =
+      typeof candidate.templateSource === "string"
+        ? candidate.templateSource
+        : isPlainObject(candidate.template)
+          ? JSON.stringify(candidate.template)
+          : typeof candidate.template === "string"
+            ? candidate.template
+            : null;
+    if (typeof templateText !== "string") {
+      return {
+        ok: false,
+        error: "Template asset import requires `templateSource` or `template`.",
+      };
+    }
+    templateSource = sanitizeTemplateString(templateText);
+  } else {
+    try {
+      templateSource = sanitizeTemplateString(rawText);
+    } catch {
+      return { ok: false, error: "Template import failed: invalid JSON." };
+    }
+  }
+
+  const parsedTemplate = parseTemplateSpec(templateSource);
+  if (parsedTemplate.error || !parsedTemplate.spec) {
+    return {
+      ok: false,
+      error: parsedTemplate.error ?? "Template import failed: template spec is invalid.",
+    };
+  }
+
+  return {
+    ok: true,
+    templateSource,
+    formState: likelyAsset
+      ? normalizeTemplateAssetFormState((candidate.formState ?? candidate.form) as unknown)
+      : null,
+    fieldMapping: isPlainObject(candidate.fieldMapping)
+      ? normalizeColumnMapping(candidate.fieldMapping)
+      : isPlainObject(candidate.mapping)
+        ? normalizeColumnMapping(candidate.mapping)
+        : null,
+    draftSnapshot: parseDraftSnapshot(candidate.draftSnapshot),
+    error: null,
+  };
+}
+
+function normalizeHeader(raw: string): string {
+  return raw
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function findSourceKey(row: DataRow, aliases: string[]): string | null {
+  const normalizedCandidates = aliases.map((alias) => normalizeHeader(alias));
+  return (
+    Object.keys(row).find((key) => {
+      const normalizedKey = normalizeHeader(key);
+      return normalizedCandidates.includes(normalizedKey);
+    }) ?? null
+  );
+}
+
+function readSourceValue(row: DataRow, aliases: string[]): string {
+  const sourceKey = findSourceKey(row, aliases);
+  if (!sourceKey) {
+    return "";
+  }
+  return (row[sourceKey] ?? "").trim();
+}
+
+function resolveEnabledSourceValue(row: DataRow): {
+  enabled: boolean;
+  invalid: boolean;
+  reason: string | null;
+} {
+  const sourceKey = findSourceKey(row, ENABLED_SOURCE_ALIASES);
+  if (!sourceKey) {
+    return { enabled: true, invalid: false, reason: null };
+  }
+
+  const raw = (row[sourceKey] ?? "").trim();
+  if (raw === "") {
+    return {
+      enabled: false,
+      invalid: true,
+      reason: `Enabled column '${sourceKey}' must be 'true' or 'false'.`,
+    };
+  }
+
+  if (raw.toLowerCase() === "true") {
+    return { enabled: true, invalid: false, reason: null };
+  }
+
+  if (raw.toLowerCase() === "false") {
+    return {
+      enabled: false,
+      invalid: false,
+      reason: "Row disabled by enabled column.",
+    };
+  }
+
+  return {
+    enabled: false,
+    invalid: true,
+    reason: `Enabled column '${sourceKey}' must be 'true' or 'false', got '${raw}'.`,
+  };
+}
+
+function extractJanDigits(raw: string): string | null {
+  const trimmed = raw.trim();
+  return /^\d{12,13}$/.test(trimmed) ? trimmed : null;
+}
+
+function spreadsheetCellToString(cell: unknown): string {
+  if (cell === null || cell === undefined) {
+    return "";
+  }
+
+  if (typeof cell === "string") {
+    return cell.trim();
+  }
+
+  if (typeof cell === "number" || typeof cell === "boolean" || typeof cell === "bigint") {
+    return String(cell);
+  }
+
+  if (typeof cell === "object") {
+    const candidate = cell as { w?: unknown; v?: unknown };
+    if (typeof candidate.w === "string" && candidate.w.trim().length > 0) {
+      return candidate.w.trim();
+    }
+    if (candidate.v !== undefined && candidate.v !== null) {
+      return String(candidate.v).trim();
+    }
+  }
+
+  return String(cell).trim();
+}
+
+function spreadsheetCellMeta(cell: unknown): XlsxCellMeta {
+  if (cell === null || cell === undefined) {
+    return { isNumeric: false, scientific: false, decimal: false };
+  }
+
+  if (typeof cell === "number") {
+    const text = String(cell);
+    return {
+      isNumeric: true,
+      scientific: /e/i.test(text),
+      decimal: !Number.isInteger(cell),
+    };
+  }
+
+  if (typeof cell !== "object") {
+    return { isNumeric: false, scientific: false, decimal: false };
+  }
+
+  const candidate = cell as { t?: unknown; w?: unknown; v?: unknown };
+  const formatted = typeof candidate.w === "string" ? candidate.w.trim() : "";
+  const numericValue = typeof candidate.v === "number" ? candidate.v : null;
+  const isNumeric = candidate.t === "n" || numericValue !== null;
+  if (!isNumeric) {
+    return { isNumeric: false, scientific: false, decimal: false };
+  }
+
+  return {
+    isNumeric: true,
+    scientific:
+      /e[+-]?\d+/i.test(formatted) ||
+      (typeof numericValue === "number" && /e/i.test(String(numericValue))),
+    decimal:
+      (formatted.includes(".") && /\d\.\d/.test(formatted)) ||
+      (typeof numericValue === "number" && !Number.isInteger(numericValue)),
+  };
+}
+
+function normalizeBridgeWarningSeverity(warning: string): BridgeWarning["severity"] {
+  if (NON_BLOCKING_WARNING_PATTERNS.some((pattern) => pattern.test(warning))) {
+    return "info";
+  }
+  return HIGH_RISK_BRIDGE_WARNING_PATTERNS.some((pattern) => pattern.test(warning))
+    ? "error"
+    : "warning";
+}
+
+function normalizeBridgeWarnings(status: PrintBridgeStatus | null): BridgeWarning[] {
+  if (!status) {
+    return [];
+  }
+  if (status.warningDetails && status.warningDetails.length > 0) {
+    return status.warningDetails;
+  }
+  return status.warnings.map((warning, index) => ({
+    code: `LEGACY_WARNING_${index + 1}`,
+    severity: normalizeBridgeWarningSeverity(warning),
+    message: warning,
+  }));
+}
+
+function isBlockingBridgeWarning(warning: BridgeWarning): boolean {
+  return warning.severity === "error";
+}
+
+function resolveTemplateFromSourceValue(
+  raw: string,
+  fallback: LabelTemplateRef | null,
+  templates: LabelTemplateRef[],
+): { template: LabelTemplateRef | null; reason: string | null } {
+  const value = raw.trim();
+  if (!value) {
+    if (fallback) {
+      return { template: fallback, reason: null };
+    }
+    return {
+      template: null,
+      reason: "Template is missing and no fallback is selected.",
+    };
+  }
+
+  const at = value.lastIndexOf("@");
+  const parsed: LabelTemplateRef =
+    at > 0 && at < value.length - 1
+      ? { id: value.slice(0, at).trim(), version: value.slice(at + 1).trim() }
+      : { id: value.trim(), version: "" };
+
+  const exact = templates.find((option) =>
+    parsed.version
+      ? option.id === parsed.id && option.version === parsed.version
+      : option.id === parsed.id,
+  );
+  if (exact) {
+    return { template: exact, reason: null };
+  }
+
+  if (!parsed.version && fallback && fallback.id === parsed.id) {
+    return { template: fallback, reason: null };
+  }
+
+  return {
+    template: null,
+    reason: `Template override '${value}' is unknown. Use template_id[@version] from available templates.`,
+  };
+}
+
+function buildTemplateCatalogBlockMessage(issue: string): string {
+  return `${TEMPLATE_CATALOG_BLOCK_PREFIX} ${issue}`;
+}
+
+function catalogSourceFromVersion(
+  options: TemplateOption[],
+  templateVersion: string | null,
+): NonNullable<TemplateOption["catalogSource"]> {
+  if (!templateVersion) {
+    return "unknown";
+  }
+  const matched = options.find((option) => templateVersionOf(option) === templateVersion);
+  return matched?.catalogSource ?? "unknown";
+}
+
+function buildTemplateSourceSummary(options: TemplateOption[]): string {
+  const counts = options.reduce(
+    (acc, option) => {
+      const source = option.catalogSource ?? "unknown";
+      acc[source] = (acc[source] || 0) + 1;
+      return acc;
+    },
+    { packaged: 0, local: 0, unknown: 0 } as Record<"packaged" | "local" | "unknown", number>,
+  );
+  const packaged = `${counts.packaged} packaged`;
+  const local = `${counts.local} local`;
+  const unknown = counts.unknown > 0 ? `, ${counts.unknown} unknown` : "";
+  return `${packaged}, ${local}${unknown}`;
+}
+
+function isTemplateCatalogBlockedQueuedRow(row: QueuedRow): boolean {
+  return Boolean(row.dispatchError?.startsWith(TEMPLATE_CATALOG_BLOCK_PREFIX));
+}
+
+function resolvePrinterFromSourceValue(
+  raw: string,
+  fallback: PrinterProfile | null,
+  printers: PrinterProfile[],
+): { printer: PrinterProfile | null; reason: string | null } {
+  const value = raw.trim();
+  if (!value) {
+    if (fallback) {
+      return { printer: fallback, reason: null };
+    }
+    return {
+      printer: null,
+      reason: "Printer profile is missing and no fallback is selected.",
+    };
+  }
+  const exact = printers.find((option) => option.id === value);
+  if (exact) {
+    return { printer: exact, reason: null };
+  }
+  return {
+    printer: null,
+    reason: `Printer override '${value}' is unknown. Use printer_profile id from available printer list.`,
+  };
+}
+
+function parseTemplateSpec(raw: string): {
+  spec: TemplateSpec | null;
+  error: string | null;
+} {
+  try {
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return { spec: null, error: "Template file must be a JSON object." };
+    }
+    return { spec: parsed as TemplateSpec, error: null };
+  } catch {
+    return {
+      spec: null,
+      error: "Invalid JSON. Please fix syntax before continuing.",
+    };
+  }
+}
+
+function parseTemplateRef(spec: TemplateSpec | null): LabelTemplateRef | null {
+  if (!spec) {
+    return null;
+  }
+  return parseTemplateVersionValue(readString(spec, "template_version"));
+}
+
+function parseTemplateVersionValue(versionValue: string): LabelTemplateRef | null {
+  const at = versionValue.lastIndexOf("@");
+  if (at <= 0 || at >= versionValue.length - 1) {
+    return null;
+  }
+  return {
+    id: versionValue.slice(0, at).trim(),
+    version: versionValue.slice(at + 1).trim(),
+  };
+}
+
+function toTemplateOptionsFromCatalog(catalog: TemplateCatalogResult): TemplateOption[] {
+  return catalog.templates.reduce<TemplateOption[]>((options, entry) => {
+    const ref = parseTemplateVersionValue(entry.version);
+    if (!ref) {
+      return options;
+    }
+    const source = entry.source ?? "unknown";
+    options.push({
+      ...ref,
+      label: entry.labelName,
+      size: entry.version,
+      catalogSource:
+        source === "packaged" || source === "local" || source === "unknown"
+          ? source
+          : packagedTemplateVersions.has(entry.version)
+            ? "packaged"
+            : "local",
+      description: entry.description ?? null,
+    });
+    return options;
+  }, []);
+}
+
+function templateMeta(spec: TemplateSpec | null): LabelTemplateMeta | null {
+  if (!spec) {
+    return null;
+  }
+  const schemaVersion = readString(spec, "schema_version");
+  const templateVersion = readString(spec, "template_version");
+  const labelName = readString(spec, "label_name");
+  const description = readString(spec, "description");
+  if (!schemaVersion && !templateVersion && !labelName && !description) {
+    return null;
+  }
+  return {
+    schemaVersion: schemaVersion || "missing",
+    templateVersion: templateVersion || "missing",
+    labelName: labelName || "missing",
+    description,
+  };
+}
+
+function queuedRowStatusClass(status: QueuedRowStatus): string {
+  switch (status) {
+    case "ready":
+      return "status-ok";
+    case "submitting":
+      return "status-submitting";
+    case "submitted":
+      return "status-ok";
+    case "failed":
+      return "status-fail";
+    default:
+      return "";
+  }
+}
+
+function queuedRowStatusRank(status: QueuedRowStatus): number {
+  switch (status) {
+    case "submitting":
+      return 0;
+    case "failed":
+      return 1;
+    case "ready":
+      return 2;
+    case "submitted":
+      return 3;
+    default:
+      return 99;
+  }
+}
+
+function formatQueuedRowResult(row: QueuedRow): string {
+  if (row.dispatchResult) {
+    return `Dispatch accepted (${row.dispatchResult.mode} / ${row.dispatchResult.submission.externalJobId})`;
+  }
+  if (row.dispatchError) {
+    return `Failed: ${row.dispatchError}`;
+  }
+  if (row.submissionStatus === "ready") {
+    return "Ready";
+  }
+  if (row.submissionStatus === "submitting") {
+    return "Submitting...";
+  }
+  return "Not submitted";
+}
+
+function matchesQueueSearch(row: QueuedRow, searchText: string): boolean {
+  const normalized = searchText.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  const values = [
+    row.draft?.jobId,
+    row.draft?.sku,
+    row.draft?.brand,
+    row.draft?.jan.normalized,
+    row.draft ? templateVersionOf(row.draft.template) : null,
+    row.dispatchError,
+    row.dispatchResult?.audit.jobId,
+    row.dispatchResult?.submission.externalJobId,
+  ];
+  return values.some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function compareQueuedRows(left: QueuedRow, right: QueuedRow, sortMode: QueueSortMode): number {
+  switch (sortMode) {
+    case "row-desc":
+      return right.rowIndex - left.rowIndex;
+    case "job-asc":
+      return (left.draft?.jobId ?? "").localeCompare(right.draft?.jobId ?? "");
+    case "status":
+      return (
+        queuedRowStatusRank(left.submissionStatus) - queuedRowStatusRank(right.submissionStatus) ||
+        left.rowIndex - right.rowIndex
+      );
+    default:
+      return left.rowIndex - right.rowIndex;
+  }
+}
+
+function auditProofFilterValue(entry: AuditSearchEntry): AuditProofFilter {
+  if (!entry.proof) {
+    return "missing";
+  }
+  if (entry.proof.status === "pending") {
+    return "pending";
+  }
+  if (entry.proof.status === "approved") {
+    return "approved";
+  }
+  if (entry.proof.status === "rejected") {
+    return "rejected";
+  }
+  return "other";
+}
+
+function auditProofStatusRank(entry: AuditSearchEntry): number {
+  switch (auditProofFilterValue(entry)) {
+    case "pending":
+      return 0;
+    case "approved":
+      return 1;
+    case "rejected":
+      return 2;
+    case "other":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareAuditEntries(
+  left: AuditSearchEntry,
+  right: AuditSearchEntry,
+  sortMode: AuditSortMode,
+): number {
+  switch (sortMode) {
+    case "occurred-asc":
+      return left.dispatch.audit.occurredAt.localeCompare(right.dispatch.audit.occurredAt);
+    case "mode":
+      return (
+        left.dispatch.mode.localeCompare(right.dispatch.mode) ||
+        right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt)
+      );
+    case "proof-status":
+      return (
+        auditProofStatusRank(left) - auditProofStatusRank(right) ||
+        right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt)
+      );
+    default:
+      return right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt);
+  }
+}
+
+function pageCount(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function clampPage(page: number, total: number, pageSize: number): number {
+  return Math.min(Math.max(page, 1), pageCount(total, pageSize));
+}
+
+function pickTemplateRef(
+  formTemplateId: string,
+  parsedTemplate: LabelTemplateRef | null,
+  templates: LabelTemplateRef[],
+): LabelTemplateRef | null {
+  if (parsedTemplate) {
+    return parsedTemplate;
+  }
+  return templates.find((option) => option.id === formTemplateId) ?? null;
+}
+
+type ParsedCsv = { headers: string[]; rows: string[][] };
+
+type PersistedTemplatePayload = {
+  templateSource: string;
+};
+type PersistedMappingPayload = {
+  mapping: ColumnMapping;
+};
+type PersistedSourcePayload = {
+  sourceData: Omit<DataSource, "rows"> & {
+    rows: string[][];
+    source: "csv" | "xlsx";
+    xlsxMeta?: XlsxSourceMeta | null;
+  };
+  rowsTruncated: boolean;
+  originalRowCount: number;
+};
+
+const defaultTemplateSource = () => sanitizeTemplateString(JSON.stringify(defaultTemplateSpec));
+
+function isBrowserStorageAvailable(): boolean {
+  return typeof window !== "undefined" && typeof window.localStorage !== "undefined";
+}
+
+function safeParseJson<T>(value: string | null): T | null {
+  if (!value) {
+    return null;
+  }
+  try {
+    return JSON.parse(value) as T;
+  } catch {
+    return null;
+  }
+}
+
+function readStorageItem<T>(key: string): PersistedItem<T> | null {
+  if (!isBrowserStorageAvailable()) {
+    return null;
+  }
+  const value = localStorage.getItem(key);
+  const parsed = safeParseJson<PersistedItem<T>>(value);
+  if (!parsed?.data || typeof parsed.savedAt !== "string") {
+    return null;
+  }
+  return parsed;
+}
+
+function writeStorageItem<T>(key: string, data: T): void {
+  if (!isBrowserStorageAvailable()) {
+    return;
+  }
+  try {
+    const payload = JSON.stringify({
+      data,
+      savedAt: new Date().toISOString(),
+    });
+    localStorage.setItem(key, payload);
+  } catch {
+    // Intentionally ignore storage failures (for example quota limits), preserving operator flow.
+  }
+}
+
+function removeStorageItem(key: string): void {
+  if (!isBrowserStorageAvailable()) {
+    return;
+  }
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    // Ignore for resilience.
+  }
+}
+
+function formatSavedAt(value: string | null): string {
+  if (!value) {
+    return "never";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return value;
+  }
+  return parsed.toLocaleString();
+}
+
+function formatAuditBundleSize(sizeBytes: number): string {
+  if (!Number.isFinite(sizeBytes) || sizeBytes < 0) {
+    return "-";
+  }
+  if (sizeBytes === 0) {
+    return "0 B";
+  }
+  const units = ["B", "KB", "MB", "GB"];
+  let unitIndex = 0;
+  let bytes = sizeBytes;
+  while (bytes >= 1024 && unitIndex < units.length - 1) {
+    bytes /= 1024;
+    unitIndex += 1;
+  }
+  if (unitIndex === 0) {
+    return `${bytes.toFixed(0)} ${units[unitIndex]}`;
+  }
+  return `${bytes.toFixed(bytes >= 10 ? 1 : 2)} ${units[unitIndex]}`;
+}
+
+function toDateTimeLocalInput(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "";
+  }
+  const offset = parsed.getTimezoneOffset() * 60_000;
+  return new Date(parsed.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function proofStatusClass(status: string | null | undefined): string {
+  switch (status) {
+    case "approved":
+      return "status-ok";
+    case "pending":
+      return "status-pending";
+    case "rejected":
+    case "superseded":
+      return "status-fail";
+    default:
+      return "";
+  }
+}
+
+function normalizeXlsxSourceMeta(raw: unknown): XlsxSourceMeta | null {
+  if (!isPlainObject(raw) || !Array.isArray(raw.cellMetaRows)) {
+    return null;
+  }
+  return {
+    cellMetaRows: raw.cellMetaRows.map((row) =>
+      Array.isArray(row)
+        ? row.map((cell) => ({
+            isNumeric: Boolean((cell as XlsxCellMeta | null)?.isNumeric),
+            scientific: Boolean((cell as XlsxCellMeta | null)?.scientific),
+            decimal: Boolean((cell as XlsxCellMeta | null)?.decimal),
+          }))
+        : [],
+    ),
+  };
+}
+
+function normalizeColumnMapping(raw: unknown): ColumnMapping {
+  const empty: ColumnMapping = {
+    parentSku: "",
+    sku: "",
+    jan: "",
+    qty: "",
+    brand: "",
+  };
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) {
+    return empty;
+  }
+  for (const key of Object.keys(empty) as FieldKey[]) {
+    const candidate = (raw as Record<string, unknown>)[key];
+    if (typeof candidate === "string") {
+      empty[key] = candidate.trim();
+    }
+  }
+  return empty;
+}
+
+function sanitizeTemplateDraft(raw: string): string {
+  const parsed = safeParseJson<TemplateSpec>(raw);
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return raw;
+  }
+  return sanitizeTemplateString(raw);
+}
+
+function validateTemplateSource(raw: string): {
+  status: "ok" | "stale" | "invalid";
+  message: string | null;
+} {
+  const parsed = parseTemplateSpec(raw);
+  if (parsed.error || !parsed.spec) {
+    return {
+      status: "invalid",
+      message: parsed.error ?? "Template draft cannot be parsed as JSON.",
+    };
+  }
+  const spec = parsed.spec;
+  const templateRef = parseTemplateRef(spec);
+  const schemaVersion = readString(spec, "schema_version");
+  const templateVersion = readString(spec, "template_version");
+  const detail: string[] = [];
+  if (!templateRef) {
+    detail.push("template_version is missing or invalid (expected template-id@version).");
+  }
+  if (!schemaVersion) {
+    detail.push(`schema_version is missing (expected ${TEMPLATE_SCHEMA_VERSION}).`);
+  } else if (schemaVersion !== TEMPLATE_SCHEMA_VERSION) {
+    detail.push(`schema_version is ${schemaVersion}; expected ${TEMPLATE_SCHEMA_VERSION}.`);
+  }
+  if (!templateVersion) {
+    detail.push("template_version is missing.");
+  }
+  if (detail.length > 0) {
+    return templateRef
+      ? { status: "stale", message: detail.join(" ") }
+      : { status: "invalid", message: detail.join(" ") };
+  }
+  const semanticIssues = validateStructuredTemplateSemantics(spec);
+  if (semanticIssues.length > 0) {
+    return {
+      status: "invalid",
+      message: semanticIssues.join(" "),
+    };
+  }
+  return { status: "ok", message: null };
+}
+
+function loadTemplateDraftFromStorage(): {
+  templateSource: string;
+  status: PersistedTemplateStatus;
+} {
+  const stored = readStorageItem<PersistedTemplatePayload>(STORAGE_KEYS.template);
+  if (!stored) {
+    const templateSource = defaultTemplateSource();
+    return {
+      templateSource,
+      status: { savedAt: null, status: "none", message: null },
+    };
+  }
+  const templateSource = sanitizeTemplateDraft(stored.data.templateSource);
+  const validation = validateTemplateSource(templateSource);
+  const savedAt = stored.savedAt || null;
+  return {
+    templateSource,
+    status: {
+      savedAt,
+      status: validation.status,
+      message:
+        validation.status === "ok"
+          ? "Saved template draft restored."
+          : `Saved template draft restored with ${validation.status} validation issue: ${validation.message}`,
+    },
+  };
+}
+
+function loadColumnMappingFromStorage(): {
+  mapping: ColumnMapping;
+  status: PersistedTemplateStatus;
+} {
+  const stored = readStorageItem<PersistedMappingPayload>(STORAGE_KEYS.mapping);
+  const mapping = normalizeColumnMapping(stored?.data.mapping);
+  const hasStorage = !!stored;
+  return {
+    mapping,
+    status: {
+      savedAt: stored?.savedAt ?? null,
+      status: hasStorage ? "ok" : "none",
+      message: hasStorage ? "Saved column mapping loaded." : null,
+    },
+  };
+}
+
+function restoreSourceFromStorage(): {
+  source: DataSource | null;
+  status: PersistedSourceStatus;
+} {
+  const stored = readStorageItem<PersistedSourcePayload>(STORAGE_KEYS.source);
+  if (!stored) {
+    return {
+      source: null,
+      status: {
+        savedAt: null,
+        status: "none",
+        message: null,
+        rowsTruncated: false,
+      },
+    };
+  }
+
+  const data = stored.data?.sourceData;
+  if (
+    !data ||
+    typeof data.fileName !== "string" ||
+    (data.source !== "csv" && data.source !== "xlsx") ||
+    !Array.isArray(data.headers) ||
+    !Array.isArray(data.rows)
+  ) {
+    return {
+      source: null,
+      status: {
+        savedAt: stored.savedAt ?? null,
+        status: "invalid",
+        message: "Saved source data shape is invalid.",
+        rowsTruncated: false,
+      },
+    };
+  }
+  const cleanedHeaders = (data.headers as unknown[])
+    .map((header: unknown) => String(header ?? "").trim())
+    .filter((header) => header.length > 0);
+  const cleanedRows = data.rows
+    .map((row: unknown) =>
+      Array.isArray(row) ? row.map((cell: unknown) => String(cell ?? "").trim()) : [],
+    )
+    .filter((row: string[]) => row.length > 0 && row.some((cell) => cell.length > 0))
+    .slice(0, MAX_PERSISTED_SOURCE_ROWS);
+  return {
+    source: {
+      fileName: data.fileName,
+      source: data.source,
+      headers: cleanedHeaders,
+      rows: cleanedRows,
+      xlsxMeta: normalizeXlsxSourceMeta(data.xlsxMeta),
+    },
+    status: {
+      savedAt: stored.savedAt ?? null,
+      status: "ok",
+      message:
+        stored.data.rowsTruncated || stored.data.originalRowCount > MAX_PERSISTED_SOURCE_ROWS
+          ? `Source restored partially. Only first ${MAX_PERSISTED_SOURCE_ROWS} rows kept in local storage.`
+          : "Saved source review state restored.",
+      rowsTruncated:
+        stored.data.rowsTruncated || stored.data.originalRowCount > MAX_PERSISTED_SOURCE_ROWS,
+    },
+  };
+}
+
+function parseCsvRows(content: string): ParsedCsv {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let current = "";
+  let inQuotes = false;
+
+  const pushField = () => {
+    row.push(current);
+    current = "";
+  };
+
+  const pushRow = () => {
+    if (row.length > 1 || (row.length === 1 && row[0].trim() !== "")) {
+      rows.push(row.map((cell) => cell.trim()));
+    }
+    row = [];
+  };
+
+  for (let i = 0; i <= content.length; i += 1) {
+    const char = content[i] ?? "\n";
+    if (char === '"') {
+      if (content[i + 1] === '"') {
+        current += '"';
+        i += 1;
+        continue;
+      }
+      inQuotes = !inQuotes;
+      continue;
+    }
+    if (char === "," && !inQuotes) {
+      pushField();
+      continue;
+    }
+    if ((char === "\n" || char === "\r") && !inQuotes) {
+      if (char === "\r" && content[i + 1] === "\n") {
+        i += 1;
+      }
+      pushField();
+      pushRow();
+      continue;
+    }
+    current += char;
+  }
+
+  const nonEmptyRows = rows.filter((entry) => entry.some((cell) => cell.length > 0));
+  if (nonEmptyRows.length === 0) {
+    throw new Error("No rows found in CSV source.");
+  }
+  const normalizedHeaders = nonEmptyRows[0].map((header) => header.trim());
+  if (normalizedHeaders.length === 0 || normalizedHeaders.every((header) => header === "")) {
+    throw new Error("CSV header row is empty.");
+  }
+  return {
+    headers: normalizedHeaders,
+    rows: nonEmptyRows.slice(1).filter((rowData) => rowData.length > 0),
+  };
+}
+
+function parseUploadedData(file: File): Promise<DataSource> {
+  return new Promise((resolve, reject) => {
+    const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
+    const isXlsx = extension === "xlsx" || extension === "xls";
+    const isCsv = extension === "csv" || extension === "txt";
+
+    if (isCsv) {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("CSV file read failed."));
+      reader.onload = () => {
+        const text = String(reader.result || "");
+        try {
+          const rows = parseCsvRows(text);
+          resolve({
+            fileName: file.name,
+            source: "csv",
+            headers: rows.headers,
+            rows: rows.rows,
+            xlsxMeta: null,
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("Failed to parse CSV file."));
+        }
+      };
+      reader.readAsText(file, "utf-8");
+      return;
+    }
+
+    if (isXlsx) {
+      const reader = new FileReader();
+      reader.onerror = () => reject(new Error("Spreadsheet read failed."));
+      reader.onload = async () => {
+        try {
+          const xlsx = await import("xlsx");
+          const workbook = xlsx.read(reader.result as ArrayBuffer, {
+            type: "array",
+          });
+          const firstSheet = workbook.SheetNames[0];
+          if (!firstSheet) {
+            reject(new Error("Spreadsheet does not contain a sheet."));
+            return;
+          }
+          const sheet = workbook.Sheets[firstSheet];
+          const rangeRef = typeof sheet["!ref"] === "string" ? sheet["!ref"] : null;
+          if (!rangeRef) {
+            reject(new Error("Spreadsheet has no readable cell range."));
+            return;
+          }
+          const range = xlsx.utils.decode_range(rangeRef);
+          const table: string[][] = [];
+          const cellMetaRows: XlsxCellMeta[][] = [];
+          for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
+            const row: string[] = [];
+            const metaRow: XlsxCellMeta[] = [];
+            for (let columnIndex = range.s.c; columnIndex <= range.e.c; columnIndex += 1) {
+              const cellAddress = xlsx.utils.encode_cell({
+                r: rowIndex,
+                c: columnIndex,
+              });
+              const cell = sheet[cellAddress];
+              row.push(spreadsheetCellToString(cell));
+              metaRow.push(spreadsheetCellMeta(cell));
+            }
+            table.push(row);
+            cellMetaRows.push(metaRow);
+          }
+          if (!table.length) {
+            reject(new Error("Spreadsheet has no data rows."));
+            return;
+          }
+          const headers = table[0]?.map((header) => header.trim()) ?? [];
+          const dataRows = table
+            .slice(1)
+            .filter((row) => row.some((cell) => cell.trim().length > 0));
+          const metaRows = cellMetaRows
+            .slice(1)
+            .filter((_, index) => table[index + 1]?.some((cell) => cell.trim().length > 0));
+          if (!headers.length) {
+            reject(new Error("Spreadsheet header row is empty."));
+            return;
+          }
+          resolve({
+            fileName: file.name,
+            source: "xlsx",
+            headers,
+            rows: dataRows,
+            xlsxMeta: { cellMetaRows: metaRows },
+          });
+        } catch (error) {
+          reject(error instanceof Error ? error : new Error("Failed to parse spreadsheet file."));
+        }
+      };
+      reader.readAsArrayBuffer(file);
+      return;
+    }
+
+    reject(new Error("Unsupported extension. Please upload CSV or XLSX."));
+  });
+}
+
+function detectMapping(headers: string[]): ColumnMapping {
+  const used = new Set<string>();
+  const normalizedToHeaders = new Map<string, string[]>();
+  for (const header of headers) {
+    const normalized = normalizeHeader(header);
+    const existing = normalizedToHeaders.get(normalized);
+    if (existing) {
+      existing.push(header);
+      continue;
+    }
+    normalizedToHeaders.set(normalized, [header]);
+  }
+  const mapping: ColumnMapping = {
+    parentSku: "",
+    sku: "",
+    jan: "",
+    qty: "",
+    brand: "",
+  };
+
+  for (const key of Object.keys(fieldAliases) as FieldKey[]) {
+    const aliases = [key, ...fieldAliases[key]].map((item) => normalizeHeader(item));
+    const matchedHeader = aliases
+      .map((alias) => normalizedToHeaders.get(alias)?.[0])
+      .find((candidate) => candidate !== undefined && !used.has(candidate));
+    if (matchedHeader) {
+      mapping[key] = matchedHeader;
+      used.add(matchedHeader);
+    }
+  }
+  return mapping;
+}
+
+function reconcileMappingWithHeaders(mapping: ColumnMapping, headers: string[]): ColumnMapping {
+  const headerSet = new Set(headers);
+  const reconciled = { ...mapping };
+  for (const key of Object.keys(mapping) as FieldKey[]) {
+    if (mapping[key] && !headerSet.has(mapping[key])) {
+      reconciled[key] = "";
+    }
+  }
+  return reconciled;
+}
+
+function toSourceRows(source: DataSource | null): DataRow[] {
+  if (!source) {
+    return [];
+  }
+  return source.rows.map((row) => {
+    const record: DataRow = {};
+    source.headers.forEach((header, index) => {
+      record[header] = (row[index] ?? "").trim();
+    });
+    return record;
+  });
+}
+
+function buildExecutionIntent(form: FormState): PrintExecutionIntent {
+  if (form.executionMode === "print") {
+    const approvedBy = form.executionApprovedBy.trim();
+    const approvedAt = form.executionApprovedAt.trim();
+    const sourceProofJobId = form.executionSourceProofJobId.trim();
+    const intent: PrintExecutionContext = {
+      mode: "print",
+    };
+    if (approvedBy) {
+      intent.approvedBy = approvedBy;
+    }
+    if (approvedAt) {
+      intent.approvedAt = approvedAt;
+    }
+    if (sourceProofJobId) {
+      intent.sourceProofJobId = sourceProofJobId;
+    }
+    if (form.executionAllowWithoutProof) {
+      intent.allowWithoutProof = true;
+    }
+    return intent;
+  }
+  const requestedBy = form.executionRequestedBy.trim() || form.actor.trim() || "ops.user";
+  const notes = form.executionNotes.trim();
+  const intent: ProofExecutionContext = {
+    mode: "proof",
+    requestedBy,
+    ...(notes ? { notes } : {}),
+  };
+  return intent;
+}
+
+function toDispatchRequestWithActor(
+  draft: PrintJobDraft,
+  options: DispatchRequestOptions = {},
+): DispatchRequest {
+  const actorId = draft.actor.trim() || "ops.user";
+  const dispatchActor: DispatchActor = {
+    actorUserId: actorId,
+    actorDisplayName: actorId,
+  };
+  return toDispatchRequest(draft, dispatchActor, options);
+}
+
+function resolveXlsxJanWarnings(
+  sourceData: DataSource | null,
+  rowIndex: number,
+  mapping: ColumnMapping,
+  janDigits: string | null,
+): string[] {
+  if (!sourceData || sourceData.source !== "xlsx") {
+    return [];
+  }
+  const janHeader = mapping.jan;
+  const janColumnIndex = janHeader ? sourceData.headers.indexOf(janHeader) : -1;
+  if (janColumnIndex < 0) {
+    return [];
+  }
+  const meta = sourceData.xlsxMeta?.cellMetaRows[rowIndex]?.[janColumnIndex];
+  if (!meta?.isNumeric) {
+    return [];
+  }
+  if (meta.scientific || meta.decimal) {
+    return [
+      "JAN came from an XLSX numeric cell with scientific notation or decimals. Format the column as text before import.",
+    ];
+  }
+  if (!janDigits) {
+    return [
+      "JAN came from an XLSX numeric cell and could not be preserved as 12/13 digits. Format the column as text before import.",
+    ];
+  }
+  if (janDigits.length === 12) {
+    return [
+      "JAN came from an XLSX numeric cell with 12 digits. Leading zero intent is ambiguous; store the column as text before import.",
+    ];
+  }
+  return [
+    "JAN came from an XLSX numeric cell. Verify that leading zeros were preserved before dispatch.",
+  ];
+}
+
+function buildDraftFromRow(input: {
+  rowIndex: number;
+  sourceRow: DataRow;
+  sourceData: DataSource | null;
+  mapping: ColumnMapping;
+  templateCatalogIssue: string | null;
+  templateRef: LabelTemplateRef | null;
+  printerProfile: PrinterProfile | null;
+  templateRefs: LabelTemplateRef[];
+  printerProfiles: PrinterProfile[];
+  actor: string;
+  execution: PrintExecutionIntent;
+  janSourceHint: string;
+}): PreparedRow {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const row = input.sourceRow;
+  const actor = input.actor.trim();
+  const enabledResolution = resolveEnabledSourceValue(row);
+  if (enabledResolution.invalid) {
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      errors: [enabledResolution.reason ?? "Enabled column is invalid."],
+      warnings,
+      status: "error",
+      pendingReason: null,
+    };
+  }
+  if (!enabledResolution.enabled) {
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      errors: [],
+      warnings,
+      status: "pending",
+      pendingReason: "Row disabled by enabled column.",
+    };
+  }
+  const templateFromSource = readSourceValue(row, TEMPLATE_SOURCE_ALIASES);
+  const printerFromSource = readSourceValue(row, PRINTER_SOURCE_ALIASES);
+  const templateResolution = resolveTemplateFromSourceValue(
+    templateFromSource,
+    input.templateRef,
+    input.templateRefs,
+  );
+  const printerResolution = resolvePrinterFromSourceValue(
+    printerFromSource,
+    input.printerProfile,
+    input.printerProfiles,
+  );
+  const template = templateResolution.template;
+  const printerProfile = printerResolution.printer;
+  if (!template) {
+    if (templateFromSource) {
+      return {
+        rowIndex: input.rowIndex,
+        sourceRow: row,
+        draft: null,
+        errors: [],
+        warnings,
+        status: "pending",
+        pendingReason: templateResolution.reason,
+      };
+    }
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      errors: ["Template reference is missing. Fix template import or template selection."],
+      warnings,
+      status: "error",
+      pendingReason: null,
+    };
+  }
+  if (!printerProfile) {
+    if (printerFromSource) {
+      return {
+        rowIndex: input.rowIndex,
+        sourceRow: row,
+        draft: null,
+        errors: [],
+        warnings,
+        status: "pending",
+        pendingReason: printerResolution.reason,
+      };
+    }
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      errors: ["Printer profile is required."],
+      warnings,
+      status: "error",
+      pendingReason: null,
+    };
+  }
+  const missingColumn = requiredFieldList.filter((entry) => input.mapping[entry.key].length === 0);
+  if (missingColumn.length > 0) {
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      status: "error",
+      errors: [`Map missing columns: ${missingColumn.map((entry) => entry.label).join(", ")}.`],
+      warnings,
+      pendingReason: null,
+    };
+  }
+  if (!actor) {
+    errors.push("Actor is required.");
+  }
+  if (input.templateCatalogIssue) {
+    errors.push(input.templateCatalogIssue);
+  }
+
+  const getValue = (key: FieldKey) => {
+    const column = input.mapping[key];
+    return column ? (row[column] ?? "") : "";
+  };
+  const parentSku = getValue("parentSku").trim();
+  const sku = getValue("sku").trim();
+  const janRaw = getValue("jan").trim();
+  const brand = getValue("brand").trim();
+  const qtyText = getValue("qty").trim();
+
+  if (!parentSku) errors.push("Parent SKU is required.");
+  if (!sku) errors.push("SKU is required.");
+  if (!brand) errors.push("Brand is required.");
+  if (!qtyText || !/^\d+$/.test(qtyText)) errors.push("Quantity must be an integer.");
+  const janDigits = extractJanDigits(janRaw);
+  warnings.push(
+    ...resolveXlsxJanWarnings(input.sourceData, input.rowIndex, input.mapping, janDigits),
+  );
+  if (!janDigits) {
+    errors.push("JAN must be 12 or 13 digits with digits only.");
+  }
+  if (
+    warnings.some(
+      (warning) =>
+        warning.includes("could not be preserved") ||
+        warning.includes("ambiguous") ||
+        warning.includes("scientific notation"),
+    )
+  ) {
+    errors.push(...warnings);
+  }
+  const qty = Number.parseInt(qtyText.replace(/,/g, ""), 10);
+  if (!Number.isFinite(qty) || qty < 1) errors.push("Quantity must be >= 1.");
+  if (errors.length > 0) {
+    return {
+      rowIndex: input.rowIndex,
+      sourceRow: row,
+      draft: null,
+      errors,
+      warnings,
+      status: "error",
+      pendingReason: null,
+    };
+  }
+  if (input.execution.mode === "print") {
+    if (!input.execution.approvedBy?.trim()) {
+      errors.push("Print requires approvedBy for each queued row.");
+    }
+    if (!input.execution.approvedAt?.trim()) {
+      errors.push("Print requires approvedAt for each queued row.");
+    }
+    if (!input.execution.allowWithoutProof && !input.execution.sourceProofJobId?.trim()) {
+      errors.push("Print requires sourceProofJobId unless allowWithoutProof is enabled.");
+    }
+    if (input.execution.approvedAt && Number.isNaN(Date.parse(input.execution.approvedAt))) {
+      errors.push("Print approvedAt must be a valid datetime.");
+    }
+    if (errors.length > 0) {
+      return {
+        rowIndex: input.rowIndex,
+        sourceRow: row,
+        draft: null,
+        errors,
+        warnings,
+        status: "error",
+        pendingReason: null,
+      };
+    }
+  }
+
+  const requestedAt = new Date().toISOString();
+  const normalizedJan = janDigits ?? "";
+  return {
+    rowIndex: input.rowIndex,
+    sourceRow: row,
+    draft: {
+      jobId: makeBatchJobId(requestedAt, input.rowIndex),
+      parentSku,
+      sku,
+      jan: {
+        raw: janRaw,
+        normalized: normalizedJan,
+        source: input.janSourceHint === "import" ? "import" : "manual",
+      },
+      qty,
+      brand,
+      template,
+      printerProfile: {
+        id: printerProfile.id,
+        adapter: printerProfile.adapter,
+        paperSize: printerProfile.paperSize,
+        dpi: printerProfile.dpi,
+        scalePolicy: printerProfile.scalePolicy,
+      },
+      execution: input.execution,
+      actor,
+      requestedAt,
+    },
+    errors: [],
+    warnings,
+    status: "ready",
+    pendingReason: null,
   };
 }
 
 function validateDraft(
   form: FormState,
   session: DraftSession,
+  templateRef: LabelTemplateRef | null,
+  printerProfile: PrinterProfile | null,
+  execution: PrintExecutionIntent,
+  templateCatalogIssue: string | null,
 ): { draft: PrintJobDraft | null; errors: FormErrors } {
   const errors: FormErrors = {};
   const parentSku = form.parentSku.trim();
@@ -89,58 +2177,52 @@ function validateDraft(
   const qty = form.qty.trim();
   const brand = form.brand.trim();
   const actor = form.actor.trim();
-  const template = templateOptions.find((option) => option.id === form.templateId);
-  const printerProfile = printerProfiles.find((option) => option.id === form.printerProfileId);
 
-  if (!parentSku) {
-    errors.parentSku = "Parent SKU is required.";
-  }
-  if (!sku) {
-    errors.sku = "SKU is required.";
-  }
-  if (!brand) {
-    errors.brand = "Brand is required.";
-  }
-  if (!actor) {
-    errors.actor = "Actor is required.";
-  }
+  if (!parentSku) errors.parentSku = "Parent SKU is required.";
+  if (!sku) errors.sku = "SKU is required.";
+  if (!brand) errors.brand = "Brand is required.";
+  if (!actor) errors.actor = "Actor is required.";
+  const janDigits = extractJanDigits(jan);
   if (!/^\d+$/.test(qty) || Number.parseInt(qty, 10) < 1) {
     errors.qty = "Quantity must be an integer greater than or equal to 1.";
   }
-  if (jan.length === 12 && /^\d+$/.test(jan)) {
-    errors.jan =
-      "12-digit JAN completion stays in Rust. Enter the canonical 13-digit value for this preview.";
-  } else if (!/^\d{13}$/.test(jan)) {
-    errors.jan = "JAN must be 13 digits to create a schema-aligned draft.";
+  if (!janDigits) {
+    errors.jan = "JAN must be 12 or 13 digits with digits only.";
   }
-  if (!template) {
-    errors.templateId = "Template selection is required.";
+  if (execution.mode === "print") {
+    if (!execution.approvedBy?.trim()) {
+      errors.executionApprovedBy = "Print requires an approvedBy user.";
+    }
+    if (!execution.approvedAt?.trim()) {
+      errors.executionApprovedAt = "Print requires an approvedAt datetime.";
+    }
+    if (!execution.allowWithoutProof && !execution.sourceProofJobId?.trim()) {
+      errors.executionSourceProofJobId =
+        "Print requires sourceProofJobId unless allowWithoutProof is enabled.";
+    }
+    if (execution.approvedAt && Number.isNaN(Date.parse(execution.approvedAt))) {
+      errors.executionApprovedAt = "approvedAt must be a valid datetime.";
+    }
   }
-  if (!printerProfile) {
-    errors.printerProfileId = "Printer profile selection is required.";
-  }
+  if (!templateRef) errors.templateId = "Template selection is required.";
+  if (templateCatalogIssue) errors.templateId = templateCatalogIssue;
+  if (!printerProfile) errors.printerProfileId = "Printer profile selection is required.";
 
-  if (Object.keys(errors).length > 0 || !template || !printerProfile) {
+  if (Object.keys(errors).length > 0 || !templateRef || !printerProfile) {
     return { draft: null, errors };
   }
 
+  const normalizedJan = janDigits ?? "";
   return {
     errors,
     draft: {
       jobId: session.jobId,
       parentSku,
       sku,
-      jan: {
-        raw: jan,
-        normalized: jan,
-        source: "manual",
-      },
+      jan: { raw: jan, normalized: normalizedJan, source: "manual" },
       qty: Number.parseInt(qty, 10),
       brand,
-      template: {
-        id: template.id,
-        version: template.version,
-      },
+      template: templateRef,
       printerProfile: {
         id: printerProfile.id,
         adapter: printerProfile.adapter,
@@ -148,264 +2230,5093 @@ function validateDraft(
         dpi: printerProfile.dpi,
         scalePolicy: printerProfile.scalePolicy,
       },
+      execution,
       actor,
       requestedAt: session.requestedAt,
     },
   };
 }
 
+function downloadText(filename: string, value: string): void {
+  const blob = new Blob([value], { type: "application/json;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function buildAuditExportFilename(scope: AuditLedgerScope, exportedAt: string): string {
+  const token = exportedAt.replace(/[:.]/g, "-");
+  return `audit-ledger-${scope}-${token}.json`;
+}
+
+function buildAuditExportDocument(result: AuditExportResult): string {
+  return JSON.stringify(
+    {
+      schema_version: "audit-ledger-export-v1",
+      exported_at: new Date().toISOString(),
+      scope: result.scope,
+      snapshot: result.snapshot,
+    },
+    null,
+    2,
+  );
+}
+
+function parseOptionalPositiveInteger(value: string, label: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${label} must be a whole number.`);
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (parsed < 1) {
+    throw new Error(`${label} must be greater than or equal to 1.`);
+  }
+  return parsed;
+}
+
+function describeAuditTrimResult(result: AuditRetentionResult): string {
+  const summary = `${result.removedDispatchCount} dispatch and ${result.removedProofCount} proof entr${
+    result.removedDispatchCount + result.removedProofCount === 1 ? "y" : "ies"
+  }`;
+  const retainedSummary = `${result.retainedDispatchCount} dispatch and ${result.retainedProofCount} proof entr${
+    result.retainedDispatchCount + result.retainedProofCount === 1 ? "y" : "ies"
+  } remain`;
+  if (result.dryRun) {
+    return `Dry run complete. ${summary} would be removed. ${retainedSummary} remain.`;
+  }
+  if (result.backup) {
+    return `Trim complete. ${summary} removed and ${retainedSummary}. Backup saved at ${result.backup.filePath}.`;
+  }
+  return `Trim complete. ${summary} removed. ${retainedSummary}.`;
+}
+
+function buildTemplateAssetPayload(
+  form: FormState,
+  mapping: ColumnMapping,
+  templateSource: string,
+  draftSnapshot: PrintJobDraft | null,
+): TemplateAssetPayload {
+  return {
+    kind: TEMPLATE_ASSET_KIND,
+    schema_version: TEMPLATE_ASSET_SCHEMA_VERSION,
+    exportedAt: new Date().toISOString(),
+    templateSource: sanitizeTemplateString(templateSource),
+    formState: {
+      parentSku: form.parentSku,
+      sku: form.sku,
+      jan: form.jan,
+      qty: form.qty,
+      brand: form.brand,
+      templateId: form.templateId,
+      printerProfileId: form.printerProfileId,
+      actor: form.actor,
+      executionMode: form.executionMode,
+      executionRequestedBy: form.executionRequestedBy,
+      executionNotes: form.executionNotes,
+      executionApprovedBy: form.executionApprovedBy,
+      executionApprovedAt: form.executionApprovedAt,
+      executionSourceProofJobId: form.executionSourceProofJobId,
+      executionAllowWithoutProof: form.executionAllowWithoutProof,
+    },
+    fieldMapping: mapping,
+    draftSnapshot,
+  };
+}
+
 export function App() {
+  const initialTemplateState = loadTemplateDraftFromStorage();
+  const initialMappingState = loadColumnMappingFromStorage();
+  const initialSourceState = restoreSourceFromStorage();
+
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceMode>("compose");
   const [session, setSession] = useState(createSession);
   const [form, setForm] = useState(createInitialFormState);
   const [showErrors, setShowErrors] = useState(false);
   const [draftSnapshot, setDraftSnapshot] = useState<PrintJobDraft | null>(null);
-  const { draft, errors } = validateDraft(form, session);
-  const template = templateOptions.find((option) => option.id === form.templateId);
-  const printerProfile = printerProfiles.find((option) => option.id === form.printerProfileId);
+  const [manualSubmit, setManualSubmit] = useState<ManualSubmitState>({
+    phase: "idle",
+    message: "",
+    result: null,
+  });
+  const [batchSubmit, setBatchSubmit] = useState<BatchSubmitState>({
+    phase: "idle",
+    message: "",
+    results: [],
+  });
+  const [queueViewFilter, setQueueViewFilter] = useState<QueueViewFilter>("all");
+  const [queueSearchText, setQueueSearchText] = useState("");
+  const [queueSortMode, setQueueSortMode] = useState<QueueSortMode>("row-asc");
+  const [queuePageSize, setQueuePageSize] = useState(10);
+  const [queuePage, setQueuePage] = useState(1);
+  const [bridgeStatus, setBridgeStatus] = useState<BridgeStatusState>({
+    phase: "loading",
+    status: null,
+    message: "Checking desktop bridge availability...",
+  });
+  const [templateCatalogState, setTemplateCatalogState] = useState<TemplateCatalogState>({
+    phase: "idle",
+    templates: templateOptions,
+    defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+    message: "Using bundled template catalog fallback.",
+  });
+  const [templateCatalogWriteState, setTemplateCatalogWriteState] = useState<SubmitState>({
+    phase: "idle",
+    message: "",
+  });
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditModeFilter, setAuditModeFilter] = useState<AuditModeFilter>("all");
+  const [auditProofFilter, setAuditProofFilter] = useState<AuditProofFilter>("all");
+  const [auditSortMode, setAuditSortMode] = useState<AuditSortMode>("occurred-desc");
+  const [auditPageSize, setAuditPageSize] = useState(10);
+  const [auditPage, setAuditPage] = useState(1);
+  const [auditSearch, setAuditSearch] = useState<AuditSearchState>({
+    phase: "idle",
+    entries: [],
+    message: "Audit ledger has not been loaded yet.",
+    lastUpdatedAt: null,
+  });
+  const [auditScope, setAuditScope] = useState<AuditLedgerScope>("all");
+  const [auditMaxAgeDays, setAuditMaxAgeDays] = useState("30");
+  const [auditMaxEntries, setAuditMaxEntries] = useState("500");
+  const [auditDryRun, setAuditDryRun] = useState(true);
+  const [auditBackupBundles, setAuditBackupBundles] = useState<AuditBackupBundleState>({
+    phase: "idle",
+    message: "Audit backups have not been loaded yet.",
+    bundles: [],
+  });
+  const [selectedAuditBackupPath, setSelectedAuditBackupPath] = useState<string | null>(null);
+  const [auditRestoreConfirmed, setAuditRestoreConfirmed] = useState(false);
+  const [auditRestoreState, setAuditRestoreState] = useState<AuditRestoreState>({
+    phase: "idle",
+    message: "",
+    filePath: null,
+    result: null,
+  });
+  const [auditExportState, setAuditExportState] = useState<AuditMaintenanceState>({
+    phase: "idle",
+    message: "",
+    detail: null,
+  });
+  const [auditTrimState, setAuditTrimState] = useState<AuditMaintenanceState>({
+    phase: "idle",
+    message: "",
+    detail: null,
+  });
+  const [proofReviewNotes, setProofReviewNotes] = useState("");
+  const [proofReview, setProofReview] = useState<ProofReviewState>({
+    phase: "idle",
+    message: "",
+    proofJobId: null,
+    action: null,
+  });
+  const [legacyProofSeedSource, setLegacyProofSeedSource] = useState<DataSource | null>(null);
+  const [legacyProofSeedError, setLegacyProofSeedError] = useState<string | null>(null);
+  const [legacyProofSeedState, setLegacyProofSeedState] = useState<LegacyProofSeedState>({
+    phase: "idle",
+    message: "",
+    result: null,
+  });
+  const [templateRenderPreview, setTemplateRenderPreview] = useState<TemplateRenderPreviewState>({
+    phase: "idle",
+    message: "Run Rust preview to compare the live editor against the renderer path.",
+    result: null,
+  });
+  const [templateWorkspaceMode, setTemplateWorkspaceMode] =
+    useState<TemplateWorkspaceMode>("structure");
+  const [selectedTemplateFieldIndex, setSelectedTemplateFieldIndex] = useState(0);
+
+  const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
+  const [templateParseError, setTemplateParseError] = useState<string | null>(null);
+  const [templateImportError, setTemplateImportError] = useState("");
+  const [templatePersistedState, setTemplatePersistedState] = useState(initialTemplateState.status);
+
+  const [sourceData, setSourceData] = useState<DataSource | null>(initialSourceState.source);
+  const [sourceError, setSourceError] = useState<string | null>(null);
+  const [fieldMapping, setFieldMapping] = useState<ColumnMapping>(
+    reconcileMappingWithHeaders(
+      initialMappingState.mapping,
+      initialSourceState.source?.headers ?? [],
+    ),
+  );
+  const [mappingPersistedState, setMappingPersistedState] = useState(initialMappingState.status);
+  const [queuedRows, setQueuedRows] = useState<QueuedRow[]>([]);
+  const [selectedQueueRowJobId, setSelectedQueueRowJobId] = useState<string | null>(null);
+  const [selectedAuditEntryJobId, setSelectedAuditEntryJobId] = useState<string | null>(null);
+  const [restoreStateNotice, setRestoreStateNotice] = useState<string | null>(null);
+  const [sourcePersistedState, setSourcePersistedState] = useState(initialSourceState.status);
+
+  const parsedTemplate = useMemo(() => parseTemplateSpec(templateSource), [templateSource]);
+  const templateReference = parsedTemplate.spec ? parseTemplateRef(parsedTemplate.spec) : null;
+  const templateMetaInfo = useMemo(() => templateMeta(parsedTemplate.spec), [parsedTemplate.spec]);
+  const templateEditorModel = useMemo(
+    () => parseTemplateEditorModel(parsedTemplate.spec),
+    [parsedTemplate.spec],
+  );
+  const availableTemplateOptions = useMemo(
+    () =>
+      templateCatalogState.templates.length > 0 ? templateCatalogState.templates : templateOptions,
+    [templateCatalogState.templates],
+  );
+  const knownTemplateVersions = useMemo(
+    () => new Set(availableTemplateOptions.map((option) => templateVersionOf(option))),
+    [availableTemplateOptions],
+  );
+  const templateReferenceIsKnown = templateReference
+    ? knownTemplateVersions.has(templateVersionOf(templateReference))
+    : false;
+  const resolvedTemplateRef = useMemo(
+    () =>
+      pickTemplateRef(
+        form.templateId,
+        templateReferenceIsKnown ? templateReference : null,
+        availableTemplateOptions,
+      ),
+    [availableTemplateOptions, form.templateId, templateReference, templateReferenceIsKnown],
+  );
+  const selectedPrinterProfile = useMemo(
+    () => printerProfiles.find((option) => option.id === form.printerProfileId),
+    [form.printerProfileId],
+  );
+  const executionIntent = useMemo(() => buildExecutionIntent(form), [form]);
+  const templateOptionLabel = resolvedTemplateRef
+    ? `${resolvedTemplateRef.id} / ${resolvedTemplateRef.version}`
+    : "Missing";
+  const templateReferenceVersion = templateReference ? templateVersionOf(templateReference) : null;
+  const templateReferenceCatalogSource = catalogSourceFromVersion(
+    availableTemplateOptions,
+    templateReferenceVersion,
+  );
+  const templateCatalogSummary = buildTemplateSourceSummary(availableTemplateOptions);
+  const selectedTemplateOption =
+    availableTemplateOptions.find(
+      (option) =>
+        option.id === resolvedTemplateRef?.id && option.version === resolvedTemplateRef?.version,
+    ) ?? null;
+  const templateCandidates = useMemo(() => {
+    const candidates: LabelTemplateRef[] = availableTemplateOptions.map((entry) => ({
+      id: entry.id,
+      version: entry.version,
+    }));
+    if (templateReference && templateReferenceIsKnown) {
+      const exists = candidates.some(
+        (option) =>
+          option.id === templateReference.id && option.version === templateReference.version,
+      );
+      if (!exists) {
+        candidates.push(templateReference);
+      }
+    }
+    return candidates;
+  }, [availableTemplateOptions, templateReference, templateReferenceIsKnown]);
+  const templateCatalogIssue =
+    templateReference && !templateReferenceIsKnown
+      ? `template_version '${templateVersionOf(templateReference)}' is not present in the desktop template catalog. Proof/print dispatch is blocked until the packaged or local catalog is updated.`
+      : null;
+
+  const { draft, errors } = validateDraft(
+    form,
+    session,
+    resolvedTemplateRef,
+    selectedPrinterProfile ?? null,
+    executionIntent,
+    templateCatalogIssue,
+  );
+  const visibleErrors = showErrors ? errors : {};
+  const templatePreviewBindings = useMemo(
+    () =>
+      buildTemplatePreviewBindings({
+        draft,
+        form,
+        session,
+        resolvedTemplateRef,
+      }),
+    [draft, form, resolvedTemplateRef, session],
+  );
+  const templateDraftPreviewRequest = useMemo(
+    () =>
+      buildTemplateDraftPreviewRequest({
+        templateSource,
+        draft,
+        form,
+        session,
+      }),
+    [draft, form, session, templateSource],
+  );
   const liveDraftJson = draft ? JSON.stringify(draft, null, 2) : null;
   const snapshotJson = draftSnapshot ? JSON.stringify(draftSnapshot, null, 2) : null;
   const draftIsStale =
     Boolean(snapshotJson) && Boolean(liveDraftJson) && snapshotJson !== liveDraftJson;
-  const previewJson = snapshotJson ?? liveDraftJson;
-  const visibleErrors = showErrors ? errors : {};
+  const previewJson = liveDraftJson ?? snapshotJson;
+
+  const sourceRows = useMemo(() => toSourceRows(sourceData), [sourceData]);
+  const preparedRows = useMemo(() => {
+    if (!sourceData) {
+      return [];
+    }
+    return sourceRows.map((sourceRow, rowIndex) =>
+      buildDraftFromRow({
+        rowIndex,
+        sourceRow,
+        sourceData,
+        mapping: fieldMapping,
+        templateCatalogIssue,
+        templateRef: resolvedTemplateRef,
+        templateRefs: templateCandidates,
+        printerProfiles,
+        printerProfile: selectedPrinterProfile ?? null,
+        actor: form.actor,
+        execution: executionIntent,
+        janSourceHint: "import",
+      }),
+    );
+  }, [
+    executionIntent,
+    fieldMapping,
+    form.actor,
+    templateCatalogIssue,
+    resolvedTemplateRef,
+    selectedPrinterProfile,
+    sourceRows,
+    sourceData,
+    templateCandidates,
+  ]);
+
+  const parsedTemplateRows = preparedRows.slice(0, 8);
+  const readyRowsCount = preparedRows.filter((entry) => entry.status === "ready").length;
+  const pendingRowsCount = preparedRows.filter((entry) => entry.status === "pending").length;
+  const errorRowsCount = preparedRows.length - readyRowsCount - pendingRowsCount;
+  const queuedReadyRowsCount = queuedRows.filter(
+    (entry) => entry.submissionStatus === "ready",
+  ).length;
+  const queuedSubmittingRowsCount = queuedRows.filter(
+    (entry) => entry.submissionStatus === "submitting",
+  ).length;
+  const queuedSubmittedRowsCount = queuedRows.filter(
+    (entry) => entry.submissionStatus === "submitted",
+  ).length;
+  const queuedFailedRowsCount = queuedRows.filter(
+    (entry) => entry.submissionStatus === "failed",
+  ).length;
+  const isBatchSubmitting = batchSubmit.phase === "submitting";
+  const queueMutationLocked = isBatchSubmitting;
+  const queueMutationLockMessage = queueMutationLocked
+    ? "Queue mutation is locked while batch submit is active."
+    : null;
+  const canSubmitQueuedRows =
+    !templateCatalogIssue &&
+    queuedRows.some(
+      (entry) => entry.submissionStatus === "ready" || entry.submissionStatus === "failed",
+    );
+  const filteredQueuedRows = useMemo(() => {
+    return [...queuedRows]
+      .filter((entry) => queueViewFilter === "all" || entry.submissionStatus === queueViewFilter)
+      .filter((entry) => matchesQueueSearch(entry, queueSearchText))
+      .sort((left, right) => compareQueuedRows(left, right, queueSortMode));
+  }, [queueSearchText, queueSortMode, queueViewFilter, queuedRows]);
+  const queueVisiblePage = clampPage(queuePage, filteredQueuedRows.length, queuePageSize);
+  const pagedQueuedRows = filteredQueuedRows.slice(
+    (queueVisiblePage - 1) * queuePageSize,
+    queueVisiblePage * queuePageSize,
+  );
+  const queuePageTotal = pageCount(filteredQueuedRows.length, queuePageSize);
+  const queueRangeStart =
+    filteredQueuedRows.length === 0 ? 0 : (queueVisiblePage - 1) * queuePageSize + 1;
+  const queueRangeEnd =
+    filteredQueuedRows.length === 0
+      ? 0
+      : Math.min(queueVisiblePage * queuePageSize, filteredQueuedRows.length);
+  const isQueueReady = sourceRows.length > 0 && readyRowsCount > 0;
+  const sourceSummary = sourceData
+    ? `${sourceData.rows.length} rows / ${sourceData.headers.length} columns (${sourceData.source})`
+    : "No source loaded";
+  const legacyProofSeedRequest = useMemo(
+    () => buildLegacyProofSeedRequest(legacyProofSeedSource),
+    [legacyProofSeedSource],
+  );
+  const legacyProofSeedSummary = legacyProofSeedSource
+    ? `${legacyProofSeedSource.rows.length} rows / ${legacyProofSeedSource.headers.length} columns (${legacyProofSeedSource.source})`
+    : "No legacy proof seed file loaded";
+  const legacyProofSeedPreviewRows = legacyProofSeedRequest?.rows.slice(0, 6) ?? [];
+  const previewBatchJson =
+    queuedRows.length > 0 ? JSON.stringify(queuedRows[0].draft, null, 2) : null;
+  const hasPersistedState =
+    templatePersistedState.status !== "none" ||
+    mappingPersistedState.status !== "none" ||
+    sourcePersistedState.status !== "none";
+  const executionModeLabel = form.executionMode === "print" ? "print-ready" : "proof-only";
+  const executionMeta =
+    form.executionMode === "print" ? "Print-ready mode" : "Proof-only review mode";
+  const executionModeChipClass = form.executionMode === "print" ? "print" : "proof";
+  const bridgeStatusAvailable = bridgeStatus.status !== null && bridgeStatus.phase === "ready";
+  const bridgeWarnings = useMemo(
+    () => normalizeBridgeWarnings(bridgeStatus.status),
+    [bridgeStatus.status],
+  );
+  const allowWithoutProofEnabled = bridgeStatus.status?.allowWithoutProofEnabled ?? false;
+  const blockingBridgeWarnings = bridgeWarnings.filter(isBlockingBridgeWarning);
+  const hasBlockingBridgeWarnings = blockingBridgeWarnings.length > 0;
+  const isBridgeSubmitAllowed = bridgeStatusAvailable && !hasBlockingBridgeWarnings;
+  const isBridgeSubmitBlocked = !isBridgeSubmitAllowed || bridgeStatus.phase === "loading";
+  const bridgeSubmitBlockMessage = isBridgeSubmitBlocked
+    ? bridgeStatus.phase === "loading"
+      ? "Submit is temporarily disabled while bridge status is being checked."
+      : !bridgeStatusAvailable
+        ? "Browser preview mode / desktop bridge unavailable. Connect via desktop shell to submit."
+        : hasBlockingBridgeWarnings
+          ? "Submit is blocked due to high-risk bridge warnings. Resolve warnings before dispatch."
+          : null
+    : null;
+  const reviewActorId = form.executionApprovedBy.trim() || form.actor.trim() || "ops.user";
+  const approvedProofEntries = useMemo(() => {
+    const deduped = new Map<string, AuditSearchEntry>();
+    for (const entry of auditSearch.entries) {
+      if (entry.proof?.status !== "approved") {
+        continue;
+      }
+      deduped.set(entry.proof.proofJobId, entry);
+    }
+    return Array.from(deduped.values()).sort((left, right) =>
+      right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt),
+    );
+  }, [auditSearch.entries]);
+  const approvedProofEntryByJobId = useMemo(() => {
+    const index = new Map<string, AuditSearchEntry>();
+    for (const entry of approvedProofEntries) {
+      if (entry.proof) {
+        index.set(entry.proof.proofJobId, entry);
+      }
+    }
+    return index;
+  }, [approvedProofEntries]);
+
+  const templateValidation = validateTemplateSource(templateSource);
+  const templateRenderPreviewSvgDataUrl = templateRenderPreview.result
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(templateRenderPreview.result.svg)}`
+    : null;
+  const templateUsesPreviewOnlyPlaceholder = templateSource.includes("{parent_sku}");
+  const templateCanvasStyle: CSSProperties | undefined = templateEditorModel
+    ? {
+        aspectRatio: `${Math.max(templateEditorModel.page.widthMm, 1)} / ${Math.max(
+          templateEditorModel.page.heightMm,
+          1,
+        )}`,
+        backgroundColor: templateEditorModel.page.backgroundFill,
+        borderColor: templateEditorModel.border.visible
+          ? templateEditorModel.border.color
+          : "transparent",
+        borderWidth: templateEditorModel.border.visible
+          ? `${Math.max(templateEditorModel.border.widthMm * 2, 1)}px`
+          : "1px",
+      }
+    : undefined;
+  const templateValidationTone =
+    templateValidation.status === "ok"
+      ? "ok"
+      : templateValidation.status === "stale"
+        ? "warning"
+        : "error";
+  const templateRenderTone =
+    templateRenderPreview.phase === "ready"
+      ? "ok"
+      : templateRenderPreview.phase === "rendering"
+        ? "warning"
+        : templateRenderPreview.phase === "error" || templateRenderPreview.phase === "unavailable"
+          ? "error"
+          : "neutral";
+  const templateCatalogTone = templateCatalogIssue
+    ? "error"
+    : templateCatalogWriteState.phase === "success"
+      ? "ok"
+      : templateCatalogWriteState.phase === "submitting"
+        ? "warning"
+        : "neutral";
+  const draftSnapshotTone = draftIsStale ? "warning" : draftSnapshot ? "ok" : "neutral";
+  const templateCatalogHeadline = templateCatalogIssue
+    ? "Catalog route blocked"
+    : templateCatalogWriteState.phase === "success"
+      ? "Draft saved to desktop catalog"
+      : templateReference && templateReferenceIsKnown
+        ? "Catalog route known"
+        : "Draft not saved to desktop catalog";
+  const templateCatalogDetail = templateCatalogIssue
+    ? templateCatalogIssue
+    : templateCatalogWriteState.phase === "success"
+      ? templateCatalogWriteState.message ||
+        "Desktop local catalog now contains the saved template."
+      : templateReference && templateReferenceIsKnown
+        ? `${templateReferenceVersion} resolves through the ${templateReferenceCatalogSource} catalog, but live editor changes still need an explicit save before dispatch uses them.`
+        : "Live JSON edits stay local until you save them into the desktop template catalog.";
+  const templateWorkspaceItems: Array<{
+    id: TemplateWorkspaceMode;
+    label: string;
+    description: string;
+    badge: string;
+  }> = [
+    {
+      id: "structure",
+      label: "Structure",
+      description: "Template id, page, and border controls",
+      badge: templateValidation.status,
+    },
+    {
+      id: "fields",
+      label: "Fields",
+      description: "Text bindings and field order",
+      badge: `${templateEditorModel?.fields.length ?? 0} fields`,
+    },
+    {
+      id: "review",
+      label: "Review",
+      description: "Local canvas vs Rust renderer",
+      badge:
+        templateRenderPreview.phase === "ready"
+          ? "rust-ready"
+          : templateRenderPreview.phase === "rendering"
+            ? "rendering"
+            : templateRenderPreview.phase,
+    },
+    {
+      id: "catalog",
+      label: "Catalog",
+      description: "JSON, import/export, and save",
+      badge:
+        templateCatalogWriteState.phase === "success"
+          ? "saved"
+          : templateCatalogIssue
+            ? "blocked"
+            : "draft-only",
+    },
+  ];
+  const templateStateCards: Array<{
+    id: string;
+    label: string;
+    title: string;
+    detail: string;
+    note: string;
+    tone: "neutral" | "ok" | "warning" | "error";
+  }> = [
+    {
+      id: "live-draft",
+      label: "Live draft",
+      title:
+        templateValidation.status === "ok"
+          ? "Structured + JSON draft are aligned"
+          : templateValidation.status === "stale"
+            ? "Draft parses but still needs cleanup"
+            : "Draft is invalid",
+      detail:
+        templatePersistedState.savedAt !== null
+          ? `Local autosave: ${formatSavedAt(templatePersistedState.savedAt)}.`
+          : "No restored autosave yet for this template draft.",
+      note:
+        templateValidation.message ??
+        "Structured controls, local canvas preview, and Rust preview all read from this live JSON draft.",
+      tone: templateValidationTone,
+    },
+    {
+      id: "local-preview",
+      label: "Local canvas",
+      title: templateEditorModel ? "Approximate layout ready" : "Needs valid template JSON",
+      detail: templateEditorModel
+        ? "Canvas preview uses current form bindings and local-only placeholder support."
+        : "Fix JSON parsing before the local preview canvas can render.",
+      note: "This view is for authoring feedback only. It does not replace Rust output or proof/PDF review.",
+      tone: templateEditorModel ? "ok" : "warning",
+    },
+    {
+      id: "rust-preview",
+      label: "Rust preview",
+      title:
+        templateRenderPreview.phase === "ready"
+          ? "Renderer preview is current"
+          : templateRenderPreview.phase === "rendering"
+            ? "Rendering current live draft"
+            : templateRenderPreview.phase === "error"
+              ? "Renderer preview failed"
+              : "Renderer preview not refreshed",
+      detail: templateRenderPreview.message,
+      note: "Rust preview is authoritative for the current live JSON draft, not for saved catalog history.",
+      tone: templateRenderTone,
+    },
+    {
+      id: "catalog-state",
+      label: "Dispatch authority",
+      title: templateCatalogHeadline,
+      detail: templateCatalogDetail,
+      note: "Proof and print dispatch resolve saved catalog entries by template_version. Unsaved editor changes do not dispatch.",
+      tone: templateCatalogTone,
+    },
+  ];
+  const composeReviewCards: Array<{
+    id: string;
+    label: string;
+    title: string;
+    detail: string;
+    tone: "neutral" | "ok" | "warning" | "error";
+  }> = [
+    {
+      id: "compose-live",
+      label: "Live payload",
+      title: draft ? "Submit uses the current form state" : "No live payload yet",
+      detail: draft
+        ? `Current route: ${templateOptionLabel} / ${executionMeta}.`
+        : "Fill the required fields before a live payload can be built.",
+      tone: draft ? "ok" : "warning",
+    },
+    {
+      id: "compose-stage",
+      label: "Staged snapshot",
+      title: draftSnapshot
+        ? draftIsStale
+          ? "Snapshot is older than the live form"
+          : "Snapshot matches the live payload"
+        : "No staged snapshot",
+      detail: draftSnapshot
+        ? "Stage is for pinned review/export only. It does not override Submit current draft."
+        : "Create a staged snapshot only when you need a frozen comparison or export copy.",
+      tone: draftSnapshotTone,
+    },
+    {
+      id: "compose-dispatch",
+      label: "Dispatch boundary",
+      title: templateCatalogIssue
+        ? "Template route is blocked"
+        : form.executionMode === "print"
+          ? "Print remains proof-gated"
+          : "Proof dispatch uses the live payload",
+      detail: templateCatalogIssue
+        ? templateCatalogIssue
+        : "Unsaved template editor changes stay local until the template is saved into the desktop catalog.",
+      tone: templateCatalogIssue ? "error" : form.executionMode === "print" ? "warning" : "ok",
+    },
+  ];
+  const pendingProofCount = auditSearch.entries.filter(
+    (entry) => entry.proof?.status === "pending",
+  ).length;
+  const filteredAuditEntries = useMemo(() => {
+    return [...auditSearch.entries]
+      .filter((entry) => auditModeFilter === "all" || entry.dispatch.mode === auditModeFilter)
+      .filter(
+        (entry) => auditProofFilter === "all" || auditProofFilterValue(entry) === auditProofFilter,
+      )
+      .sort((left, right) => compareAuditEntries(left, right, auditSortMode));
+  }, [auditModeFilter, auditProofFilter, auditSearch.entries, auditSortMode]);
+  const auditSearchMayBeTruncated = auditSearch.entries.length >= AUDIT_SEARCH_RESULT_LIMIT;
+  const auditVisiblePage = clampPage(auditPage, filteredAuditEntries.length, auditPageSize);
+  const pagedAuditEntries = filteredAuditEntries.slice(
+    (auditVisiblePage - 1) * auditPageSize,
+    auditVisiblePage * auditPageSize,
+  );
+  const auditPageTotal = pageCount(filteredAuditEntries.length, auditPageSize);
+  const auditRangeStart =
+    filteredAuditEntries.length === 0 ? 0 : (auditVisiblePage - 1) * auditPageSize + 1;
+  const auditRangeEnd =
+    filteredAuditEntries.length === 0
+      ? 0
+      : Math.min(auditVisiblePage * auditPageSize, filteredAuditEntries.length);
+  const selectedTemplateField =
+    templateEditorModel?.fields[
+      Math.min(selectedTemplateFieldIndex, Math.max(templateEditorModel.fields.length - 1, 0))
+    ] ?? null;
+  const queueFocusRow =
+    queuedRows.find((entry) => entry.draft?.jobId === selectedQueueRowJobId) ??
+    pagedQueuedRows.find((entry) => entry.submissionStatus === "submitting") ??
+    pagedQueuedRows.find((entry) => entry.submissionStatus === "failed") ??
+    pagedQueuedRows[0] ??
+    null;
+  const auditFocusEntry =
+    filteredAuditEntries.find((entry) => entry.dispatch.audit.jobId === selectedAuditEntryJobId) ??
+    pagedAuditEntries.find((entry) => entry.proof?.status === "pending") ??
+    pagedAuditEntries[0] ??
+    null;
+  const selectedAuditBackupBundle =
+    auditBackupBundles.bundles.find((bundle) => bundle.filePath === selectedAuditBackupPath) ??
+    auditBackupBundles.bundles[0] ??
+    null;
+  const queueFocusSummary = queueFocusRow
+    ? `${queueFocusRow.draft?.jobId ?? `row-${queueFocusRow.rowIndex + 1}`} / ${queueFocusRow.submissionStatus}`
+    : "No queue row in focus";
+  const auditFocusSummary = auditFocusEntry
+    ? `${auditFocusEntry.dispatch.audit.jobId} / ${auditFocusEntry.dispatch.mode}`
+    : "No audit record in focus";
+  const auditRestoreReady =
+    !!selectedAuditBackupBundle &&
+    auditRestoreConfirmed &&
+    auditRestoreState.phase !== "submitting" &&
+    bridgeStatusAvailable;
+  const workspaceItems: Array<{
+    id: WorkspaceMode;
+    label: string;
+    description: string;
+    badge: string;
+  }> = [
+    {
+      id: "compose",
+      label: "Draft",
+      description: "Manual compose and live payload review",
+      badge: draft ? "ready" : "incomplete",
+    },
+    {
+      id: "templates",
+      label: "Template",
+      description: "Authoring, JSON, and renderer parity",
+      badge: templateValidation.status,
+    },
+    {
+      id: "queue",
+      label: "Queue",
+      description: "Import, validate, and dispatch batches",
+      badge: queuedRows.length > 0 ? String(queuedRows.length) : String(sourceRows.length),
+    },
+    {
+      id: "audit",
+      label: "Audit",
+      description: "Proof approvals, export, retention",
+      badge:
+        pendingProofCount > 0 ? `${pendingProofCount} pending` : String(auditSearch.entries.length),
+    },
+  ];
+  const workspaceDetailById: Record<WorkspaceMode, { title: string; summary: string }> = {
+    compose: {
+      title: "Draft Composer",
+      summary: "Manual draft entry, execution intent, and live payload review.",
+    },
+    templates: {
+      title: "Template Workbench",
+      summary: "Structured authoring, catalog-aligned JSON, and renderer parity checks.",
+    },
+    queue: {
+      title: "Import And Queue",
+      summary: "Spreadsheet intake, mapping, row validation, and staged batch dispatch.",
+    },
+    audit: {
+      title: "Audit And Proof Review",
+      summary: "Approval flow, retention, backup inventory, and legacy proof migration.",
+    },
+  };
+  const activeWorkspaceMeta = workspaceDetailById[activeWorkspace];
+  const workstationStatusCards = [
+    {
+      id: "bridge",
+      label: "Bridge",
+      value: bridgeStatus.phase === "ready" ? "ready" : bridgeStatus.phase,
+      detail: bridgeStatusAvailable ? (bridgeStatus.status?.printAdapterKind ?? "desktop") : "n/a",
+    },
+    {
+      id: "draft",
+      label: "Live payload",
+      value: draft ? "armed" : "missing",
+      detail: executionModeLabel,
+    },
+    {
+      id: "queue",
+      label: "Queue session",
+      value: queueFocusSummary,
+      detail: `${queuedReadyRowsCount} ready / ${queuedFailedRowsCount} failed`,
+    },
+    {
+      id: "audit",
+      label: "Audit focus",
+      value: auditFocusSummary,
+      detail: `${pendingProofCount} pending / ${approvedProofEntries.length} approved`,
+    },
+  ];
+  const activeWorkspaceFocus =
+    activeWorkspace === "compose"
+      ? draft
+        ? "Live payload is authoritative for submit; staged snapshot stays review-only."
+        : "Compose lane is waiting for a valid live payload."
+      : activeWorkspace === "templates"
+        ? "Canvas and Rust preview are split from catalog authority so local draft edits do not silently dispatch."
+        : activeWorkspace === "queue"
+          ? queueMutationLocked
+            ? "Queue mutation lock is active until the batch session completes."
+            : "Grid state is idle. Build or retry rows from the current submit session."
+          : selectedAuditBackupBundle
+            ? `Restore target armed: ${selectedAuditBackupBundle.fileName}.`
+            : "Audit lane covers proof review, retention, bundle inventory, and restore.";
+  const activityFeed = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = [];
+    const pushItem = (
+      id: string,
+      label: string,
+      message: string | null | undefined,
+      tone: ActivityTone,
+    ) => {
+      const normalized = message?.trim();
+      if (!normalized) {
+        return;
+      }
+      items.push({ id, label, message: normalized, tone });
+    };
+
+    pushItem(
+      "bridge",
+      "Bridge",
+      bridgeStatus.message,
+      bridgeStatus.phase === "error"
+        ? "error"
+        : bridgeStatus.phase === "unavailable"
+          ? "warning"
+          : "neutral",
+    );
+    pushItem(
+      "manual",
+      "Manual dispatch",
+      manualSubmit.message,
+      manualSubmit.phase === "error"
+        ? "error"
+        : manualSubmit.phase === "success"
+          ? "ok"
+          : manualSubmit.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "batch",
+      "Batch dispatch",
+      batchSubmit.message,
+      batchSubmit.phase === "error"
+        ? "error"
+        : batchSubmit.phase === "success"
+          ? "ok"
+          : batchSubmit.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "template-save",
+      "Template catalog",
+      templateCatalogWriteState.message,
+      templateCatalogWriteState.phase === "error"
+        ? "error"
+        : templateCatalogWriteState.phase === "success"
+          ? "ok"
+          : templateCatalogWriteState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-search",
+      "Audit search",
+      auditSearch.message,
+      auditSearch.phase === "error"
+        ? "error"
+        : auditSearch.phase === "ready"
+          ? "ok"
+          : auditSearch.phase === "loading"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "proof-review",
+      "Proof review",
+      proofReview.message,
+      proofReview.phase === "error"
+        ? "error"
+        : proofReview.phase === "success"
+          ? "ok"
+          : proofReview.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-export",
+      "Audit export",
+      auditExportState.message,
+      auditExportState.phase === "error"
+        ? "error"
+        : auditExportState.phase === "success"
+          ? "ok"
+          : auditExportState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-trim",
+      "Audit trim",
+      auditTrimState.message,
+      auditTrimState.phase === "error"
+        ? "error"
+        : auditTrimState.phase === "success"
+          ? "ok"
+          : auditTrimState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-restore",
+      "Audit restore",
+      auditRestoreState.message,
+      auditRestoreState.phase === "error"
+        ? "error"
+        : auditRestoreState.phase === "success"
+          ? "ok"
+          : auditRestoreState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "legacy-proof",
+      "Legacy proof",
+      legacyProofSeedState.message,
+      legacyProofSeedState.phase === "error"
+        ? "error"
+        : legacyProofSeedState.phase === "success"
+          ? "ok"
+          : legacyProofSeedState.phase === "validating" || legacyProofSeedState.phase === "seeding"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "template-preview",
+      "Renderer preview",
+      templateRenderPreview.message,
+      templateRenderPreview.phase === "error"
+        ? "error"
+        : templateRenderPreview.phase === "ready"
+          ? "ok"
+          : templateRenderPreview.phase === "rendering"
+            ? "warning"
+            : "neutral",
+    );
+
+    return items.slice(0, 8);
+  }, [
+    auditExportState.message,
+    auditExportState.phase,
+    auditSearch.message,
+    auditSearch.phase,
+    auditTrimState.message,
+    auditTrimState.phase,
+    auditRestoreState.message,
+    auditRestoreState.phase,
+    batchSubmit.message,
+    batchSubmit.phase,
+    bridgeStatus.message,
+    bridgeStatus.phase,
+    legacyProofSeedState.message,
+    legacyProofSeedState.phase,
+    manualSubmit.message,
+    manualSubmit.phase,
+    proofReview.message,
+    proofReview.phase,
+    templateCatalogWriteState.message,
+    templateCatalogWriteState.phase,
+    templateRenderPreview.message,
+    templateRenderPreview.phase,
+  ]);
+
+  useEffect(() => {
+    if (!allowWithoutProofEnabled && form.executionAllowWithoutProof) {
+      setForm((current) => ({ ...current, executionAllowWithoutProof: false }));
+    }
+  }, [allowWithoutProofEnabled, form.executionAllowWithoutProof]);
+
+  useEffect(() => {
+    if (!templateEditorModel || templateEditorModel.fields.length === 0) {
+      setSelectedTemplateFieldIndex(0);
+      return;
+    }
+    setSelectedTemplateFieldIndex((current) =>
+      Math.min(current, templateEditorModel.fields.length - 1),
+    );
+  }, [templateEditorModel]);
+
+  useEffect(() => {
+    if (!selectedAuditBackupBundle) {
+      if (selectedAuditBackupPath !== null) {
+        setSelectedAuditBackupPath(null);
+      }
+      return;
+    }
+    if (selectedAuditBackupPath !== selectedAuditBackupBundle.filePath) {
+      setSelectedAuditBackupPath(selectedAuditBackupBundle.filePath);
+    }
+  }, [selectedAuditBackupBundle, selectedAuditBackupPath]);
+
+  useEffect(() => {
+    setQueuedRows((current) => {
+      if (current.length === 0) {
+        return current;
+      }
+      if (templateCatalogIssue) {
+        const blockMessage = buildTemplateCatalogBlockMessage(templateCatalogIssue);
+        let changed = false;
+        const next = current.map((row) => {
+          if (
+            row.submissionStatus === "ready" ||
+            row.submissionStatus === "submitting" ||
+            isTemplateCatalogBlockedQueuedRow(row)
+          ) {
+            const alreadyBlocked =
+              row.submissionStatus === "failed" && row.dispatchError === blockMessage;
+            if (alreadyBlocked) {
+              return row;
+            }
+            changed = true;
+            return {
+              ...row,
+              submissionStatus: "failed" as const,
+              dispatchResult: null,
+              dispatchError: blockMessage,
+            };
+          }
+          return row;
+        });
+        return changed ? next : current;
+      }
+
+      let changed = false;
+      const next = current.map((row) => {
+        if (
+          row.submissionStatus === "failed" &&
+          isTemplateCatalogBlockedQueuedRow(row) &&
+          row.dispatchResult === null
+        ) {
+          changed = true;
+          return {
+            ...row,
+            submissionStatus: "ready" as const,
+            dispatchError: null,
+          };
+        }
+        return row;
+      });
+      return changed ? next : current;
+    });
+  }, [templateCatalogIssue]);
 
   function updateField<Key extends keyof FormState>(key: Key, value: FormState[Key]) {
+    setForm((current) => ({ ...current, [key]: value }));
+  }
+
+  function updateTemplateSource(value: string) {
+    setTemplateSource(value);
+    setTemplateParseError(null);
+    setTemplateImportError("");
+    setTemplateCatalogWriteState({ phase: "idle", message: "" });
+  }
+
+  function applyStructuredTemplateUpdate(
+    mutate: (spec: TemplateSpec) => void,
+    invalidMessage = "Fix template JSON before using the structured editor.",
+  ) {
+    const updated = updateTemplateSpecSource(templateSource, mutate);
+    if (!updated.next) {
+      setTemplateParseError(updated.error ?? invalidMessage);
+      return;
+    }
+    setTemplateSource(updated.next);
+    setTemplateParseError(null);
+    setTemplateImportError("");
+  }
+
+  function updateTemplateMetaField(
+    key: "label_name" | "description" | "template_version",
+    value: string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      spec[key] = value;
+    });
+  }
+
+  function updateTemplatePageField(
+    key: "width_mm" | "height_mm" | "background_fill",
+    value: number | string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const page = isPlainObject(spec.page) ? { ...spec.page } : {};
+      page[key] =
+        typeof value === "number"
+          ? Math.max(0.1, Number(value) || 0.1)
+          : normalizeTemplateColor(value, "#ffffff");
+      spec.page = page;
+    });
+  }
+
+  function updateTemplateBorderField(
+    key: "visible" | "color" | "width_mm",
+    value: boolean | number | string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const border = isPlainObject(spec.border) ? { ...spec.border } : {};
+      if (key === "visible") {
+        border[key] = Boolean(value);
+      } else if (key === "width_mm") {
+        border[key] = Math.max(0, Number(value) || 0);
+      } else {
+        border[key] = normalizeTemplateColor(String(value), "#000000");
+      }
+      spec.border = border;
+    });
+  }
+
+  function updateTemplateFieldRow(
+    index: number,
+    key: keyof TemplateFieldEditor,
+    value: string | number,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const current = isPlainObject(fields[index]) ? { ...fields[index] } : {};
+      if (key === "color") {
+        current.color = normalizeTemplateColor(String(value));
+      } else if (key === "xMm") {
+        current.x_mm = Math.max(0, Number(value) || 0);
+      } else if (key === "yMm") {
+        current.y_mm = Math.max(0, Number(value) || 0);
+      } else if (key === "fontSizeMm") {
+        current.font_size_mm = Math.max(0.1, Number(value) || 0.1);
+      } else if (key === "name") {
+        current.name = String(value);
+      } else if (key === "template") {
+        current.template = String(value);
+      }
+      fields[index] = current;
+      spec.fields = fields;
+    });
+  }
+
+  function moveTemplateField(index: number, direction: -1 | 1) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || index >= fields.length || nextIndex >= fields.length) {
+        return;
+      }
+      const [field] = fields.splice(index, 1);
+      fields.splice(nextIndex, 0, field);
+      spec.fields = fields;
+    });
+  }
+
+  function addTemplateField() {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      fields.push({
+        name: `field_${fields.length + 1}`,
+        x_mm: 2,
+        y_mm: Math.min(26, 4 + fields.length * 4),
+        font_size_mm: 3,
+        template: "text:{sku}",
+        color: DEFAULT_TEMPLATE_FIELD_COLOR,
+      });
+      spec.fields = fields;
+    });
+  }
+
+  function duplicateTemplateField(index: number) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const field = fields[index];
+      if (!isPlainObject(field)) {
+        return;
+      }
+      const clone = { ...field };
+      clone.name =
+        typeof clone.name === "string" && clone.name.trim().length > 0
+          ? `${clone.name}_copy`
+          : `field_${fields.length + 1}`;
+      clone.y_mm = Math.max(0, Number(clone.y_mm ?? 0) + 3);
+      fields.splice(index + 1, 0, clone);
+      spec.fields = fields;
+    });
+  }
+
+  function removeTemplateField(index: number) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      if (fields.length <= 1) {
+        return;
+      }
+      fields.splice(index, 1);
+      spec.fields = fields;
+    });
+  }
+
+  function updateFieldMapping(field: FieldKey, value: string) {
+    setFieldMapping((current) => ({ ...current, [field]: value }));
+  }
+
+  function handleTemplateImport(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    const reader = new FileReader();
+    reader.onerror = () => {
+      setTemplateImportError("Template import failed.");
+      setTemplateParseError("Template import failed.");
+    };
+    reader.onload = () => {
+      const raw = String(reader.result || "");
+      const parsed = parseTemplateAsset(raw);
+      if (!parsed.ok) {
+        setTemplateImportError(parsed.error);
+        setTemplateParseError(parsed.error);
+        return;
+      }
+      setTemplateSource(parsed.templateSource);
+
+      const parsedTemplate = parseTemplateSpec(parsed.templateSource);
+      if (parsedTemplate.error) {
+        setTemplateImportError(`Imported template is not valid JSON: ${parsedTemplate.error}`);
+        setTemplateParseError(parsedTemplate.error);
+        return;
+      }
+      const sourceValidation = validateTemplateSource(parsed.templateSource);
+      if (sourceValidation.status === "invalid") {
+        setTemplateImportError(`Imported template is invalid: ${sourceValidation.message}`);
+        setTemplateParseError(sourceValidation.message);
+        return;
+      }
+      setTemplateImportError(
+        sourceValidation.status === "stale"
+          ? `Imported template is stale: ${sourceValidation.message}`
+          : "",
+      );
+      setTemplateParseError(null);
+
+      if (parsed.formState) {
+        setForm(() => ({
+          ...createInitialFormState(),
+          ...parsed.formState,
+        }));
+      }
+      if (parsed.fieldMapping) {
+        setFieldMapping(parsed.fieldMapping);
+      }
+      if (parsed.draftSnapshot) {
+        setDraftSnapshot(parsed.draftSnapshot);
+      } else {
+        setDraftSnapshot(null);
+      }
+    };
+    reader.readAsText(file, "utf-8");
+  }
+
+  function handleTemplateAssetExport() {
+    const payload = buildTemplateAssetPayload(form, fieldMapping, templateSource, draftSnapshot);
+    downloadText("template-asset.json", JSON.stringify(payload, null, 2));
+  }
+
+  function handleTemplateExport() {
+    downloadText("template-spec.json", templateSource);
+  }
+
+  async function runTemplateCatalogSave() {
+    const parsed = parseTemplateSpec(templateSource);
+    if (parsed.error || !parsed.spec) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: parsed.error ?? "Template JSON must be valid before saving.",
+      });
+      return;
+    }
+    const templateRef = parseTemplateRef(parsed.spec);
+    if (!templateRef) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message:
+          "Template JSON must include a valid template_version (for example `template-id@version`) before saving.",
+      });
+      return;
+    }
+    const templateVersion = templateVersionOf(templateRef);
+    const validation = validateTemplateSource(templateSource);
+    if (validation.status === "invalid") {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: `Cannot save invalid template: ${validation.message}`,
+      });
+      return;
+    }
+
+    setTemplateCatalogWriteState({
+      phase: "submitting",
+      message: `Saving ${templateVersion} to desktop local catalog...`,
+    });
+
+    try {
+      const result: SaveTemplateToLocalCatalogResult = await saveTemplateToLocalCatalog({
+        templateSource,
+      });
+      const responseVersion = result.templateVersion ?? templateVersion;
+      const action = result.status === "updated" ? "updated" : "saved";
+      setTemplateCatalogWriteState({
+        phase: "success",
+        message:
+          result.message ?? `Template ${responseVersion} ${action} in desktop local catalog.`,
+      });
+      await refreshTemplateCatalog();
+    } catch (error) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: `Template catalog save failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  }
+
+  function validateTemplateText() {
+    const parsed = parseTemplateSpec(templateSource);
+    if (parsed.error) {
+      setTemplateParseError(parsed.error);
+      return;
+    }
+    setTemplateParseError(null);
+    setTemplateSource(sanitizeTemplateString(templateSource));
+  }
+
+  function resetTemplateToDefaults() {
+    const text = sanitizeTemplateString(JSON.stringify(defaultTemplateSpec));
+    setTemplateSource(text);
+    setTemplateParseError(null);
+    setTemplateImportError("");
+    setTemplateCatalogWriteState({
+      phase: "idle",
+      message: "",
+    });
+  }
+
+  async function handleDataUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    if (queueMutationLocked) {
+      event.currentTarget.value = "";
+      return;
+    }
+    setSourceError(null);
+    setSourceData(null);
+    setQueuedRows([]);
+    try {
+      const parsed = await parseUploadedData(file);
+      setSourceData(parsed);
+      setFieldMapping(detectMapping(parsed.headers));
+    } catch (error) {
+      setSourceError(error instanceof Error ? error.message : "Data import failed.");
+    }
+  }
+
+  async function handleLegacyProofSeedUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    setLegacyProofSeedError(null);
+    setLegacyProofSeedSource(null);
+    setLegacyProofSeedState({
+      phase: "idle",
+      message: "",
+      result: null,
+    });
+    try {
+      const parsed = await parseUploadedData(file);
+      setLegacyProofSeedSource(parsed);
+    } catch (error) {
+      setLegacyProofSeedError(
+        error instanceof Error ? error.message : "Legacy proof import failed.",
+      );
+    }
+  }
+
+  function autoDetectMapping() {
+    if (!sourceData) return;
+    setFieldMapping(detectMapping(sourceData.headers));
+  }
+
+  function buildQueueSnapshot() {
+    if (queueMutationLocked) {
+      return;
+    }
+    setBatchSubmit({ phase: "idle", message: "", results: [] });
+    setQueuedRows(
+      preparedRows
+        .filter((entry) => entry.status === "ready" && entry.draft !== null)
+        .map((entry) => ({
+          ...entry,
+          submissionStatus: "ready" as const,
+          dispatchResult: null,
+          dispatchError: null,
+          retryLineageJobId: null,
+        }))
+        .slice(),
+    );
+  }
+
+  function clearQueueSnapshot() {
+    if (queueMutationLocked) {
+      return;
+    }
+    setQueuedRows([]);
+    setBatchSubmit({ phase: "idle", message: "", results: [] });
+  }
+
+  async function runLegacyProofSeed(action: LegacyProofSeedPhase) {
+    if (!legacyProofSeedRequest) {
+      setLegacyProofSeedState({
+        phase: "error",
+        message: "Load a CSV/XLSX file before validating or seeding legacy proofs.",
+        result: null,
+      });
+      return;
+    }
+    setLegacyProofSeedState({
+      phase: action,
+      message:
+        action === "validating"
+          ? "Validating legacy proof seed rows..."
+          : "Seeding legacy proof rows as pending review...",
+      result: null,
+    });
+    try {
+      const result =
+        action === "validating"
+          ? await validateLegacyProofSeed(legacyProofSeedRequest)
+          : await seedLegacyProofs(legacyProofSeedRequest);
+      setLegacyProofSeedState({
+        phase: result.applied ? "success" : action === "validating" ? "success" : "error",
+        message: result.message,
+        result,
+      });
+      if (result.applied) {
+        void refreshAuditSearch(auditQuery);
+      }
+    } catch (error) {
+      setLegacyProofSeedState({
+        phase: "error",
+        message: `Legacy proof seed failed: ${formatErrorMessage(error)}`,
+        result: null,
+      });
+    }
+  }
+
+  const refreshAuditSearch = useEffectEvent(async (searchText?: string) => {
+    if (!isTauriConnected()) {
+      setAuditSearch({
+        phase: "unavailable",
+        entries: [],
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        lastUpdatedAt: null,
+      });
+      return;
+    }
+
+    setAuditSearch((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Loading proof inbox and audit ledger...",
+    }));
+
+    try {
+      const result = await searchAuditLog({
+        searchText: searchText?.trim() || auditQuery.trim() || undefined,
+        limit: AUDIT_SEARCH_RESULT_LIMIT,
+      });
+      setAuditSearch({
+        phase: "ready",
+        entries: result.entries,
+        message: `Loaded ${result.entries.length} audit entr${result.entries.length === 1 ? "y" : "ies"}.`,
+        lastUpdatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setAuditSearch({
+        phase: "error",
+        entries: [],
+        message: `Audit search failed: ${formatErrorMessage(error)}`,
+        lastUpdatedAt: null,
+      });
+    }
+  });
+
+  const runAuditExport = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditExportState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        detail: null,
+      });
+      return;
+    }
+
+    setAuditExportState({
+      phase: "submitting",
+      message: "Building audit export from desktop ledger...",
+      detail: null,
+    });
+
+    try {
+      const result = await exportAuditLedger({ scope: auditScope });
+      const exportedAt = new Date().toISOString();
+      const fileName = buildAuditExportFilename(result.scope, exportedAt);
+      downloadText(fileName, buildAuditExportDocument(result));
+      setAuditExportState({
+        phase: "success",
+        message: `Exported ${result.dispatchCount} dispatch and ${result.proofCount} proof entries as JSON.`,
+        detail: `Saved ${fileName}.`,
+      });
+    } catch (error) {
+      setAuditExportState({
+        phase: "error",
+        message: `Audit export failed: ${formatErrorMessage(error)}`,
+        detail: null,
+      });
+    }
+  });
+
+  const runAuditTrim = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditTrimState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        detail: null,
+      });
+      return;
+    }
+
+    let maxAgeDays: number | null;
+    let maxEntries: number | null;
+    try {
+      maxAgeDays = parseOptionalPositiveInteger(auditMaxAgeDays, "Max age days");
+      maxEntries = parseOptionalPositiveInteger(auditMaxEntries, "Max entries");
+    } catch (error) {
+      setAuditTrimState({
+        phase: "error",
+        message: formatErrorMessage(error),
+        detail: null,
+      });
+      return;
+    }
+
+    if (maxAgeDays === null && maxEntries === null) {
+      setAuditTrimState({
+        phase: "error",
+        message: "Set max age days, max entries, or both before running retention.",
+        detail: null,
+      });
+      return;
+    }
+
+    setAuditTrimState({
+      phase: "submitting",
+      message: auditDryRun
+        ? "Running audit retention dry run..."
+        : "Trimming audit ledger and writing backup bundle...",
+      detail: null,
+    });
+
+    try {
+      const result = await trimAuditLedger({
+        scope: auditScope,
+        maxAgeDays: maxAgeDays ?? undefined,
+        maxEntries: maxEntries ?? undefined,
+        dryRun: auditDryRun,
+      });
+      setAuditTrimState({
+        phase: "success",
+        message: describeAuditTrimResult(result),
+        detail: result.backup?.filePath ?? null,
+      });
+      if (!result.dryRun) {
+        void refreshAuditSearch(auditQuery);
+        void refreshAuditBackupBundles();
+      }
+    } catch (error) {
+      setAuditTrimState({
+        phase: "error",
+        message: `Audit retention failed: ${formatErrorMessage(error)}`,
+        detail: null,
+      });
+    }
+  });
+
+  const refreshAuditBackupBundles = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditBackupBundles({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        bundles: [],
+      });
+      return;
+    }
+
+    setAuditBackupBundles((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Loading audit backup bundles...",
+      bundles: current.bundles,
+    }));
+
+    try {
+      const bundles = await listAuditBackupBundles();
+      const sorted = [...bundles].sort((left, right) => {
+        if (!left.createdAtUtc && !right.createdAtUtc) {
+          return 0;
+        }
+        if (!left.createdAtUtc) {
+          return 1;
+        }
+        if (!right.createdAtUtc) {
+          return -1;
+        }
+        return right.createdAtUtc.localeCompare(left.createdAtUtc);
+      });
+      setAuditBackupBundles({
+        phase: "ready",
+        message: `Loaded ${sorted.length} backup bundle${sorted.length === 1 ? "" : "s"}.`,
+        bundles: sorted,
+      });
+    } catch (error) {
+      setAuditBackupBundles({
+        phase: "error",
+        message: `Audit backup bundle list failed: ${formatErrorMessage(error)}`,
+        bundles: [],
+      });
+    }
+  });
+
+  const runAuditRestore = useEffectEvent(async () => {
+    if (!selectedAuditBackupBundle) {
+      setAuditRestoreState({
+        phase: "error",
+        message: "Select an audit backup bundle before running restore.",
+        filePath: null,
+        result: null,
+      });
+      return;
+    }
+    if (!isTauriConnected()) {
+      setAuditRestoreState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
+      });
+      return;
+    }
+    if (!auditRestoreConfirmed) {
+      setAuditRestoreState({
+        phase: "error",
+        message: "Confirm merge restore before restoring the selected backup bundle.",
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
+      });
+      return;
+    }
+
+    setAuditRestoreState({
+      phase: "submitting",
+      message: `Restoring ${selectedAuditBackupBundle.fileName} into the active desktop audit ledger...`,
+      filePath: selectedAuditBackupBundle.filePath,
+      result: null,
+    });
+
+    try {
+      const result = await restoreAuditBackupBundle({
+        filePath: selectedAuditBackupBundle.filePath,
+      });
+      setAuditRestoreState({
+        phase: "success",
+        message: result.message,
+        filePath: selectedAuditBackupBundle.filePath,
+        result,
+      });
+      setAuditRestoreConfirmed(false);
+      void refreshAuditSearch(auditQuery);
+      void refreshAuditBackupBundles();
+    } catch (error) {
+      setAuditRestoreState({
+        phase: "error",
+        message: `Audit restore failed: ${formatErrorMessage(error)}`,
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
+      });
+    }
+  });
+
+  const refreshBridgeStatus = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setBridgeStatus({
+        phase: "unavailable",
+        status: null,
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+      });
+      setAuditSearch({
+        phase: "unavailable",
+        entries: [],
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        lastUpdatedAt: null,
+      });
+      setTemplateCatalogState({
+        phase: "unavailable",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message:
+          "Browser preview mode / desktop bridge unavailable. Using bundled template catalog fallback.",
+      });
+      setAuditBackupBundles({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        bundles: [],
+      });
+      return;
+    }
+
+    setBridgeStatus((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Reading bridge health and output paths...",
+    }));
+
+    try {
+      const status = await fetchPrintBridgeStatus();
+      setBridgeStatus({
+        phase: "ready",
+        status,
+        message: `Bridge ready. Active adapter: ${status.printAdapterKind}`,
+      });
+      void refreshTemplateCatalog();
+      void refreshAuditSearch();
+      void refreshAuditBackupBundles();
+    } catch (error) {
+      setBridgeStatus({
+        phase: "error",
+        status: null,
+        message: `Bridge status check failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  });
+
+  const refreshTemplateCatalog = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setTemplateCatalogState({
+        phase: "unavailable",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message:
+          "Browser preview mode / desktop bridge unavailable. Using bundled template catalog fallback.",
+      });
+      return;
+    }
+
+    setTemplateCatalogState((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Reading desktop template catalog...",
+    }));
+
+    try {
+      const catalog = await fetchTemplateCatalog();
+      const options = toTemplateOptionsFromCatalog(catalog);
+      setTemplateCatalogState({
+        phase: "ready",
+        templates: options.length > 0 ? options : templateOptions,
+        defaultTemplateVersion: catalog.defaultTemplateVersion,
+        message: `Loaded ${catalog.templates.length} desktop template entr${
+          catalog.templates.length === 1 ? "y" : "ies"
+        }.`,
+      });
+    } catch (error) {
+      setTemplateCatalogState({
+        phase: "error",
+        templates: templateOptions,
+        defaultTemplateVersion: templateVersionOf(templateOptions[0]),
+        message: `Template catalog sync failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  });
+
+  const refreshTemplateRenderPreview = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setTemplateRenderPreview({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell to render Rust previews.",
+        result: null,
+      });
+      return;
+    }
+
+    setTemplateRenderPreview({
+      phase: "rendering",
+      message: "Rendering SVG preview through desktop-shell and Rust renderer...",
+      result: null,
+    });
+
+    try {
+      const result = await previewTemplateDraft(templateDraftPreviewRequest);
+      setTemplateRenderPreview({
+        phase: "ready",
+        message: `Rust preview ready for ${result.templateVersion} (${result.fieldCount} fields).`,
+        result,
+      });
+    } catch (error) {
+      setTemplateRenderPreview({
+        phase: "error",
+        message: `Rust preview failed: ${formatErrorMessage(error)}`,
+        result: null,
+      });
+    }
+  });
+
+  function formatErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+      return error.message;
+    }
+    return "Unknown error while submitting dispatch request.";
+  }
+
+  async function dispatchDraft(
+    draft: PrintJobDraft,
+    options: DispatchRequestOptions = {},
+  ): Promise<PrintDispatchResult> {
+    const request = toDispatchRequestWithActor(draft, options);
+    return dispatchPrintJob(request);
+  }
+
+  function buildProofLinkedDispatchOptions(
+    draft: PrintJobDraft,
+    options: DispatchRequestOptions = {},
+  ): DispatchRequestOptions {
+    if (options.jobLineageId) {
+      return options;
+    }
+    if (draft.execution?.mode !== "print") {
+      return options;
+    }
+    const sourceProofJobId = draft.execution.sourceProofJobId?.trim();
+    if (!sourceProofJobId) {
+      return options;
+    }
+    const proofEntry = approvedProofEntryByJobId.get(sourceProofJobId);
+    if (!proofEntry?.proof) {
+      return options;
+    }
+    return {
+      ...options,
+      jobLineageId: proofEntry.proof.jobLineageId,
+    };
+  }
+
+  function buildLegacyProofSeedRequest(
+    sourceData: DataSource | null,
+  ): LegacyProofSeedRequest | null {
+    if (!sourceData) {
+      return null;
+    }
+    const rows = toSourceRows(sourceData).map((row) => {
+      const qtyText = readSourceValue(row, fieldAliases.qty).replace(/,/g, "").trim();
+      const qty = /^\d+$/.test(qtyText) ? Number.parseInt(qtyText, 10) : 0;
+      const jobLineageId = readSourceValue(row, LEGACY_JOB_LINEAGE_ID_ALIASES);
+      const notes = readSourceValue(row, LEGACY_NOTES_ALIASES);
+      return {
+        proofJobId: readSourceValue(row, LEGACY_PROOF_JOB_ID_ALIASES),
+        artifactPath: readSourceValue(row, LEGACY_ARTIFACT_PATH_ALIASES),
+        templateVersion: readSourceValue(row, LEGACY_TEMPLATE_VERSION_ALIASES),
+        matchSubject: {
+          sku: readSourceValue(row, fieldAliases.sku),
+          brand: readSourceValue(row, fieldAliases.brand),
+          jan: readSourceValue(row, fieldAliases.jan),
+          qty,
+        },
+        requestedBy: {
+          userId: readSourceValue(row, LEGACY_REQUESTED_BY_USER_ID_ALIASES),
+          displayName: readSourceValue(row, LEGACY_REQUESTED_BY_DISPLAY_NAME_ALIASES),
+        },
+        requestedAt: readSourceValue(row, LEGACY_REQUESTED_AT_ALIASES),
+        jobLineageId: jobLineageId || undefined,
+        notes: notes || undefined,
+      };
+    });
+    return { rows };
+  }
+
+  function applyApprovedProofToForm(entry: AuditSearchEntry) {
+    const proof = entry.proof;
+    if (proof?.status !== "approved") {
+      return;
+    }
     setForm((current) => ({
       ...current,
-      [key]: value,
+      sku: entry.dispatch.matchSubject.sku,
+      brand: entry.dispatch.matchSubject.brand,
+      jan: entry.dispatch.matchSubject.janNormalized,
+      qty: String(entry.dispatch.matchSubject.qty),
+      executionMode: "print",
+      executionApprovedBy:
+        proof.decision?.actor.displayName ||
+        current.executionApprovedBy ||
+        current.actor ||
+        "ops.user",
+      executionApprovedAt:
+        toDateTimeLocalInput(proof.decision?.occurredAt) || current.executionApprovedAt,
+      executionSourceProofJobId: proof.proofJobId,
+      executionAllowWithoutProof: false,
     }));
   }
+
+  const submitProofReview = useEffectEvent(
+    async (entry: AuditSearchEntry, action: "approve" | "reject") => {
+      if (!entry.proof) {
+        return;
+      }
+
+      setProofReview({
+        phase: "submitting",
+        message: `${action === "approve" ? "Approving" : "Rejecting"} ${entry.proof.proofJobId}...`,
+        proofJobId: entry.proof.proofJobId,
+        action,
+      });
+
+      const request = {
+        proofJobId: entry.proof.proofJobId,
+        actorUserId: reviewActorId,
+        actorDisplayName: reviewActorId,
+        decidedAt: new Date().toISOString(),
+        notes: proofReviewNotes.trim() || undefined,
+      };
+
+      try {
+        const proof =
+          action === "approve" ? await approveProof(request) : await rejectProof(request);
+        setProofReview({
+          phase: "success",
+          message: `Proof ${proof.proofJobId} marked ${proof.status}.`,
+          proofJobId: proof.proofJobId,
+          action,
+        });
+        if (proof.status === "approved") {
+          applyApprovedProofToForm({ dispatch: entry.dispatch, proof });
+        }
+        void refreshAuditSearch();
+      } catch (error) {
+        setProofReview({
+          phase: "error",
+          message: `Proof review failed: ${formatErrorMessage(error)}`,
+          proofJobId: entry.proof.proofJobId,
+          action,
+        });
+      }
+    },
+  );
+
+  async function submitManualDraft() {
+    setShowErrors(true);
+    if (!draft) {
+      setManualSubmit({
+        phase: "error",
+        message: "Cannot submit: manual draft is not valid. Complete the required fields first.",
+        result: null,
+      });
+      return;
+    }
+    if (templateCatalogIssue) {
+      setManualSubmit({
+        phase: "error",
+        message: templateCatalogIssue,
+        result: null,
+      });
+      return;
+    }
+    if (isBridgeSubmitBlocked || bridgeSubmitBlockMessage) {
+      setManualSubmit({
+        phase: "error",
+        message: bridgeSubmitBlockMessage ?? "Submit is blocked by bridge safety checks.",
+        result: null,
+      });
+      return;
+    }
+    setManualSubmit({
+      phase: "submitting",
+      message: "Submitting current manual draft to desktop backend...",
+      result: null,
+    });
+    setDraftSnapshot(draft);
+    try {
+      const result = await dispatchDraft(draft, buildProofLinkedDispatchOptions(draft));
+      setManualSubmit({
+        phase: "success",
+        message: `Manual draft submitted for ${result.audit.jobId} (${result.mode}).`,
+        result,
+      });
+      setDraftSnapshot(draft);
+      setSession(createSession());
+      void refreshAuditSearch();
+    } catch (error) {
+      setManualSubmit({
+        phase: "error",
+        message: `Manual submit failed: ${formatErrorMessage(error)}`,
+        result: null,
+      });
+    }
+  }
+
+  async function submitQueuedRows() {
+    if (queueMutationLocked) {
+      return;
+    }
+    const rows = queuedRows
+      .map((entry, queueIndex) => ({ entry, queueIndex }))
+      .filter(
+        (item): item is { entry: QueuedRow; queueIndex: number } =>
+          item.entry.draft !== null &&
+          (item.entry.submissionStatus === "ready" || item.entry.submissionStatus === "failed"),
+      );
+
+    if (isBridgeSubmitBlocked || bridgeSubmitBlockMessage) {
+      setBatchSubmit({
+        phase: "error",
+        message: bridgeSubmitBlockMessage ?? "Batch submit is blocked by bridge safety checks.",
+        results: [],
+      });
+      return;
+    }
+    if (templateCatalogIssue) {
+      setBatchSubmit({
+        phase: "error",
+        message: templateCatalogIssue,
+        results: [],
+      });
+      return;
+    }
+    if (rows.length === 0) {
+      setBatchSubmit({
+        phase: "error",
+        message: "No queued row drafts available. Snapshot rows before submitting.",
+        results: [],
+      });
+      return;
+    }
+    setBatchSubmit({
+      phase: "submitting",
+      message: `Submitting ${rows.length} queued draft(s)...`,
+      results: [],
+    });
+    const results: PrintDispatchResult[] = [];
+    const failures: string[] = [];
+
+    for (const item of rows) {
+      const currentDraft = item.entry.draft as PrintJobDraft;
+      const retryContext =
+        item.entry.submissionStatus === "failed"
+          ? createRetriedDraft(currentDraft, item.queueIndex)
+          : null;
+      const activeDraft = retryContext?.draft ?? currentDraft;
+      const lineageJobId = item.entry.retryLineageJobId ?? retryContext?.lineageJobId ?? null;
+      const dispatchOptions: DispatchRequestOptions = {};
+      if (lineageJobId) {
+        dispatchOptions.jobLineageId = lineageJobId;
+      }
+      if (retryContext?.retryReason) {
+        dispatchOptions.reason = retryContext.retryReason;
+      }
+      const linkedDispatchOptions = buildProofLinkedDispatchOptions(activeDraft, dispatchOptions);
+
+      setQueuedRows((current) =>
+        current.map((row, queueIndex) =>
+          queueIndex === item.queueIndex
+            ? {
+                ...row,
+                draft: activeDraft,
+                submissionStatus: "submitting",
+                dispatchResult: null,
+                dispatchError: null,
+                retryLineageJobId: lineageJobId,
+              }
+            : row,
+        ),
+      );
+      setBatchSubmit({
+        phase: "submitting",
+        message: `Submitting queued draft ${item.queueIndex + 1}/${rows.length}...`,
+        results: [...results],
+      });
+
+      try {
+        const result = await dispatchDraft(activeDraft, linkedDispatchOptions);
+        results.push(result);
+        setQueuedRows((current) =>
+          current.map((row, queueIndex) =>
+            queueIndex === item.queueIndex
+              ? {
+                  ...row,
+                  draft: activeDraft,
+                  submissionStatus: "submitted",
+                  dispatchResult: result,
+                  dispatchError: null,
+                  retryLineageJobId: lineageJobId,
+                }
+              : row,
+          ),
+        );
+      } catch (error) {
+        const message = formatErrorMessage(error);
+        failures.push(message);
+        setQueuedRows((current) =>
+          current.map((row, queueIndex) =>
+            queueIndex === item.queueIndex
+              ? {
+                  ...row,
+                  draft: activeDraft,
+                  submissionStatus: "failed",
+                  dispatchResult: null,
+                  dispatchError: message,
+                  retryLineageJobId: lineageJobId,
+                }
+              : row,
+          ),
+        );
+      }
+    }
+
+    if (failures.length > 0) {
+      setBatchSubmit({
+        phase: "error",
+        message: `Batch submit partially failed (${results.length}/${rows.length} succeeded): ${failures[0]}`,
+        results,
+      });
+      void refreshAuditSearch();
+      return;
+    }
+    setBatchSubmit({
+      phase: "success",
+      message: `Batch submit succeeded for ${results.length} queued draft(s).`,
+      results,
+    });
+    setSession(createSession());
+    void refreshAuditSearch();
+  }
+
+  function resetDataSource() {
+    if (queueMutationLocked) {
+      return;
+    }
+    setSourceData(null);
+    setSourceError(null);
+    setFieldMapping({
+      parentSku: "",
+      sku: "",
+      jan: "",
+      qty: "",
+      brand: "",
+    });
+    setQueuedRows([]);
+    setBatchSubmit({ phase: "idle", message: "", results: [] });
+  }
+
+  const persistTemplateDraft = useEffectEvent(() => {
+    writeStorageItem(STORAGE_KEYS.template, {
+      templateSource,
+    });
+  });
+
+  const persistMapping = useEffectEvent(() => {
+    writeStorageItem(STORAGE_KEYS.mapping, {
+      mapping: fieldMapping,
+    });
+  });
+
+  const persistSourceReview = useEffectEvent(() => {
+    if (!sourceData) {
+      return;
+    }
+    const rowsToStore = sourceData.rows.slice(0, MAX_PERSISTED_SOURCE_ROWS);
+    writeStorageItem(STORAGE_KEYS.source, {
+      sourceData: {
+        fileName: sourceData.fileName,
+        source: sourceData.source,
+        headers: sourceData.headers,
+        rows: rowsToStore,
+        xlsxMeta: sourceData.xlsxMeta ?? null,
+      },
+      rowsTruncated: sourceData.rows.length > MAX_PERSISTED_SOURCE_ROWS,
+      originalRowCount: sourceData.rows.length,
+    });
+  });
+
+  function clearPersistedState() {
+    removeStorageItem(STORAGE_KEYS.template);
+    removeStorageItem(STORAGE_KEYS.mapping);
+    removeStorageItem(STORAGE_KEYS.source);
+    setTemplatePersistedState({ savedAt: null, status: "none", message: null });
+    setMappingPersistedState({ savedAt: null, status: "none", message: null });
+    setSourcePersistedState({
+      savedAt: null,
+      status: "none",
+      message: null,
+      rowsTruncated: false,
+    });
+    setRestoreStateNotice(null);
+  }
+
+  function restorePersistedState() {
+    const templateState = loadTemplateDraftFromStorage();
+    const mappingState = loadColumnMappingFromStorage();
+    const sourceState = restoreSourceFromStorage();
+    setTemplateSource(templateState.templateSource);
+    setTemplatePersistedState(templateState.status);
+    setTemplateImportError("");
+    setFieldMapping(
+      reconcileMappingWithHeaders(mappingState.mapping, sourceState.source?.headers ?? []),
+    );
+    setMappingPersistedState(mappingState.status);
+    setSourceData(sourceState.source);
+    setSourcePersistedState(sourceState.status);
+    setSourceError(null);
+    if (queuedRows.length > 0) {
+      setRestoreStateNotice(
+        "Saved state restored. Existing unsent batch snapshot was preserved; please re-check row and actor validity.",
+      );
+    } else {
+      setRestoreStateNotice(
+        "Saved state restored. You can continue from the saved operator context.",
+      );
+    }
+  }
+
+  useEffect(() => {
+    persistTemplateDraft();
+    const validation = validateTemplateSource(templateSource);
+    setTemplatePersistedState((current) => ({
+      savedAt: current.savedAt ?? new Date().toISOString(),
+      status: validation.status,
+      message:
+        validation.status === "ok"
+          ? "Template draft saved."
+          : `Template draft saved with ${validation.status} issue: ${validation.message}`,
+    }));
+    const templateTextState = validateTemplateSource(templateSource);
+    setTemplateParseError(
+      templateTextState.status === "invalid" ? templateTextState.message : null,
+    );
+    setTemplateImportError("");
+  }, [persistTemplateDraft, templateSource]);
+
+  useEffect(() => {
+    persistMapping();
+    const hasAnyValue = Object.values(fieldMapping).some((value) => value.length > 0);
+    setMappingPersistedState({
+      savedAt: new Date().toISOString(),
+      status: hasAnyValue ? "ok" : "none",
+      message: hasAnyValue
+        ? "Column mapping saved."
+        : "Column mapping snapshot cleared (all columns empty).",
+    });
+  }, [fieldMapping, persistMapping]);
+
+  useEffect(() => {
+    if (sourceData) {
+      persistSourceReview();
+      setSourcePersistedState((current) => ({
+        savedAt: new Date().toISOString(),
+        status: "ok",
+        message:
+          current.rowsTruncated || sourceData.rows.length > MAX_PERSISTED_SOURCE_ROWS
+            ? `Source review saved partially. Showing first ${MAX_PERSISTED_SOURCE_ROWS} rows in local storage.`
+            : "Source review state saved.",
+        rowsTruncated: sourceData.rows.length > MAX_PERSISTED_SOURCE_ROWS,
+      }));
+    } else {
+      setSourcePersistedState({
+        savedAt: null,
+        status: "none",
+        message: null,
+        rowsTruncated: false,
+      });
+    }
+  }, [persistSourceReview, sourceData]);
+
+  useEffect(() => {
+    if (!sourceData) {
+      return;
+    }
+    setFieldMapping((current) => {
+      const reconciled = reconcileMappingWithHeaders(current, sourceData.headers);
+      if (
+        current.parentSku === reconciled.parentSku &&
+        current.sku === reconciled.sku &&
+        current.jan === reconciled.jan &&
+        current.qty === reconciled.qty &&
+        current.brand === reconciled.brand
+      ) {
+        return current;
+      }
+      return reconciled;
+    });
+  }, [sourceData]);
+
+  useEffect(() => {
+    void refreshBridgeStatus();
+  }, [refreshBridgeStatus]);
+
+  useEffect(() => {
+    const previewJobId = templateDraftPreviewRequest.sample.jobId;
+    setTemplateRenderPreview((current) => {
+      if (current.phase === "idle" && current.result === null) {
+        return current;
+      }
+      return {
+        phase: "idle",
+        message: `Template or sample data changed for ${previewJobId}. Refresh Rust preview to compare the renderer path.`,
+        result: null,
+      };
+    });
+  }, [templateDraftPreviewRequest]);
 
   function resetForm() {
     setSession(createSession());
     setForm(createInitialFormState());
     setShowErrors(false);
     setDraftSnapshot(null);
+    setManualSubmit({ phase: "idle", message: "", result: null });
+  }
+
+  function stageManualDraft() {
+    setShowErrors(true);
+    if (!draft) {
+      return;
+    }
+    setDraftSnapshot(draft);
+  }
+
+  function selectAuditBackupBundle(filePath: string) {
+    setSelectedAuditBackupPath(filePath);
+    setAuditRestoreConfirmed(false);
   }
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setShowErrors(true);
-
-    if (!draft) {
-      return;
-    }
-
-    setDraftSnapshot(draft);
+    stageManualDraft();
   }
 
   return (
-    <main className="page">
-      <section className="hero hero-grid">
-        <div>
-          <p className="eyebrow">Issue #4</p>
-          <h1>Job Draft Builder</h1>
-          <p className="lede">
-            Capture operator intent in the UI, then hand canonical validation and rendering back to
-            the Rust print core.
-          </p>
+    <main className="page app-shell">
+      <header className="app-topbar">
+        <div className="app-brand">
+          <span className="app-kicker">JAN Label / v0.2.0</span>
+          <strong>Operator Workstation</strong>
+          <p>Desktop-first proof, queue, template, and audit control surface.</p>
         </div>
-        <div className="hero-meta">
-          <p>
-            <strong>Session job</strong>
-            <span>{session.jobId}</span>
-          </p>
-          <p>
-            <strong>Requested at</strong>
-            <span>{session.requestedAt}</span>
-          </p>
-          <p>
-            <strong>Status</strong>
-            <span className={`status-pill ${draft ? "ready" : "blocked"}`}>
-              {draft ? "Ready to snapshot" : "Needs input"}
-            </span>
-          </p>
+        <div className="app-current-view">
+          <h1>{activeWorkspaceMeta.title}</h1>
+          <p>{activeWorkspaceFocus}</p>
+          <div className="workspace-meta-grid shell-metrics">
+            {workstationStatusCards.map((item) => (
+              <div key={item.id}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.detail}</small>
+              </div>
+            ))}
+          </div>
         </div>
-      </section>
-
-      <section className="workspace">
-        <form className="panel form-panel" noValidate onSubmit={handleSubmit}>
-          <div className="section-heading">
-            <h2>Create draft</h2>
-            <p>Enter the minimum fields from T-004 and keep the preview schema-aligned.</p>
-          </div>
-
-          <div className="form-grid">
-            <label className="field">
-              <span>Parent SKU</span>
-              <input
-                value={form.parentSku}
-                onChange={(event) => updateField("parentSku", event.target.value)}
-              />
-              {visibleErrors.parentSku ? (
-                <small className="error-text">{visibleErrors.parentSku}</small>
-              ) : null}
-            </label>
-
-            <label className="field">
-              <span>SKU</span>
-              <input
-                value={form.sku}
-                onChange={(event) => updateField("sku", event.target.value)}
-              />
-              {visibleErrors.sku ? <small className="error-text">{visibleErrors.sku}</small> : null}
-            </label>
-
-            <label className="field field-wide">
-              <span>JAN</span>
-              <input
-                inputMode="numeric"
-                value={form.jan}
-                onChange={(event) => updateField("jan", event.target.value)}
-                placeholder="4006381333931"
-              />
-              <small className="hint-text">
-                The form accepts input, but it does not perform 12-digit checksum completion.
-              </small>
-              {visibleErrors.jan ? <small className="error-text">{visibleErrors.jan}</small> : null}
-            </label>
-
-            <label className="field">
-              <span>Quantity</span>
-              <input
-                inputMode="numeric"
-                value={form.qty}
-                onChange={(event) => updateField("qty", event.target.value)}
-              />
-              {visibleErrors.qty ? <small className="error-text">{visibleErrors.qty}</small> : null}
-            </label>
-
-            <label className="field">
-              <span>Brand</span>
-              <input
-                value={form.brand}
-                onChange={(event) => updateField("brand", event.target.value)}
-              />
-              {visibleErrors.brand ? (
-                <small className="error-text">{visibleErrors.brand}</small>
-              ) : null}
-            </label>
-
-            <label className="field">
-              <span>Template</span>
-              <select
-                value={form.templateId}
-                onChange={(event) => updateField("templateId", event.target.value)}
-              >
-                {templateOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {visibleErrors.templateId ? (
-                <small className="error-text">{visibleErrors.templateId}</small>
-              ) : null}
-            </label>
-
-            <label className="field">
-              <span>Printer profile</span>
-              <select
-                value={form.printerProfileId}
-                onChange={(event) => updateField("printerProfileId", event.target.value)}
-              >
-                {printerProfiles.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {visibleErrors.printerProfileId ? (
-                <small className="error-text">{visibleErrors.printerProfileId}</small>
-              ) : null}
-            </label>
-
-            <label className="field field-wide">
-              <span>Actor</span>
-              <input
-                value={form.actor}
-                onChange={(event) => updateField("actor", event.target.value)}
-              />
-              {visibleErrors.actor ? (
-                <small className="error-text">{visibleErrors.actor}</small>
-              ) : null}
-            </label>
-          </div>
-
-          <div className="toolbar">
-            <button className="button-primary" type="submit">
-              Create draft snapshot
-            </button>
-            <button className="button-secondary" onClick={resetForm} type="button">
-              Reset session
-            </button>
-          </div>
-        </form>
-
-        <aside className="panel preview-panel">
-          <div className="section-heading">
-            <h2>Draft preview</h2>
+        <div className="app-commandbar">
+          <div className="commandbar-context">
+            <span className="app-kicker">Current route</span>
+            <strong>{session.jobId}</strong>
             <p>
-              The preview stays honest to the current schema and never guesses a normalized JAN.
+              {templateOptionLabel} / {executionModeLabel}
             </p>
           </div>
+          {activeWorkspace === "compose" ? (
+            <>
+              <button className="button-secondary" type="button" onClick={stageManualDraft}>
+                Stage snapshot
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void submitManualDraft()}
+                disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+              >
+                Submit current draft
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "templates" ? (
+            <>
+              <button className="button-secondary" type="button" onClick={validateTemplateText}>
+                Validate template
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void runTemplateCatalogSave()}
+                disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
+              >
+                Save to catalog
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "queue" ? (
+            <>
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={buildQueueSnapshot}
+                disabled={!isQueueReady}
+              >
+                Build session
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void submitQueuedRows()}
+                disabled={
+                  !canSubmitQueuedRows ||
+                  batchSubmit.phase === "submitting" ||
+                  isBridgeSubmitBlocked
+                }
+              >
+                Dispatch queue
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "audit" ? (
+            <>
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={() => {
+                  void refreshAuditSearch(auditQuery);
+                }}
+              >
+                Refresh audit
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => {
+                  void runAuditExport();
+                }}
+                disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+              >
+                Export ledger
+              </button>
+            </>
+          ) : null}
+        </div>
+      </header>
 
-          <div className="preview-summary">
-            <div>
-              <span>Template route</span>
-              <strong>{template ? `${template.label} / ${template.version}` : "Missing"}</strong>
-              <small>{template ? template.size : "Select a template."}</small>
+      <div className="app-body">
+        <aside className="app-rail">
+          <div className="rail-group">
+            <span className="rail-heading">Workspaces</span>
+            {workspaceItems.map((item) => (
+              <button
+                key={item.id}
+                className={`rail-button ${activeWorkspace === item.id ? "active" : ""}`}
+                type="button"
+                aria-pressed={activeWorkspace === item.id}
+                onClick={() => setActiveWorkspace(item.id)}
+              >
+                <strong>{item.label}</strong>
+                <small>{item.description}</small>
+                <span className="rail-badge">{item.badge}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="rail-group">
+            <span className="rail-heading">Operations</span>
+            <button className="rail-command" type="button" onClick={refreshBridgeStatus}>
+              Refresh bridge
+            </button>
+            <button className="rail-command" type="button" onClick={restorePersistedState}>
+              Restore saved state
+            </button>
+            <button className="rail-command" type="button" onClick={clearPersistedState}>
+              Clear saved state
+            </button>
+          </div>
+        </aside>
+
+        <section className="app-workspace">
+          <div className="workspace-header-shell">
+            <div className="workspace-title-group">
+              <span className="workspace-kicker">Current lane</span>
+              <h2>{activeWorkspaceMeta.title}</h2>
+              <p>{activeWorkspaceMeta.summary}</p>
+              <small className="workspace-focus-note">{activeWorkspaceFocus}</small>
             </div>
-            <div>
-              <span>Output route</span>
-              <strong>{printerProfile ? printerProfile.label : "Missing"}</strong>
-              <small>
-                {printerProfile
-                  ? `${printerProfile.adapter} / ${printerProfile.paperSize} / ${printerProfile.dpi} dpi`
-                  : "Select a printer profile."}
-              </small>
+            <div className="workspace-meta-grid">
+              <div>
+                <span>Bridge</span>
+                <strong>{bridgeStatus.phase === "ready" ? "Ready" : bridgeStatus.phase}</strong>
+                <small>
+                  {bridgeStatusAvailable ? bridgeStatus.status?.printAdapterKind : "n/a"}
+                </small>
+              </div>
+              <div>
+                <span>Session</span>
+                <strong>{session.jobId}</strong>
+                <small>{formatSavedAt(session.requestedAt)}</small>
+              </div>
+              <div>
+                <span>Queue</span>
+                <strong>{queuedRows.length} rows</strong>
+                <small>
+                  {queuedReadyRowsCount} ready / {queuedFailedRowsCount} failed
+                </small>
+              </div>
+              <div>
+                <span>Audit</span>
+                <strong>{pendingProofCount} pending</strong>
+                <small>{approvedProofEntries.length} approved proofs</small>
+              </div>
             </div>
           </div>
 
-          {previewJson ? (
-            <>
-              <pre className="json-block">{previewJson}</pre>
+          <div className="workspace-scroll">
+            {activeWorkspace === "compose" ? (
+              <div className="workspace-stack">
+                {hasPersistedState ? (
+                  <section className="panel">
+                    <div className="section-heading">
+                      <h2>Recovered operator state</h2>
+                      <p>
+                        Restore template draft, source review, and field mapping after restart or
+                        accidental close.
+                      </p>
+                    </div>
+                    <p className="data-summary">
+                      Template draft: {formatSavedAt(templatePersistedState.savedAt)} /{" "}
+                      {templatePersistedState.status}
+                      {templatePersistedState.message ? ` (${templatePersistedState.message})` : ""}
+                    </p>
+                    <p className="data-summary">
+                      Source review: {formatSavedAt(sourcePersistedState.savedAt)} /{" "}
+                      {sourcePersistedState.status}
+                      {sourcePersistedState.message ? ` (${sourcePersistedState.message})` : ""}
+                    </p>
+                    <p className="data-summary">
+                      Column mapping: {formatSavedAt(mappingPersistedState.savedAt)} /{" "}
+                      {mappingPersistedState.status}
+                      {mappingPersistedState.message ? ` (${mappingPersistedState.message})` : ""}
+                    </p>
+                    {restoreStateNotice ? (
+                      <p className="notice-text">{restoreStateNotice}</p>
+                    ) : null}
+                    <div className="toolbar">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={restorePersistedState}
+                      >
+                        Restore saved state
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={clearPersistedState}
+                      >
+                        Clear saved state
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className="workspace compose-workbench">
+                  <form className="panel form-panel" noValidate onSubmit={handleSubmit}>
+                    <div className="section-heading">
+                      <h2>Draft composer</h2>
+                      <p>
+                        Use the manual compose lane for single labels and controlled proof or print
+                        intent.
+                      </p>
+                    </div>
+
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Parent SKU</span>
+                        <input
+                          value={form.parentSku}
+                          onChange={(event) => updateField("parentSku", event.target.value)}
+                        />
+                        {visibleErrors.parentSku ? (
+                          <small className="error-text">{visibleErrors.parentSku}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>SKU</span>
+                        <input
+                          value={form.sku}
+                          onChange={(event) => updateField("sku", event.target.value)}
+                        />
+                        {visibleErrors.sku ? (
+                          <small className="error-text">{visibleErrors.sku}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>JAN</span>
+                        <input
+                          inputMode="numeric"
+                          value={form.jan}
+                          onChange={(event) => updateField("jan", event.target.value)}
+                          placeholder="4006381333931"
+                        />
+                        <small className="hint-text">
+                          Rust-side normalization accepts 12-digit input; 13-digit checksum is
+                          preferred.
+                        </small>
+                        {visibleErrors.jan ? (
+                          <small className="error-text">{visibleErrors.jan}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Quantity</span>
+                        <input
+                          inputMode="numeric"
+                          value={form.qty}
+                          onChange={(event) => updateField("qty", event.target.value)}
+                        />
+                        {visibleErrors.qty ? (
+                          <small className="error-text">{visibleErrors.qty}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Brand</span>
+                        <input
+                          value={form.brand}
+                          onChange={(event) => updateField("brand", event.target.value)}
+                        />
+                        {visibleErrors.brand ? (
+                          <small className="error-text">{visibleErrors.brand}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Template</span>
+                        <select
+                          value={templateReference ? "template-from-spec" : form.templateId}
+                          onChange={(event) => {
+                            if (event.target.value === "template-from-spec") return;
+                            updateField("templateId", event.target.value);
+                          }}
+                        >
+                          {templateReference ? (
+                            <option value="template-from-spec">
+                              Template from spec ({templateReference.id}@{templateReference.version}
+                              )
+                            </option>
+                          ) : null}
+                          {availableTemplateOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label} ({option.catalogSource ?? "unknown"})
+                            </option>
+                          ))}
+                        </select>
+                        {visibleErrors.templateId ? (
+                          <small className="error-text">{visibleErrors.templateId}</small>
+                        ) : null}
+                        {templateCatalogState.phase !== "ready" ? (
+                          <small className="hint-text">{templateCatalogState.message}</small>
+                        ) : null}
+                        {templateReference ? (
+                          <small className="hint-text">
+                            Template route {templateVersionOf(templateReference)} is sourced as{" "}
+                            {templateReferenceCatalogSource}.
+                          </small>
+                        ) : null}
+                        <small className="hint-text">
+                          Desktop catalog: {templateCatalogSummary}.
+                        </small>
+                      </label>
+
+                      <label className="field">
+                        <span>Printer profile</span>
+                        <select
+                          value={form.printerProfileId}
+                          onChange={(event) => updateField("printerProfileId", event.target.value)}
+                        >
+                          {printerProfiles.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {visibleErrors.printerProfileId ? (
+                          <small className="error-text">{visibleErrors.printerProfileId}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>Actor</span>
+                        <input
+                          value={form.actor}
+                          onChange={(event) => updateField("actor", event.target.value)}
+                        />
+                        {visibleErrors.actor ? (
+                          <small className="error-text">{visibleErrors.actor}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>Execution intent</span>
+                        <select
+                          value={form.executionMode}
+                          onChange={(event) =>
+                            updateField("executionMode", event.target.value as ExecutionMode)
+                          }
+                        >
+                          <option value="proof">Proof-only (safe default)</option>
+                          <option value="print">Print-ready</option>
+                        </select>
+                        <small className="hint-text">
+                          Proof mode is the safe default and includes explicit intent in every draft
+                          payload.
+                        </small>
+                      </label>
+
+                      {form.executionMode === "proof" ? (
+                        <>
+                          <label className="field field-wide">
+                            <span>Requested by</span>
+                            <input
+                              value={form.executionRequestedBy}
+                              onChange={(event) =>
+                                updateField("executionRequestedBy", event.target.value)
+                              }
+                              placeholder="Proof requestor"
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Notes</span>
+                            <textarea
+                              className="batch-text"
+                              rows={4}
+                              value={form.executionNotes}
+                              onChange={(event) =>
+                                updateField("executionNotes", event.target.value)
+                              }
+                              placeholder="Use this for print review context (optional)."
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <>
+                          <label className="field">
+                            <span>Approved by</span>
+                            <input
+                              value={form.executionApprovedBy}
+                              onChange={(event) =>
+                                updateField("executionApprovedBy", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionApprovedBy ? (
+                              <small className="error-text">
+                                {visibleErrors.executionApprovedBy}
+                              </small>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Approved at</span>
+                            <input
+                              type="datetime-local"
+                              value={form.executionApprovedAt}
+                              onChange={(event) =>
+                                updateField("executionApprovedAt", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionApprovedAt ? (
+                              <small className="error-text">
+                                {visibleErrors.executionApprovedAt}
+                              </small>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Source proof job ID</span>
+                            <input
+                              value={form.executionSourceProofJobId}
+                              onChange={(event) =>
+                                updateField("executionSourceProofJobId", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionSourceProofJobId ? (
+                              <small className="error-text">
+                                {visibleErrors.executionSourceProofJobId}
+                              </small>
+                            ) : null}
+                            {approvedProofEntries.length > 0 ? (
+                              <div className="proof-picker">
+                                <small className="hint-text">
+                                  Approved proofs from the local audit ledger can be pinned into
+                                  print execution.
+                                </small>
+                                <div className="job-actions">
+                                  {approvedProofEntries.slice(0, 4).map((entry) => (
+                                    <button
+                                      key={entry.dispatch.audit.jobId}
+                                      className="button-secondary proof-chip"
+                                      type="button"
+                                      onClick={() => applyApprovedProofToForm(entry)}
+                                    >
+                                      {entry.proof?.proofJobId}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Allow without proof</span>
+                            <input
+                              type="checkbox"
+                              checked={form.executionAllowWithoutProof}
+                              disabled={!allowWithoutProofEnabled}
+                              onChange={(event) =>
+                                updateField("executionAllowWithoutProof", event.target.checked)
+                              }
+                            />
+                            <small className="hint-text">
+                              Print without linked proof job stays disabled until proof approval
+                              workflow is implemented.
+                            </small>
+                          </label>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="toolbar">
+                      <button className="button-secondary" type="submit">
+                        Stage draft snapshot
+                      </button>
+                      <button
+                        className="button-primary"
+                        type="button"
+                        onClick={submitManualDraft}
+                        disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+                      >
+                        Submit current draft
+                      </button>
+                      <button className="button-secondary" onClick={resetForm} type="button">
+                        Reset session
+                      </button>
+                    </div>
+                    {manualSubmit.phase === "submitting" ? (
+                      <p className="notice-text">Submitting manual draft via Tauri invoke...</p>
+                    ) : null}
+                    {manualSubmit.phase === "error" ? (
+                      <p className="status-fail">{manualSubmit.message}</p>
+                    ) : null}
+                    {bridgeSubmitBlockMessage ? (
+                      <p className="status-fail">{bridgeSubmitBlockMessage}</p>
+                    ) : null}
+                  </form>
+
+                  <aside className="panel preview-panel">
+                    <div className="section-heading">
+                      <h2>Manual draft preview</h2>
+                      <p>Preview stays aligned with print job schema and output adapters.</p>
+                    </div>
+                    <div className="preview-summary">
+                      <div>
+                        <span>Template route</span>
+                        <strong>{templateOptionLabel}</strong>
+                        <small>
+                          {selectedTemplateOption
+                            ? selectedTemplateOption.size
+                            : "template route inferred"}
+                        </small>
+                      </div>
+                      <div>
+                        <span>Output route</span>
+                        <strong>
+                          {selectedPrinterProfile ? selectedPrinterProfile.label : "Missing"}
+                        </strong>
+                        <small>
+                          {selectedPrinterProfile
+                            ? `${selectedPrinterProfile.adapter} / ${selectedPrinterProfile.paperSize} / ${selectedPrinterProfile.dpi} dpi`
+                            : "Select printer profile"}
+                        </small>
+                      </div>
+                      <div>
+                        <span>Execution</span>
+                        <strong>{executionMeta}</strong>
+                        <small>{executionModeLabel}</small>
+                      </div>
+                    </div>
+                    <div className="state-card-grid">
+                      {composeReviewCards.map((item) => (
+                        <article className={`state-card ${item.tone}`} key={item.id}>
+                          <span>{item.label}</span>
+                          <strong>{item.title}</strong>
+                          <p>{item.detail}</p>
+                        </article>
+                      ))}
+                    </div>
+
+                    {previewJson ? (
+                      <>
+                        <div className="payload-compare">
+                          <div>
+                            <div className="data-grid-header">
+                              <strong>Live payload</strong>
+                              <span>{draft ? "authoritative" : "missing"}</span>
+                            </div>
+                            <pre className="json-block">{liveDraftJson ?? previewJson}</pre>
+                          </div>
+                          <div>
+                            <div className="data-grid-header">
+                              <strong>Staged snapshot</strong>
+                              <span>{draftSnapshot ? "review-only" : "not pinned"}</span>
+                            </div>
+                            <pre className="json-block">
+                              {snapshotJson ?? "No staged snapshot yet."}
+                            </pre>
+                          </div>
+                        </div>
+                        {draftIsStale ? (
+                          <p className="notice-text">
+                            Live input has moved past the staged snapshot. The preview shows the
+                            current payload; use Stage draft only when you need to pin the snapshot
+                            for export.
+                          </p>
+                        ) : null}
+                        {manualSubmit.phase === "error" ? (
+                          <p className="status-fail">{manualSubmit.message}</p>
+                        ) : null}
+                        {manualSubmit.phase === "success" ? (
+                          <>
+                            <p className="status-ok">{manualSubmit.message}</p>
+                            <pre className="json-block">
+                              {JSON.stringify(manualSubmit.result, null, 2)}
+                            </pre>
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <strong>No draft yet</strong>
+                        <p>Fill required fields to build the live payload.</p>
+                      </div>
+                    )}
+                  </aside>
+                </section>
+              </div>
+            ) : null}
+
+            {activeWorkspace === "templates" ? (
+              <section className="panel template-lane">
+                <div className="section-heading">
+                  <h2>Template editor</h2>
+                  <p>
+                    Use a desktop-style authoring lane for page setup, field lists, JSON parity, and
+                    Rust renderer validation.
+                  </p>
+                </div>
+                <div className="proof-note">
+                  <strong>Current release boundary</strong>
+                  <p>
+                    Rust preview below renders the live JSON draft, and template JSON can now be
+                    written to the desktop local catalog via Tauri. Keep template_version explicit
+                    so catalog resolution stays aligned with dispatch gates.
+                  </p>
+                </div>
+                <div className="lane-tab-list">
+                  {templateWorkspaceItems.map((item) => (
+                    <button
+                      className={`lane-tab ${templateWorkspaceMode === item.id ? "active" : ""}`}
+                      key={item.id}
+                      type="button"
+                      onClick={() => setTemplateWorkspaceMode(item.id)}
+                    >
+                      <span>{item.label}</span>
+                      <strong>{item.badge}</strong>
+                      <small>{item.description}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="state-card-grid">
+                  {templateStateCards.map((item) => (
+                    <article className={`state-card ${item.tone}`} key={item.id}>
+                      <span>{item.label}</span>
+                      <strong>{item.title}</strong>
+                      <p>{item.detail}</p>
+                      <small>{item.note}</small>
+                    </article>
+                  ))}
+                </div>
+                <div
+                  className={`template-workbench ${
+                    templateWorkspaceMode === "review" ? "review-mode" : ""
+                  }`}
+                >
+                  <div className="template-editor-column">
+                    {templateEditorModel ? (
+                      <>
+                        {templateWorkspaceMode === "structure" ? (
+                          <div className="template-section-stack">
+                            <div className="section-heading">
+                              <h3>Template structure</h3>
+                              <p>Adjust template identity, page geometry, and border styling.</p>
+                            </div>
+                            <div className="template-control-grid">
+                              <label className="field">
+                                <span>Label name</span>
+                                <input
+                                  value={templateEditorModel.labelName}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("label_name", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Template version</span>
+                                <input
+                                  value={templateEditorModel.templateVersion}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("template_version", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field field-wide">
+                                <span>Description</span>
+                                <input
+                                  value={templateEditorModel.description}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("description", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Width (mm)</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="0.1"
+                                  value={templateEditorModel.page.widthMm}
+                                  onChange={(event) =>
+                                    updateTemplatePageField(
+                                      "width_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Height (mm)</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="0.1"
+                                  value={templateEditorModel.page.heightMm}
+                                  onChange={(event) =>
+                                    updateTemplatePageField(
+                                      "height_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Background</span>
+                                <div className="color-row">
+                                  <input
+                                    type="color"
+                                    value={templateEditorModel.page.backgroundFill}
+                                    onChange={(event) =>
+                                      updateTemplatePageField("background_fill", event.target.value)
+                                    }
+                                  />
+                                  <input
+                                    value={templateEditorModel.page.backgroundFill}
+                                    onChange={(event) =>
+                                      updateTemplatePageField("background_fill", event.target.value)
+                                    }
+                                  />
+                                </div>
+                              </label>
+                              <div className="field checkbox-field">
+                                <span>Border</span>
+                                <label className="checkbox-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={templateEditorModel.border.visible}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("visible", event.target.checked)
+                                    }
+                                  />
+                                  <span>Show border in render and preview</span>
+                                </label>
+                              </div>
+                              <label className="field">
+                                <span>Border color</span>
+                                <div className="color-row">
+                                  <input
+                                    type="color"
+                                    value={templateEditorModel.border.color}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("color", event.target.value)
+                                    }
+                                  />
+                                  <input
+                                    value={templateEditorModel.border.color}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("color", event.target.value)
+                                    }
+                                  />
+                                </div>
+                              </label>
+                              <label className="field">
+                                <span>Border width (mm)</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.1"
+                                  value={templateEditorModel.border.widthMm}
+                                  onChange={(event) =>
+                                    updateTemplateBorderField(
+                                      "width_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        ) : null}
+
+                        {templateWorkspaceMode === "fields" ? (
+                          <div className="template-fields-panel">
+                            <div className="section-heading">
+                              <h3>Field bindings</h3>
+                              <p>
+                                Edit text templates, placement, font sizing, color, and field order
+                                without mixing page controls into the same surface.
+                              </p>
+                            </div>
+                            <div className="data-grid-header">
+                              <strong>Template fields</strong>
+                              <span>{templateEditorModel.fields.length} fields</span>
+                            </div>
+                            <div className="template-field-list">
+                              {templateEditorModel.fields.map((field, index) => (
+                                <article
+                                  className={`template-field-card ${
+                                    selectedTemplateFieldIndex === index ? "active" : ""
+                                  }`}
+                                  key={`${field.name}-${index}`}
+                                >
+                                  <div className="template-field-header">
+                                    <div>
+                                      <strong>{field.name || `field_${index + 1}`}</strong>
+                                      <small>
+                                        {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
+                                        {field.fontSizeMm.toFixed(1)}mm
+                                      </small>
+                                    </div>
+                                    <div className="template-field-actions">
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => setSelectedTemplateFieldIndex(index)}
+                                      >
+                                        Focus
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => moveTemplateField(index, -1)}
+                                        disabled={index === 0}
+                                      >
+                                        Up
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => moveTemplateField(index, 1)}
+                                        disabled={index === templateEditorModel.fields.length - 1}
+                                      >
+                                        Down
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => duplicateTemplateField(index)}
+                                      >
+                                        Duplicate
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => removeTemplateField(index)}
+                                        disabled={templateEditorModel.fields.length <= 1}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="template-control-grid">
+                                    <label className="field">
+                                      <span>Name</span>
+                                      <input
+                                        value={field.name}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(index, "name", event.target.value)
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field field-wide">
+                                      <span>Text template</span>
+                                      <input
+                                        value={field.template}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "template",
+                                            event.target.value,
+                                          )
+                                        }
+                                      />
+                                      <small className="hint-text">
+                                        Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
+                                        preview-only:{" "}
+                                        {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
+                                      </small>
+                                    </label>
+                                    <label className="field">
+                                      <span>X (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={field.xMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "xMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Y (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={field.yMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "yMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Font size (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0.1"
+                                        step="0.1"
+                                        value={field.fontSizeMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "fontSizeMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Color</span>
+                                      <div className="color-row">
+                                        <input
+                                          type="color"
+                                          value={field.color}
+                                          onChange={(event) =>
+                                            updateTemplateFieldRow(
+                                              index,
+                                              "color",
+                                              event.target.value,
+                                            )
+                                          }
+                                        />
+                                        <input
+                                          value={field.color}
+                                          onChange={(event) =>
+                                            updateTemplateFieldRow(
+                                              index,
+                                              "color",
+                                              event.target.value,
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    </label>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                            <div className="toolbar">
+                              <button
+                                className="button-primary"
+                                type="button"
+                                onClick={addTemplateField}
+                              >
+                                Add text field
+                              </button>
+                            </div>
+                          </div>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <strong>Structured editor unavailable</strong>
+                        <p>
+                          Fix template JSON first. The form-based editor only works against valid
+                          JSON.
+                        </p>
+                      </div>
+                    )}
+
+                    {templateWorkspaceMode === "catalog" ? (
+                      <label className="field field-wide">
+                        <span>Template spec JSON</span>
+                        <textarea
+                          className="batch-text"
+                          value={templateSource}
+                          onChange={(event) => updateTemplateSource(event.target.value)}
+                          onBlur={validateTemplateText}
+                        />
+                        {templateParseError ? (
+                          <small className="error-text">{templateParseError}</small>
+                        ) : null}
+                        {templateImportError ? (
+                          <small className="error-text">{templateImportError}</small>
+                        ) : null}
+                        {templateMetaInfo ? (
+                          <small className="hint-text">
+                            schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
+                            {templateMetaInfo.templateVersion} / label_name:{" "}
+                            {templateMetaInfo.labelName}
+                          </small>
+                        ) : null}
+                      </label>
+                    ) : null}
+                  </div>
+
+                  <aside className="template-preview-column">
+                    {templateWorkspaceMode === "structure" ? (
+                      <>
+                        <div className="proof-note">
+                          <strong>What changes here</strong>
+                          <p>
+                            These controls update the live JSON draft immediately. They do not save
+                            a new dispatchable catalog entry until you switch to Catalog and save.
+                          </p>
+                        </div>
+                        {templateReference ? (
+                          <div className="proof-note">
+                            <strong>Current catalog route</strong>
+                            <p>
+                              {templateReferenceVersion} is tracked as{" "}
+                              {templateReferenceCatalogSource}.
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="proof-note">
+                          <strong>Next step</strong>
+                          <p>
+                            Move to Fields to adjust text bindings, then use Review to compare the
+                            approximate canvas against the Rust renderer path.
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {templateWorkspaceMode === "fields" ? (
+                      <>
+                        <div className="proof-note">
+                          <strong>Placeholder scope</strong>
+                          <p>
+                            Rust render uses {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local-only
+                            preview placeholders stay inside the authoring canvas and do not flow
+                            into proof or PDF output.
+                          </p>
+                        </div>
+                        {templateUsesPreviewOnlyPlaceholder ? (
+                          <div className="proof-note">
+                            <strong>Preview-only placeholder detected</strong>
+                            <p>
+                              <code>{LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS[0]}</code> renders in
+                              the local canvas only. Rust proof/PDF output does not substitute it.
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="proof-note">
+                          <strong>Next step</strong>
+                          <p>
+                            Switch to Review after changing bindings so local canvas placement and
+                            Rust renderer output can be compared directly.
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {templateWorkspaceMode === "review" ? (
+                      templateEditorModel ? (
+                        <>
+                          <div className="section-heading">
+                            <h3>Review live authoring output</h3>
+                            <p>
+                              Compare the approximate local canvas with the authoritative Rust
+                              renderer for the current live JSON draft.
+                            </p>
+                          </div>
+                          <div className="proof-note">
+                            <strong>Authority split</strong>
+                            <p>
+                              Local canvas is for editing feedback only. Rust preview verifies the
+                              live JSON draft. Proof/print dispatch still uses saved catalog
+                              entries.
+                            </p>
+                          </div>
+                          <div className="preview-summary">
+                            <div>
+                              <span>Label size</span>
+                              <strong>
+                                {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
+                                {templateEditorModel.page.heightMm.toFixed(1)} mm
+                              </strong>
+                              <small>{templateEditorModel.fields.length} fields</small>
+                            </div>
+                            <div>
+                              <span>Template state</span>
+                              <strong>{templateValidation.status}</strong>
+                              <small>
+                                {templateValidation.message ?? "Schema route looks aligned."}
+                              </small>
+                            </div>
+                          </div>
+                          <div className="template-canvas-shell">
+                            <div className="template-canvas" style={templateCanvasStyle}>
+                              {templateEditorModel.border.visible ? (
+                                <div className="template-canvas-border" />
+                              ) : null}
+                              {templateEditorModel.fields.map((field, index) => (
+                                <div
+                                  className="template-canvas-field"
+                                  key={`${field.name}-${index}-preview`}
+                                  style={{
+                                    left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
+                                    top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
+                                    fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
+                                    color: field.color,
+                                  }}
+                                >
+                                  {renderTemplatePreviewText(
+                                    field.template,
+                                    templatePreviewBindings,
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="proof-note">
+                            <strong>Local binding sample</strong>
+                            <p>
+                              job_id: {templatePreviewBindings.job_id} / sku:{" "}
+                              {templatePreviewBindings.sku} / jan: {templatePreviewBindings.jan}
+                            </p>
+                          </div>
+                          {templateCatalogIssue ? (
+                            <div className="proof-note">
+                              <strong>Catalog mismatch</strong>
+                              <p>{templateCatalogIssue}</p>
+                            </div>
+                          ) : null}
+                          <div className="template-render-preview">
+                            <div className="data-grid-header">
+                              <strong>Rust renderer preview</strong>
+                              <button
+                                className="button-secondary"
+                                type="button"
+                                onClick={() => void refreshTemplateRenderPreview()}
+                                disabled={templateRenderPreview.phase === "rendering"}
+                              >
+                                {templateRenderPreview.phase === "rendering"
+                                  ? "Rendering..."
+                                  : "Refresh Rust preview"}
+                              </button>
+                            </div>
+                            <p className="hint-text">{templateRenderPreview.message}</p>
+                            {templateRenderPreview.phase === "ready" &&
+                            templateRenderPreview.result &&
+                            templateRenderPreviewSvgDataUrl ? (
+                              <>
+                                <div className="preview-summary">
+                                  <div>
+                                    <span>Renderer output</span>
+                                    <strong>{templateRenderPreview.result.labelName}</strong>
+                                    <small>
+                                      {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
+                                      {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm /
+                                      JAN {templateRenderPreview.result.normalizedJan}
+                                    </small>
+                                  </div>
+                                </div>
+                                <div className="template-render-preview-frame">
+                                  <img
+                                    className="template-render-preview-image"
+                                    src={templateRenderPreviewSvgDataUrl}
+                                    alt="Rust renderer SVG preview"
+                                  />
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty-state">
+                          <strong>No visual preview</strong>
+                          <p>
+                            Template JSON must be valid before the preview canvas can be rendered.
+                          </p>
+                        </div>
+                      )
+                    ) : null}
+
+                    {templateWorkspaceMode === "catalog" ? (
+                      <>
+                        <div className="proof-note">
+                          <strong>Live draft vs saved catalog</strong>
+                          <p>
+                            Browser autosave keeps your working JSON locally. Only Save template to
+                            local catalog makes the current draft dispatchable by template_version.
+                          </p>
+                        </div>
+                        {templateReference ? (
+                          <div className="proof-note">
+                            <strong>Catalog source</strong>
+                            <p>
+                              {templateReferenceVersion} is tracked as{" "}
+                              {templateReferenceCatalogSource}.
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="toolbar template-action-toolbar">
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={() => void runTemplateCatalogSave()}
+                            disabled={
+                              !isTauriConnected() ||
+                              templateCatalogWriteState.phase === "submitting"
+                            }
+                          >
+                            {templateCatalogWriteState.phase === "submitting"
+                              ? "Saving..."
+                              : "Save template to local catalog"}
+                          </button>
+                          <label className="button-secondary fake-button">
+                            Import template JSON / asset
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={handleTemplateImport}
+                            />
+                          </label>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={handleTemplateExport}
+                          >
+                            Export template JSON
+                          </button>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={handleTemplateAssetExport}
+                          >
+                            Export template asset
+                          </button>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={resetTemplateToDefaults}
+                          >
+                            Reset template
+                          </button>
+                          <button
+                            className="button-primary"
+                            type="button"
+                            onClick={validateTemplateText}
+                          >
+                            Validate JSON
+                          </button>
+                        </div>
+                        {templateCatalogWriteState.message ? (
+                          <p
+                            className={
+                              templateCatalogWriteState.phase === "success"
+                                ? "status-ok"
+                                : templateCatalogWriteState.phase === "error"
+                                  ? "status-fail"
+                                  : "notice-text"
+                            }
+                          >
+                            {templateCatalogWriteState.message}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </aside>
+                </div>
+              </section>
+            ) : null}
+
+            {activeWorkspace === "queue" ? (
+              <div className="workspace-stack queue-workbench">
+                <section className="panel">
+                  <div className="section-heading">
+                    <h2>Data source (Excel / CSV)</h2>
+                    <p>
+                      Import operator-owned spreadsheets, map columns, validate rows, and move only
+                      clean rows into the dispatch queue.
+                    </p>
+                  </div>
+                  <div className="toolbar">
+                    <label className="button-secondary fake-button">
+                      Upload CSV/XLSX
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls,text/csv"
+                        disabled={queueMutationLocked}
+                        onChange={handleDataUpload}
+                      />
+                    </label>
+                    {sourceData ? (
+                      <>
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          onClick={autoDetectMapping}
+                          disabled={queueMutationLocked}
+                        >
+                          Auto detect mapping
+                        </button>
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          onClick={resetDataSource}
+                          disabled={queueMutationLocked}
+                        >
+                          Clear source
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={buildQueueSnapshot}
+                      disabled={!isQueueReady || queueMutationLocked}
+                    >
+                      Snapshot valid rows
+                    </button>
+                  </div>
+
+                  <p className="data-summary">{sourceError ? sourceError : sourceSummary}</p>
+                  {queueMutationLockMessage ? (
+                    <p className="section-lock-note">{queueMutationLockMessage}</p>
+                  ) : null}
+
+                  {sourceData ? (
+                    <>
+                      <div className="mapping-grid">
+                        {requiredFieldList.map((entry) => (
+                          <label className="field" key={entry.key}>
+                            <span>Map {entry.label}</span>
+                            <select
+                              value={fieldMapping[entry.key]}
+                              disabled={queueMutationLocked}
+                              onChange={(event) =>
+                                updateFieldMapping(entry.key, event.target.value)
+                              }
+                            >
+                              <option value="">-- Select column --</option>
+                              {sourceData.headers.map((header) => (
+                                <option key={header} value={header}>
+                                  {header}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="data-grid">
+                        <div className="data-grid-header">
+                          <strong>Source preview (first 8 rows)</strong>
+                          <span>
+                            {readyRowsCount} ready / {pendingRowsCount} pending / {errorRowsCount}{" "}
+                            invalid / {preparedRows.length} rows
+                          </span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Row</th>
+                              <th>Parent SKU</th>
+                              <th>SKU</th>
+                              <th>JAN</th>
+                              <th>Qty</th>
+                              <th>Brand</th>
+                              <th>Template</th>
+                              <th>Printer</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {parsedTemplateRows.map((entry) => (
+                              <tr key={entry.rowIndex}>
+                                <td>{entry.rowIndex + 1}</td>
+                                <td>{entry.sourceRow[fieldMapping.parentSku] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.sku] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.jan] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.qty] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.brand] ?? "-"}</td>
+                                <td>
+                                  {readSourceValue(entry.sourceRow, TEMPLATE_SOURCE_ALIASES) ||
+                                    (entry.draft
+                                      ? `${entry.draft.template.id}@${entry.draft.template.version}`
+                                      : "default")}
+                                </td>
+                                <td>
+                                  {readSourceValue(entry.sourceRow, PRINTER_SOURCE_ALIASES) ||
+                                    (entry.draft ? entry.draft.printerProfile.id : "default")}
+                                </td>
+                                <td
+                                  className={
+                                    entry.status === "ready"
+                                      ? "status-ok"
+                                      : entry.status === "error"
+                                        ? "status-fail"
+                                        : "status-pending"
+                                  }
+                                >
+                                  {entry.status === "pending"
+                                    ? `pending: ${entry.pendingReason ?? "requires operator review"}`
+                                    : entry.errors.join(" / ") ||
+                                      (entry.warnings.length > 0
+                                        ? `ready: ${entry.warnings.join(" / ")}`
+                                        : "ready")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : null}
+                </section>
+
+                {queuedRows.length > 0 ? (
+                  <section className="panel">
+                    <div className="section-heading">
+                      <h2>Batch draft preview</h2>
+                      <p>
+                        Queue review before dispatch. This lane is for staged rows only, not raw
+                        source data.
+                      </p>
+                    </div>
+                    <pre className="json-block">{previewBatchJson}</pre>
+                    <p className="notice-text">
+                      {queuedRows.length} rows captured. ready: {queuedReadyRowsCount}, submitting:{" "}
+                      {queuedSubmittingRowsCount}, submitted: {queuedSubmittedRowsCount}, failed:{" "}
+                      {queuedFailedRowsCount}.
+                    </p>
+                    <div className="grid-toolbar">
+                      <div className="grid-toolbar-group">
+                        <label className="field">
+                          <span>Queue filter</span>
+                          <select
+                            value={queueViewFilter}
+                            onChange={(event) => {
+                              setQueueViewFilter(event.target.value as QueueViewFilter);
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="all">All statuses</option>
+                            <option value="ready">Ready</option>
+                            <option value="submitting">Submitting</option>
+                            <option value="submitted">Submitted</option>
+                            <option value="failed">Failed</option>
+                          </select>
+                        </label>
+                        <label className="field field-wide">
+                          <span>Find queued row</span>
+                          <input
+                            value={queueSearchText}
+                            onChange={(event) => {
+                              setQueueSearchText(event.target.value);
+                              setQueuePage(1);
+                            }}
+                            placeholder="job id, sku, jan, template, result"
+                          />
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Sort</span>
+                          <select
+                            value={queueSortMode}
+                            onChange={(event) => {
+                              setQueueSortMode(event.target.value as QueueSortMode);
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="row-asc">Row ascending</option>
+                            <option value="row-desc">Row descending</option>
+                            <option value="job-asc">Job id</option>
+                            <option value="status">Status</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Page size</span>
+                          <select
+                            value={String(queuePageSize)}
+                            onChange={(event) => {
+                              setQueuePageSize(Number(event.target.value));
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-meta">
+                        <div className="grid-chip-list">
+                          <span
+                            className={`grid-chip ${queueViewFilter === "all" ? "active" : ""}`}
+                          >
+                            {filteredQueuedRows.length} visible
+                          </span>
+                          <span className="grid-chip">{queuedRows.length} total</span>
+                          <span className={`grid-chip ${queueMutationLocked ? "active" : ""}`}>
+                            {queueMutationLocked ? "Submit lock active" : "Queue idle"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Queue progress</strong>
+                        <span>
+                          page {queueVisiblePage} / {queuePageTotal}
+                        </span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            <th>Job ID</th>
+                            <th>SKU / JAN</th>
+                            <th>Template</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {pagedQueuedRows.length > 0 ? (
+                            pagedQueuedRows.map((entry, index) => (
+                              <tr
+                                key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}
+                                className={[
+                                  entry.submissionStatus === "submitting"
+                                    ? "table-row-submitting"
+                                    : "",
+                                  entry.submissionStatus === "failed" ? "table-row-failed" : "",
+                                  queueFocusRow?.draft?.jobId === entry.draft?.jobId
+                                    ? "table-row-focus"
+                                    : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                tabIndex={0}
+                                onClick={() => setSelectedQueueRowJobId(entry.draft?.jobId ?? null)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setSelectedQueueRowJobId(entry.draft?.jobId ?? null);
+                                  }
+                                }}
+                              >
+                                <td>{entry.rowIndex + 1}</td>
+                                <td className="mono-data">
+                                  {entry.draft ? entry.draft.jobId : "-"}
+                                </td>
+                                <td>
+                                  {entry.draft ? (
+                                    <>
+                                      <strong>{entry.draft.sku}</strong>
+                                      <br />
+                                      <small className="mono-data">
+                                        {entry.draft.jan.normalized}
+                                      </small>
+                                    </>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
+                                <td className="mono-data">
+                                  {entry.draft ? templateVersionOf(entry.draft.template) : "-"}
+                                </td>
+                                <td className={queuedRowStatusClass(entry.submissionStatus)}>
+                                  {entry.submissionStatus}
+                                </td>
+                                <td>{formatQueuedRowResult(entry)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={6} className="data-summary">
+                                No queued rows match the current filter.
+                              </td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <div className="grid-pager">
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => setQueuePage((current) => Math.max(current - 1, 1))}
+                        disabled={queueVisiblePage <= 1}
+                      >
+                        Previous page
+                      </button>
+                      <span className="grid-pager-status">
+                        showing {queueRangeStart}-{queueRangeEnd} of {filteredQueuedRows.length}
+                      </span>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() =>
+                          setQueuePage((current) =>
+                            Math.min(
+                              current + 1,
+                              pageCount(filteredQueuedRows.length, queuePageSize),
+                            ),
+                          )
+                        }
+                        disabled={queueVisiblePage >= queuePageTotal}
+                      >
+                        Next page
+                      </button>
+                    </div>
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={submitQueuedRows}
+                      disabled={
+                        !canSubmitQueuedRows || queueMutationLocked || isBridgeSubmitBlocked
+                      }
+                    >
+                      Submit queued rows
+                    </button>
+                    <button
+                      className={`button-danger${queueMutationLocked ? " is-locked" : ""}`}
+                      type="button"
+                      onClick={clearQueueSnapshot}
+                      disabled={queueMutationLocked}
+                    >
+                      Clear batch snapshot
+                    </button>
+                    {queueMutationLockMessage ? (
+                      <p className="section-lock-note">{queueMutationLockMessage}</p>
+                    ) : null}
+                    {batchSubmit.phase === "submitting" ? (
+                      <p className="notice-text">{batchSubmit.message}</p>
+                    ) : null}
+                    {bridgeSubmitBlockMessage ? (
+                      <p className="status-fail">{bridgeSubmitBlockMessage}</p>
+                    ) : null}
+                    {batchSubmit.phase === "error" ? (
+                      <p className="status-fail">{batchSubmit.message}</p>
+                    ) : null}
+                    {batchSubmit.phase === "success" ? (
+                      <p className="status-ok">{batchSubmit.message}</p>
+                    ) : null}
+                    {batchSubmit.results.length > 0 ? (
+                      <pre className="json-block">
+                        {JSON.stringify(batchSubmit.results, null, 2)}
+                      </pre>
+                    ) : null}
+                  </section>
+                ) : (
+                  <section className="panel">
+                    <div className="empty-state">
+                      <strong>No queued rows</strong>
+                      <p>
+                        Load a source file, confirm column mapping, then snapshot valid rows into
+                        the dispatch queue.
+                      </p>
+                    </div>
+                  </section>
+                )}
+              </div>
+            ) : null}
+
+            {activeWorkspace === "audit" ? (
+              <section className="panel audit-lane">
+                <div className="section-heading">
+                  <h2>Proof inbox / audit search</h2>
+                  <p>
+                    Keep proof review, audit export, retention, backup inventory, and legacy
+                    migration in a dedicated operational lane.
+                  </p>
+                </div>
+                <div className="form-grid">
+                  <label className="field field-wide">
+                    <span>Search ledger</span>
+                    <input
+                      value={auditQuery}
+                      onChange={(event) => setAuditQuery(event.target.value)}
+                      placeholder="job id, lineage, actor, template, adapter"
+                    />
+                  </label>
+                  <label className="field field-wide">
+                    <span>Review note</span>
+                    <textarea
+                      className="batch-text"
+                      rows={3}
+                      value={proofReviewNotes}
+                      onChange={(event) => setProofReviewNotes(event.target.value)}
+                      placeholder="Optional approval or rejection note for the proof ledger."
+                    />
+                  </label>
+                </div>
+                <div className="proof-note">
+                  <strong>Audit maintenance</strong>
+                  <p>
+                    Export the current desktop ledger as JSON, then dry-run or apply retention with
+                    a backup bundle written under the desktop audit backup directory.
+                  </p>
+                  <small>
+                    {bridgeStatusAvailable && bridgeStatus.status
+                      ? `audit log dir: ${bridgeStatus.status.auditLogDir} / backup dir: ${bridgeStatus.status.auditBackupDir}`
+                      : "Desktop bridge unavailable. Audit maintenance needs desktop-shell."}
+                  </small>
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>Scope</span>
+                      <select
+                        value={auditScope}
+                        onChange={(event) => setAuditScope(event.target.value as AuditLedgerScope)}
+                      >
+                        <option value="all">All ledgers</option>
+                        <option value="dispatch">Dispatch only</option>
+                        <option value="proof">Proof only</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Max age days</span>
+                      <input
+                        value={auditMaxAgeDays}
+                        onChange={(event) => setAuditMaxAgeDays(event.target.value)}
+                        placeholder="30"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Max entries</span>
+                      <input
+                        value={auditMaxEntries}
+                        onChange={(event) => setAuditMaxEntries(event.target.value)}
+                        placeholder="500"
+                      />
+                    </label>
+                    <label className="field checkbox-field">
+                      <span>Retention mode</span>
+                      <div className="checkbox-row">
+                        <input
+                          id="audit-dry-run"
+                          type="checkbox"
+                          checked={auditDryRun}
+                          onChange={(event) => setAuditDryRun(event.target.checked)}
+                        />
+                        <label htmlFor="audit-dry-run">Dry run first</label>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="toolbar">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void runAuditExport();
+                      }}
+                      disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+                    >
+                      Export audit JSON
+                    </button>
+                    <button
+                      className={auditDryRun ? "button-secondary" : "button-primary"}
+                      type="button"
+                      onClick={() => {
+                        void runAuditTrim();
+                      }}
+                      disabled={!bridgeStatusAvailable || auditTrimState.phase === "submitting"}
+                    >
+                      {auditDryRun ? "Run retention dry run" : "Apply retention trim"}
+                    </button>
+                  </div>
+                  {auditExportState.phase === "submitting" ? (
+                    <p className="notice-text">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.phase === "error" ? (
+                    <p className="status-fail">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.phase === "success" ? (
+                    <p className="status-ok">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.detail ? (
+                    <p className="data-summary">{auditExportState.detail}</p>
+                  ) : null}
+                  {auditTrimState.phase === "submitting" ? (
+                    <p className="notice-text">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.phase === "error" ? (
+                    <p className="status-fail">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.phase === "success" ? (
+                    <p className="status-ok">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.detail ? (
+                    <p className="data-summary">{auditTrimState.detail}</p>
+                  ) : null}
+                </div>
+                <div className="proof-note">
+                  <strong>Audit backup bundles</strong>
+                  <p>
+                    List backup JSON bundles written by retention runs from the desktop audit backup
+                    directory, then restore a selected bundle back into the active ledger.
+                  </p>
+                  <div className="toolbar">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void refreshAuditBackupBundles();
+                      }}
+                      disabled={
+                        auditBackupBundles.phase === "loading" ||
+                        auditBackupBundles.phase === "unavailable" ||
+                        !isTauriConnected()
+                      }
+                    >
+                      {auditBackupBundles.phase === "loading"
+                        ? "Loading backups..."
+                        : "Refresh backup bundles"}
+                    </button>
+                  </div>
+                  {auditBackupBundles.message ? (
+                    <p
+                      className={
+                        auditBackupBundles.phase === "error"
+                          ? "status-fail"
+                          : auditBackupBundles.phase === "success" ||
+                              auditBackupBundles.phase === "ready"
+                            ? "status-ok"
+                            : "notice-text"
+                      }
+                    >
+                      {auditBackupBundles.message}
+                    </p>
+                  ) : null}
+                  {auditBackupBundles.phase === "ready" ? (
+                    auditBackupBundles.bundles.length > 0 ? (
+                      <div className="data-grid">
+                        <div className="data-grid-header">
+                          <strong>Backup bundle list</strong>
+                          <span>{auditBackupBundles.bundles.length}</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Select</th>
+                              <th>File</th>
+                              <th>Created</th>
+                              <th>Size</th>
+                              <th>Path</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {auditBackupBundles.bundles.map((bundle) => (
+                              <tr
+                                key={bundle.filePath}
+                                className={
+                                  selectedAuditBackupBundle?.filePath === bundle.filePath
+                                    ? "table-row-focus"
+                                    : undefined
+                                }
+                              >
+                                <td>
+                                  <input
+                                    type="radio"
+                                    name="audit-backup-bundle"
+                                    checked={
+                                      selectedAuditBackupBundle?.filePath === bundle.filePath
+                                    }
+                                    onChange={() => selectAuditBackupBundle(bundle.filePath)}
+                                  />
+                                </td>
+                                <td>{bundle.fileName}</td>
+                                <td>{formatSavedAt(bundle.createdAtUtc)}</td>
+                                <td>{formatAuditBundleSize(bundle.sizeBytes)}</td>
+                                <td className="data-summary">{bundle.filePath}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="data-summary">No backup bundles found.</p>
+                    )
+                  ) : null}
+                  <div className="restore-panel">
+                    <div className="section-heading">
+                      <h3>Restore selected bundle</h3>
+                      <p>
+                        Restore merges the selected backup bundle into the current desktop ledger.
+                        Conflicts or invalid bundles fail the whole restore.
+                      </p>
+                    </div>
+                    <p className="data-summary">
+                      {selectedAuditBackupBundle
+                        ? `${selectedAuditBackupBundle.fileName} / ${formatSavedAt(selectedAuditBackupBundle.createdAtUtc)} / ${formatAuditBundleSize(selectedAuditBackupBundle.sizeBytes)}`
+                        : "Select a bundle from the inventory table first."}
+                    </p>
+                    <label className="checkbox-row restore-confirm-row">
+                      <input
+                        type="checkbox"
+                        checked={auditRestoreConfirmed}
+                        onChange={(event) => setAuditRestoreConfirmed(event.target.checked)}
+                        disabled={!selectedAuditBackupBundle}
+                      />
+                      <span>
+                        Confirm merge restore into the active audit ledger. Conflicts abort the
+                        whole operation.
+                      </span>
+                    </label>
+                    <div className="toolbar">
+                      <button
+                        className="button-primary"
+                        type="button"
+                        onClick={() => {
+                          void runAuditRestore();
+                        }}
+                        disabled={!auditRestoreReady}
+                      >
+                        {auditRestoreState.phase === "submitting"
+                          ? "Restoring bundle..."
+                          : "Restore selected bundle"}
+                      </button>
+                    </div>
+                    {auditRestoreState.phase === "submitting" ? (
+                      <p className="notice-text">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.phase === "error" ? (
+                      <p className="status-fail">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.phase === "success" ? (
+                      <p className="status-ok">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.result ? (
+                      <p className="data-summary">
+                        Restored {auditRestoreState.result.restoredDispatchCount} dispatch /{" "}
+                        {auditRestoreState.result.restoredProofCount} proof rows from{" "}
+                        {auditRestoreState.result.bundle.filePath}.
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+                <div className="proof-note">
+                  <strong>Legacy proof seed</strong>
+                  <p>
+                    Import proof PDFs created before the approval ledger existed. Seeded rows stay
+                    pending until they are approved in this inbox.
+                  </p>
+                  <small>
+                    Required columns: {LEGACY_PROOF_SEED_REQUIRED_COLUMNS.join(", ")}
+                    {bridgeStatusAvailable && bridgeStatus.status
+                      ? ` / proof output dir: ${bridgeStatus.status.proofOutputDir}`
+                      : ""}
+                  </small>
+                  <div className="toolbar">
+                    <label className="button-secondary fake-button">
+                      Upload legacy proof CSV/XLSX
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls,text/csv"
+                        onChange={handleLegacyProofSeedUpload}
+                      />
+                    </label>
+                    {legacyProofSeedSource ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => {
+                          setLegacyProofSeedSource(null);
+                          setLegacyProofSeedError(null);
+                          setLegacyProofSeedState({
+                            phase: "idle",
+                            message: "",
+                            result: null,
+                          });
+                        }}
+                      >
+                        Clear legacy proof file
+                      </button>
+                    ) : null}
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void runLegacyProofSeed("validating");
+                      }}
+                      disabled={
+                        !legacyProofSeedSource ||
+                        legacyProofSeedState.phase === "validating" ||
+                        legacyProofSeedState.phase === "seeding" ||
+                        !bridgeStatusAvailable
+                      }
+                    >
+                      Validate legacy rows
+                    </button>
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={() => {
+                        void runLegacyProofSeed("seeding");
+                      }}
+                      disabled={
+                        !legacyProofSeedSource ||
+                        legacyProofSeedState.phase === "validating" ||
+                        legacyProofSeedState.phase === "seeding" ||
+                        !bridgeStatusAvailable
+                      }
+                    >
+                      Seed pending proofs
+                    </button>
+                  </div>
+                  <p className="data-summary">
+                    {legacyProofSeedError ? legacyProofSeedError : legacyProofSeedSummary}
+                  </p>
+                  {legacyProofSeedState.phase === "validating" ||
+                  legacyProofSeedState.phase === "seeding" ? (
+                    <p className="notice-text">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedState.phase === "error" ? (
+                    <p className="status-fail">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedState.phase === "success" ? (
+                    <p className="status-ok">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedPreviewRows.length > 0 ? (
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Legacy proof preview</strong>
+                        <span>{legacyProofSeedRequest?.rows.length ?? 0} rows</span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Proof job</th>
+                            <th>Template</th>
+                            <th>JAN</th>
+                            <th>Qty</th>
+                            <th>Requested by</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {legacyProofSeedPreviewRows.map((row) => (
+                            <tr key={`${row.proofJobId}-${row.artifactPath}`}>
+                              <td>{row.proofJobId || "-"}</td>
+                              <td>{row.templateVersion || "-"}</td>
+                              <td>{row.matchSubject.jan || "-"}</td>
+                              <td>{row.matchSubject.qty || "-"}</td>
+                              <td>
+                                {row.requestedBy.displayName || row.requestedBy.userId || "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                  {legacyProofSeedState.result?.rows.length ? (
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Legacy proof validation</strong>
+                        <span>{legacyProofSeedState.result.rows.length} rows</span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            <th>Proof job</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {legacyProofSeedState.result.rows.map((row) => (
+                            <tr key={`${row.rowIndex}-${row.proofJobId}`}>
+                              <td>{row.rowIndex + 1}</td>
+                              <td>{row.proofJobId || "-"}</td>
+                              <td className={row.status === "ok" ? "status-ok" : "status-fail"}>
+                                {row.status}
+                              </td>
+                              <td>{row.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="toolbar">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditSearch(auditQuery);
+                    }}
+                  >
+                    Refresh proof inbox
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setAuditQuery("");
+                      void refreshAuditSearch("");
+                    }}
+                  >
+                    Clear search
+                  </button>
+                </div>
+                <p className="data-summary">
+                  {auditSearch.message}
+                  {auditSearch.lastUpdatedAt
+                    ? ` Last updated: ${formatSavedAt(auditSearch.lastUpdatedAt)}.`
+                    : ""}
+                </p>
+                {proofReview.phase === "submitting" ? (
+                  <p className="notice-text">{proofReview.message}</p>
+                ) : null}
+                {proofReview.phase === "error" ? (
+                  <p className="status-fail">{proofReview.message}</p>
+                ) : null}
+                {proofReview.phase === "success" ? (
+                  <p className="status-ok">{proofReview.message}</p>
+                ) : null}
+                {auditSearch.phase === "error" ? (
+                  <p className="status-fail">{auditSearch.message}</p>
+                ) : null}
+                {auditSearch.entries.length > 0 ? (
+                  <div className="data-grid">
+                    <div className="data-grid-header">
+                      <strong>Recent dispatches</strong>
+                      <span>
+                        {filteredAuditEntries.length} visible / {auditSearch.entries.length} entries
+                      </span>
+                    </div>
+                    <div className="grid-toolbar">
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Mode</span>
+                          <select
+                            value={auditModeFilter}
+                            onChange={(event) => {
+                              setAuditModeFilter(event.target.value as AuditModeFilter);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="all">All modes</option>
+                            <option value="proof">Proof</option>
+                            <option value="print">Print</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Proof state</span>
+                          <select
+                            value={auditProofFilter}
+                            onChange={(event) => {
+                              setAuditProofFilter(event.target.value as AuditProofFilter);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="all">All proof states</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="other">Other proof state</option>
+                            <option value="missing">No proof record</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Sort</span>
+                          <select
+                            value={auditSortMode}
+                            onChange={(event) => {
+                              setAuditSortMode(event.target.value as AuditSortMode);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="occurred-desc">Newest first</option>
+                            <option value="occurred-asc">Oldest first</option>
+                            <option value="mode">Mode</option>
+                            <option value="proof-status">Proof status</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Page size</span>
+                          <select
+                            value={String(auditPageSize)}
+                            onChange={(event) => {
+                              setAuditPageSize(Number(event.target.value));
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-meta">
+                        <div className="grid-chip-list">
+                          <span
+                            className={`grid-chip ${auditModeFilter === "all" ? "active" : ""}`}
+                          >
+                            {auditModeFilter}
+                          </span>
+                          <span
+                            className={`grid-chip ${auditProofFilter === "all" ? "active" : ""}`}
+                          >
+                            {auditProofFilter}
+                          </span>
+                          <span className="grid-chip">
+                            page {auditVisiblePage} / {auditPageTotal}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {auditSearchMayBeTruncated ? (
+                      <p className="section-lock-note">
+                        Audit search currently loads the newest {AUDIT_SEARCH_RESULT_LIMIT} entries.
+                        Refine server search terms to reach older records outside this window.
+                      </p>
+                    ) : null}
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Occurred</th>
+                          <th>Job</th>
+                          <th>Mode</th>
+                          <th>Actor</th>
+                          <th>Proof</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedAuditEntries.length > 0 ? (
+                          pagedAuditEntries.map((entry) => (
+                            <tr
+                              key={entry.dispatch.audit.jobId}
+                              className={
+                                auditFocusEntry?.dispatch.audit.jobId === entry.dispatch.audit.jobId
+                                  ? "table-row-focus"
+                                  : undefined
+                              }
+                              tabIndex={0}
+                              onClick={() => setSelectedAuditEntryJobId(entry.dispatch.audit.jobId)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  setSelectedAuditEntryJobId(entry.dispatch.audit.jobId);
+                                }
+                              }}
+                            >
+                              <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
+                              <td>
+                                <strong className="mono-data">{entry.dispatch.audit.jobId}</strong>
+                                <br />
+                                <small className="mono-data">
+                                  {entry.dispatch.templateVersion}
+                                </small>
+                              </td>
+                              <td>
+                                <span
+                                  className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
+                                >
+                                  {entry.dispatch.mode}
+                                </span>
+                              </td>
+                              <td>
+                                {entry.dispatch.audit.actor.displayName}
+                                <br />
+                                <small className="mono-data">
+                                  {entry.dispatch.audit.actor.userId}
+                                </small>
+                              </td>
+                              <td className={proofStatusClass(entry.proof?.status)}>
+                                {entry.proof ? (
+                                  <>
+                                    <strong>{entry.proof.status}</strong>
+                                    <br />
+                                    <small className="mono-data">{entry.proof.proofJobId}</small>
+                                  </>
+                                ) : (
+                                  <span>not a proof record</span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="audit-actions">
+                                  {entry.proof?.status === "pending" ? (
+                                    <>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        disabled={proofReview.phase === "submitting"}
+                                        onClick={() => {
+                                          void submitProofReview(entry, "approve");
+                                        }}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        disabled={proofReview.phase === "submitting"}
+                                        onClick={() => {
+                                          void submitProofReview(entry, "reject");
+                                        }}
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  ) : null}
+                                  {entry.proof?.status === "approved" ? (
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => applyApprovedProofToForm(entry)}
+                                    >
+                                      Use for print
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="data-summary">
+                              No audit entries match the current filters.
+                            </td>
+                          </tr>
+                        )}
+                      </tbody>
+                    </table>
+                    <div className="grid-pager">
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => setAuditPage((current) => Math.max(current - 1, 1))}
+                        disabled={auditVisiblePage <= 1}
+                      >
+                        Previous page
+                      </button>
+                      <span className="grid-pager-status">
+                        showing {auditRangeStart}-{auditRangeEnd} of {filteredAuditEntries.length}
+                      </span>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() =>
+                          setAuditPage((current) =>
+                            Math.min(
+                              current + 1,
+                              pageCount(filteredAuditEntries.length, auditPageSize),
+                            ),
+                          )
+                        }
+                        disabled={auditVisiblePage >= auditPageTotal}
+                      >
+                        Next page
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <strong>No audit entries</strong>
+                    <p>
+                      Submit a proof job from desktop shell or refresh the search after bridge
+                      startup.
+                    </p>
+                  </div>
+                )}
+              </section>
+            ) : null}
+          </div>
+        </section>
+
+        <aside className="app-inspector">
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Session</h2>
+              <p>Current operator context and active route across the workstation.</p>
+            </div>
+            <div className="inspector-grid">
+              <div>
+                <span>Job</span>
+                <strong>{session.jobId}</strong>
+              </div>
+              <div>
+                <span>Requested</span>
+                <strong>{formatSavedAt(session.requestedAt)}</strong>
+              </div>
+              <div>
+                <span>Template</span>
+                <strong>{templateOptionLabel}</strong>
+              </div>
+              <div>
+                <span>Execution</span>
+                <strong>{executionModeLabel}</strong>
+              </div>
+            </div>
+            <p className="data-summary">{activeWorkspaceFocus}</p>
+          </section>
+
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Bridge</h2>
+              <p>Desktop backend readiness and route blocking status.</p>
+            </div>
+            <div className="inspector-grid">
+              <div>
+                <span>Status</span>
+                <strong>
+                  {bridgeStatus.phase === "ready"
+                    ? "Ready"
+                    : bridgeStatus.phase === "loading"
+                      ? "Checking"
+                      : bridgeStatus.phase === "error"
+                        ? "Error"
+                        : "Unavailable"}
+                </strong>
+              </div>
+              <div>
+                <span>Adapter</span>
+                <strong>
+                  {bridgeStatusAvailable ? bridgeStatus.status?.printAdapterKind : "n/a"}
+                </strong>
+              </div>
+              <div>
+                <span>Warnings</span>
+                <strong>{bridgeWarnings.length}</strong>
+              </div>
+              <div>
+                <span>Submit gate</span>
+                <strong>{isBridgeSubmitBlocked ? "Blocked" : "Open"}</strong>
+              </div>
+            </div>
+            <p className="data-summary">{bridgeStatus.message}</p>
+            {bridgeStatusAvailable && bridgeStatus.status ? (
+              <p className="data-summary">
+                proof {bridgeStatus.status.proofOutputDir} / print{" "}
+                {bridgeStatus.status.printOutputDir}
+              </p>
+            ) : null}
+            {bridgeWarnings.length > 0 ? (
+              <ul className="inspector-list">
+                {bridgeWarnings.slice(0, 4).map((warning) => (
+                  <li
+                    key={`${warning.code}-${warning.message}`}
+                    className={
+                      warning.severity === "error"
+                        ? "status-fail"
+                        : warning.severity === "warning"
+                          ? "status-pending"
+                          : ""
+                    }
+                  >
+                    <strong>{warning.code}</strong>: {warning.message}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="status-ok">No bridge warnings.</p>
+            )}
+          </section>
+
+          {activeWorkspace === "compose" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Compose Inspector</h2>
+                <p>Live payload, staged snapshot, and proof-gated dispatch authority.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Live payload</span>
+                  <strong>{draft ? "Current form" : "Missing"}</strong>
+                </div>
+                <div>
+                  <span>Staged snapshot</span>
+                  <strong>
+                    {draftSnapshot ? (draftIsStale ? "Pinned, stale" : "Pinned") : "None"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Dispatch gate</span>
+                  <strong>{isBridgeSubmitBlocked ? "Blocked" : "Ready"}</strong>
+                </div>
+                <div>
+                  <span>Proof lineage</span>
+                  <strong>{form.executionSourceProofJobId || "Pending proof selection"}</strong>
+                </div>
+              </div>
+              {templateCatalogIssue ? <p className="status-fail">{templateCatalogIssue}</p> : null}
               {draftIsStale ? (
                 <p className="notice-text">
-                  Live input changed after the last snapshot. Click create again to refresh the
-                  saved draft.
+                  Staged snapshot is a fixed comparison copy only. Submit still uses the live
+                  payload.
                 </p>
               ) : null}
-            </>
-          ) : (
-            <div className="empty-state">
-              <strong>No draft yet</strong>
-              <p>Fill the required fields, then create a snapshot to inspect the payload.</p>
-            </div>
-          )}
-        </aside>
-      </section>
+            </section>
+          ) : null}
 
-      <section className="grid">
-        <article className="card">
-          <span>Guardrails</span>
-          <strong>Print core first</strong>
-          <ul className="card-list">
-            {corePillars.map((pillar) => (
-              <li key={pillar}>{pillar}</li>
-            ))}
-          </ul>
-        </article>
-        <article className="card">
-          <span>Operator notes</span>
-          <strong>Why the form is strict</strong>
-          <ul className="card-list">
-            {operatorNotes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </article>
-      </section>
+          {activeWorkspace === "templates" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Template Inspector</h2>
+                <p>Page geometry, active submode, and the currently selected field binding.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Submode</span>
+                  <strong>{templateWorkspaceMode}</strong>
+                </div>
+                <div>
+                  <span>Catalog</span>
+                  <strong>{templateCatalogHeadline}</strong>
+                </div>
+                <div>
+                  <span>Page</span>
+                  <strong>
+                    {templateEditorModel
+                      ? `${templateEditorModel.page.widthMm} x ${templateEditorModel.page.heightMm} mm`
+                      : "Invalid JSON"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Fields</span>
+                  <strong>{templateEditorModel?.fields.length ?? 0}</strong>
+                </div>
+              </div>
+              {selectedTemplateField ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Selected field</strong>
+                  <p>
+                    {selectedTemplateField.name || "unnamed"} /{" "}
+                    {selectedTemplateField.xMm.toFixed(1)}
+                    mm / {selectedTemplateField.yMm.toFixed(1)}mm /{" "}
+                    {selectedTemplateField.fontSizeMm.toFixed(1)}mm
+                  </p>
+                  <small className="mono-data">{selectedTemplateField.template}</small>
+                </div>
+              ) : (
+                <p className="notice-text">Select a field card to inspect its binding.</p>
+              )}
+            </section>
+          ) : null}
+
+          {activeWorkspace === "queue" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Queue Inspector</h2>
+                <p>Focused row, submit session state, and retry semantics.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Submit session</span>
+                  <strong>{queueMutationLocked ? "Locked" : "Idle"}</strong>
+                </div>
+                <div>
+                  <span>Visible rows</span>
+                  <strong>{filteredQueuedRows.length}</strong>
+                </div>
+                <div>
+                  <span>Ready / failed</span>
+                  <strong>
+                    {queuedReadyRowsCount} / {queuedFailedRowsCount}
+                  </strong>
+                </div>
+                <div>
+                  <span>Focus row</span>
+                  <strong>{queueFocusRow?.draft?.jobId ?? "None"}</strong>
+                </div>
+              </div>
+              {queueFocusRow ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Focused queue row</strong>
+                  <p>
+                    Row {queueFocusRow.rowIndex + 1} / {queueFocusRow.draft?.sku ?? "-"} /{" "}
+                    {queueFocusRow.submissionStatus}
+                  </p>
+                  <small className="mono-data">
+                    {queueFocusRow.dispatchError ||
+                      queueFocusRow.retryLineageJobId ||
+                      formatQueuedRowResult(queueFocusRow)}
+                  </small>
+                </div>
+              ) : (
+                <p className="notice-text">Build or filter queue rows to focus a dispatch row.</p>
+              )}
+            </section>
+          ) : null}
+
+          {activeWorkspace === "audit" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Audit Inspector</h2>
+                <p>Focused ledger row, proof detail, and backup restore target.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Focus entry</span>
+                  <strong>{auditFocusEntry?.dispatch.audit.jobId ?? "None"}</strong>
+                </div>
+                <div>
+                  <span>Proof state</span>
+                  <strong>{auditFocusEntry?.proof?.status ?? "n/a"}</strong>
+                </div>
+                <div>
+                  <span>Restore target</span>
+                  <strong>{selectedAuditBackupBundle?.fileName ?? "None"}</strong>
+                </div>
+                <div>
+                  <span>Last restore</span>
+                  <strong>{auditRestoreState.phase === "success" ? "Applied" : "Idle"}</strong>
+                </div>
+              </div>
+              {auditFocusEntry ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Focused audit row</strong>
+                  <p>
+                    {auditFocusEntry.dispatch.mode} /{" "}
+                    {auditFocusEntry.dispatch.audit.actor.displayName} /{" "}
+                    {formatSavedAt(auditFocusEntry.dispatch.audit.occurredAt)}
+                  </p>
+                  <small className="mono-data">
+                    lineage {auditFocusEntry.dispatch.audit.jobLineageId}
+                    {auditFocusEntry.proof?.decision
+                      ? ` / reviewed by ${auditFocusEntry.proof.decision.actor.displayName}`
+                      : ""}
+                  </small>
+                </div>
+              ) : (
+                <p className="notice-text">
+                  Refresh audit search to inspect proof or dispatch rows.
+                </p>
+              )}
+              {auditRestoreState.message ? (
+                <p
+                  className={
+                    auditRestoreState.phase === "error"
+                      ? "status-fail"
+                      : auditRestoreState.phase === "success"
+                        ? "status-ok"
+                        : "notice-text"
+                  }
+                >
+                  {auditRestoreState.message}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Activity</h2>
+              <p>Latest operational messages across compose, queue, template, and audit flows.</p>
+            </div>
+            {activityFeed.length > 0 ? (
+              <ul className="inspector-list">
+                {activityFeed.map((entry) => (
+                  <li key={entry.id} className={`activity-item ${entry.tone}`}>
+                    <strong>{entry.label}</strong>
+                    <span>{entry.message}</span>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <div className="empty-state compact">
+                <strong>No recent activity</strong>
+                <p>Run a workspace action to populate the operational log.</p>
+              </div>
+            )}
+          </section>
+        </aside>
+      </div>
+
+      <footer className="status-bar">
+        <div className="status-bar-item">
+          <span>Bridge</span>
+          <strong>{bridgeStatus.phase === "ready" ? "ready" : bridgeStatus.phase}</strong>
+        </div>
+        <div className="status-bar-item">
+          <span>Draft</span>
+          <strong>{draft ? "live" : "missing"}</strong>
+        </div>
+        <div className="status-bar-item">
+          <span>Queue</span>
+          <strong>
+            {queuedReadyRowsCount} ready / {queuedFailedRowsCount} failed
+          </strong>
+        </div>
+        <div className="status-bar-item">
+          <span>Audit</span>
+          <strong>
+            {pendingProofCount} pending / {approvedProofEntries.length} approved
+          </strong>
+        </div>
+      </footer>
     </main>
   );
 }

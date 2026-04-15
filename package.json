@@ -7,7 +7,9 @@
     "format:check": "pnpm exec biome check .",
     "lint": "pnpm exec biome lint .",
     "typecheck": "pnpm -r --if-present typecheck",
-    "fixture:validate": "node scripts/validate-fixtures.mjs"
+    "fixture:validate": "node scripts/validate-fixtures.mjs",
+    "release:notes": "node scripts/generate-release-notes.mjs",
+    "release:readiness": "node scripts/generate-release-readiness.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

@@ -14,4 +14,5 @@
 - `0001-print-core-first.md`
 - `0002-svg-pdf-first.md`
 - `0003-zint-for-barcode-generation.md`
-
+- `0004-template-spec-json.md`
+- `0005-proof-approval-ledger-local-json.md`

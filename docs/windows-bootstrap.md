@@ -1,114 +1,41 @@
 # windows-bootstrap
 
-## 1. 必要ツール一覧
-
+## 必要環境
 - Git
 - Rust stable
 - Node.js LTS
 - pnpm
 - Visual Studio C++ Build Tools
 - WebView2 Runtime
-  Tauri を採用する場合のみ必須
-- PDF 仮想プリンタ
-- 物理ラベルプリンタ
 
-## 2. インストール順
-
-1. Git
-2. Rust stable
-3. Node.js LTS
-4. pnpm
-5. Visual Studio C++ Build Tools
-6. WebView2 Runtime
-   Tauri 採用時のみ
-7. PDF 仮想プリンタ
-8. 物理ラベルプリンタのドライバ
-
-## 3. 用途説明
-
-- Git
-  ソース管理、PR ベース運用、差分監査。
-- Rust stable
-  `print-agent`、`domain`、`render`、`printer-adapters` のビルド。
-- Node.js LTS
-  管理 UI、fixture 検証スクリプト、CI 補助。
-- pnpm
-  monorepo の依存解決とワークスペース管理。
-- Visual Studio C++ Build Tools
-  Windows 向け Rust ネイティブビルド、将来の Tauri シェル。
-- WebView2 Runtime
-  Tauri の Windows shell 実行基盤。
-- PDF 仮想プリンタ
-  実機に触る前の倍率・余白確認。
-- 物理ラベルプリンタ
-  本命の寸法検証。
-
-## 4. 動作確認コマンド
-
+## Windows bootstrap
 ```powershell
 git --version
 rustup show
 cargo --version
 node --version
 pnpm --version
-pwsh -File .\scripts\windows\verify-bootstrap.ps1
-pwsh -File .\scripts\windows\verify-bootstrap.ps1 --with-tauri
 pnpm --filter @label/desktop-shell tauri info
-pnpm --filter @label/desktop-shell dev
 pnpm --filter @label/desktop-shell build
 ```
 
-## 5. トラブルシュート
+## Desktop Shell / Bridge 運用
+- desktop-shell 起動時: Tauri bridge が有効
+- admin-web（ブラウザ単体）: bridge 未接続（印刷は preview のみ想定）
 
-### Rust が MSVC を見つけない
+Tauri で使うコマンド:
+- `dispatch_print_job`
+- `print_bridge_status`
 
-- Visual Studio C++ Build Tools に `Desktop development with C++` を入れる
-- PowerShell を再起動する
+必要/任意の環境変数:
+- `JAN_LABEL_PRINT_OUTPUT_DIR`
+- `JAN_LABEL_SPOOL_OUTPUT_DIR`
+- `JAN_LABEL_ZINT_BINARY_PATH`
+- `JAN_LABEL_PRINT_ADAPTER`
+- `JAN_LABEL_WINDOWS_PRINTER_NAME`
 
-### pnpm が見つからない
+## 事前確認（最小）
+1. `pnpm --filter @label/desktop-shell build`
+2. `pnpm --filter @label/desktop-shell tauri info`
+3. desktop-shell 起動後、`print_bridge_status` を呼び `print_adapter_kind` と `warnings` を確認
 
-- `corepack enable`
-- `corepack prepare pnpm@latest --activate`
-
-### Tauri だけ起動しない
-
-- WebView2 Runtime の有無を確認する
-- `verify-bootstrap.ps1 --with-tauri` で確認する
-- `pnpm --filter @label/desktop-shell tauri info` で `devUrl` と `frontendDist` を確認する
-
-### desktop-shell が build できない
-
-- Visual Studio C++ Build Tools に `Desktop development with C++` を入れる
-- PowerShell を再起動して `link.exe` が見える状態にする
-- 先に `pnpm --filter @label/admin-web build` が通ることを確認する
-
-### 印字倍率がずれる
-
-- OS の印刷ダイアログで `100%` 固定以外を禁止する
-- PDF 仮想プリンタで 50mm x 30mm の実測を先に行う
-- 物理プリンタ側の縮小拡大設定を無効化する
-
-## 6. ハードウェア検証環境
-
-- 物理ラベルプリンタ 1 台
-- A4 普通紙プリンタまたは PDF 仮想プリンタ
-- 実運用ラベル用紙
-- 定規
-- ノギス
-- バーコードリーダー
-
-## 7. Tauri を使う場合と使わない場合の差分
-
-- 使う場合
-  Windows 配布がしやすい。ローカルブリッジを同梱しやすい。VC++ Build Tools と WebView2 が必要。
-- 使わない場合
-  開発は軽い。ブラウザ UI とローカル `print-agent` の組み合わせで MVP を進めやすい。
-- 共通
-  印刷コアの責務は変わらない。印字精度は UI 技術ではなく template と adapter で決まる。
-
-## 8. desktop-shell の現状
-
-- `apps/desktop-shell` には `admin-web` を包む最小 Tauri 2 shell を配置済み
-- `tauri info` では `frontendDist` と `devUrl` を確認できる
-- ローカルでは Visual Studio C++ Build Tools 不足のため `build` までは未検証
-- GitHub Actions の `desktop-shell-windows` job と `Release` workflow は `windows-latest` 上で bundle build を担う
