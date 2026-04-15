@@ -1,6 +1,6 @@
 # active-todo
 
-Priority order for the next release branch work.
+Priority order for post-`v0.1.2` branch work.
 
 ## Done
 
@@ -23,6 +23,7 @@ Priority order for the next release branch work.
 | T-028e | P1 | done | Codex + Sub-Agent | Audit export / retention / backup | Scoped export, dry-run trim, apply trim, and backup bundles work |
 | T-028f-list | P2 | done | Codex + Sub-Agent | Audit backup bundle listing | `admin-web` and `desktop-shell` can list retention backup bundles with metadata |
 | T-029 | P2 | done | Codex + Sub-Agent | Operator runbook and stop/restart/escalation rules | PDF-only operator checklist and release handoff are documented |
+| T-045 | P1 | done | Codex + Sub-Agent | Cut PDF-only release `v0.1.2` | Tag, GitHub Release workflow, and Windows installer asset are published |
 | T-032b | P1 | done | Codex + Sub-Agent | Structured editor UX and preview workbench | Editor, local canvas, and Rust preview are usable together |
 | T-032c | P1 | done | Codex + Sub-Agent | Desktop template catalog sync | `admin-web` reads desktop catalog and blocks unknown template routes |
 | T-032a | P1 | done | Codex + Sub-Agent | Local template catalog write-back | Live template JSON can be saved into the desktop local catalog |
