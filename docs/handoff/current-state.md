@@ -1,10 +1,10 @@
 # current-state
 
 - Updated: 2026-04-16
-- Branch: `codex/v020-workstation-redesign`
-- Release base: `v0.1.3` (`0e22216`)
-- Active PR: `#31` `[codex] implement v0.2.0 workstation release batch`
-- Branch relation to `origin/main` on 2026-04-16: published integration branch for the `v0.2.0` workstation release batch; draft PR is open against `main`
+- Branch: `main`
+- Release base: `v0.2.0` (`0b6827e`)
+- Active PR: `none`
+- Branch relation to `origin/main` on 2026-04-16: `main` includes the merged operator workstation batch and tagged `v0.2.0` release commit; post-release sync is being prepared separately
 
 ## Shipping Now
 
@@ -37,9 +37,12 @@
   - `preview_template_draft`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
 - release automation
-  - `pnpm release:notes --version <version>`
-  - `pnpm release:readiness --version <version>`
-  - `Release` workflow uploads release notes and readiness artifacts
+- `pnpm release:notes --version <version>`
+- `pnpm release:readiness --version <version>`
+- `Release` workflow uploads release notes and readiness artifacts
+- GitHub release publishing
+  - `v0.2.0` tag published through the Release workflow
+  - Windows installer asset uploaded successfully
 
 ## Landed In This Batch
 
@@ -114,6 +117,9 @@ Passed on this batch:
   - `rust-test`
   - `golden-tests`
   - `desktop-shell-windows`
+- GitHub `Release` workflow on tag `v0.2.0`
+  - `verify-release-ready`
+  - `publish-windows-release`
 
 Operational note:
 
@@ -129,18 +135,19 @@ Operational note:
 ## Release Status
 
 - `v0.1.3` was tagged and published on `2026-04-15`.
-- GitHub `Release` workflow run `24451489938` succeeded and published the Windows installer asset.
-- Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.1.3`
-- Windows installer asset: `JAN-Label_0.1.3_windows_x64-setup.exe`
-- Next target is `v0.2.0` with operator workstation redesign, audit restore, and release automation artifacts in scope.
+- `v0.2.0` was tagged and published on `2026-04-15`.
+- GitHub `Release` workflow run `24474516998` succeeded and published the Windows installer asset.
+- Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
+- Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
+- The operator workstation redesign, audit restore flow, and release automation artifacts are now in the published baseline.
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
 
 ## Next Main Tasks
 
-1. `T-045c`: cut and verify the `v0.2.0` operator workstation release using the GitHub Windows runner as the primary verification host
-2. `T-041`: local template catalog governance hardening
+1. `T-041`: local template catalog governance hardening
+2. `T-042`: template library operator UX
 3. `T-044`: audit transaction hardening
 
 ## External Deferrals

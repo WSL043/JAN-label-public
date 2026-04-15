@@ -95,7 +95,7 @@ jobs:
           } > .codex-maintenance-state.md
 
       - name: Upload maintenance snapshot
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: codex-maintenance-state
           path: .codex-maintenance-state.md
