@@ -3002,45 +3002,45 @@ export function App() {
   }> = [
     {
       id: "compose",
-      label: "Draft",
-      description: "Manual compose and live payload review",
+      label: "Data Entry",
+      description: "Manual job input and live payload review",
       badge: draft ? "ready" : "incomplete",
     },
     {
       id: "templates",
-      label: "Template",
-      description: "Authoring, JSON, and renderer parity",
+      label: "Designer",
+      description: "Label design, JSON, and renderer parity",
       badge: templateValidation.status,
     },
     {
       id: "queue",
-      label: "Queue",
+      label: "Batch Queue",
       description: "Import, validate, and dispatch batches",
       badge: queuedRows.length > 0 ? String(queuedRows.length) : String(sourceRows.length),
     },
     {
       id: "audit",
-      label: "Audit",
-      description: "Proof approvals, export, retention",
+      label: "History",
+      description: "Proof approvals, retention, and audit review",
       badge:
         pendingProofCount > 0 ? `${pendingProofCount} pending` : String(auditSearch.entries.length),
     },
   ];
   const workspaceDetailById: Record<WorkspaceMode, { title: string; summary: string }> = {
     compose: {
-      title: "Draft Composer",
-      summary: "Manual draft entry, execution intent, and live payload review.",
+      title: "Label Job",
+      summary: "Manual job entry, execution intent, and live payload review.",
     },
     templates: {
-      title: "Template Workbench",
+      title: "Label Designer",
       summary: "Structured authoring, catalog-aligned JSON, and renderer parity checks.",
     },
     queue: {
-      title: "Import And Queue",
+      title: "Batch Queue",
       summary: "Spreadsheet intake, mapping, row validation, and staged batch dispatch.",
     },
     audit: {
-      title: "Audit And Proof Review",
+      title: "Audit & Proof Review",
       summary: "Approval flow, retention, backup inventory, and legacy proof migration.",
     },
   };
@@ -3085,6 +3085,7 @@ export function App() {
           : selectedAuditBackupBundle
             ? `Restore target armed: ${selectedAuditBackupBundle.fileName}.`
             : "Audit lane covers proof review, retention, bundle inventory, and restore.";
+  const shellMenuItems = ["File", "Edit", "View", "Layout", "Tools", "Help"] as const;
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
     const pushItem = (
@@ -4693,15 +4694,51 @@ export function App() {
   return (
     <main className="page app-shell">
       <header className="app-topbar">
-        <div className="app-titlebar">
-          <div className="app-brand">
-            <span className="app-kicker">JAN Label / v0.2.0</span>
-            <strong>Operator Console</strong>
-            <p>Desktop-first proof, queue, template, and audit control surface.</p>
+        <div className="app-window-caption">
+          <span>JAN Label</span>
+          <strong>
+            {activeWorkspaceMeta.title} | {session.jobId}
+          </strong>
+          <small>{templateOptionLabel}</small>
+        </div>
+        <div className="app-menubar">
+          {shellMenuItems.map((item) => (
+            <button key={item} className="menu-button" type="button">
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="workspace-tabstrip">
+          {workspaceItems.map((item) => (
+            <button
+              key={item.id}
+              className={`workspace-tab ${activeWorkspace === item.id ? "active" : ""}`}
+              type="button"
+              aria-pressed={activeWorkspace === item.id}
+              onClick={() => setActiveWorkspace(item.id)}
+            >
+              <span>{item.label}</span>
+              <strong>{item.badge}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="ribbon-shell">
+          <div className="ribbon-group">
+            <span className="ribbon-group-title">Application</span>
+            <div className="ribbon-button-row">
+              <button className="button-secondary" type="button" onClick={refreshBridgeStatus}>
+                Refresh bridge
+              </button>
+              <button className="button-secondary" type="button" onClick={restorePersistedState}>
+                Restore state
+              </button>
+              <button className="button-secondary" type="button" onClick={clearPersistedState}>
+                Clear state
+              </button>
+            </div>
           </div>
-          <div className="app-current-view">
-            <h1>{activeWorkspaceMeta.title}</h1>
-            <p>{activeWorkspaceFocus}</p>
+          <div className="ribbon-group ribbon-group-metrics">
+            <span className="ribbon-group-title">Workspace</span>
             <div className="workspace-meta-grid shell-metrics">
               {workstationStatusCards.map((item) => (
                 <div key={item.id}>
@@ -4712,123 +4749,197 @@ export function App() {
               ))}
             </div>
           </div>
-          <div className="titlebar-route-card">
-            <span className="app-kicker">Current route</span>
-            <strong>{session.jobId}</strong>
-            <p>
-              {templateOptionLabel} / {executionModeLabel}
-            </p>
-          </div>
-        </div>
-        <div className="app-toolbar-shell">
-          <div className="shell-toolbar shell-toolbar-global">
-            <span className="toolbar-label">Application</span>
-            <button className="button-secondary" type="button" onClick={refreshBridgeStatus}>
-              Refresh bridge
-            </button>
-            <button className="button-secondary" type="button" onClick={restorePersistedState}>
-              Restore saved state
-            </button>
-            <button className="button-secondary" type="button" onClick={clearPersistedState}>
-              Clear saved state
-            </button>
-          </div>
-          <div className="app-commandbar shell-toolbar shell-toolbar-context">
-            <span className="toolbar-label">Lane actions</span>
+          {activeWorkspace === "compose" ? (
+            <>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Snapshot</span>
+                <div className="ribbon-button-row">
+                  <button className="button-secondary" type="button" onClick={stageManualDraft}>
+                    Stage snapshot
+                  </button>
+                  <button className="button-secondary" type="button" onClick={resetForm}>
+                    Reset session
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Dispatch</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void submitManualDraft()}
+                    disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+                  >
+                    Submit current draft
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+          {activeWorkspace === "templates" ? (
+            <>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Designer</span>
+                <div className="ribbon-button-row">
+                  <button className="button-secondary" type="button" onClick={validateTemplateText}>
+                    Validate JSON
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={resetTemplateToDefaults}
+                  >
+                    Reset template
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => void refreshTemplateRenderPreview()}
+                    disabled={templateRenderPreview.phase === "rendering"}
+                  >
+                    Refresh preview
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Catalog</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void runTemplateCatalogSave()}
+                    disabled={
+                      !isTauriConnected() || templateCatalogWriteState.phase === "submitting"
+                    }
+                  >
+                    Save to catalog
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+          {activeWorkspace === "queue" ? (
+            <>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Session</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={buildQueueSnapshot}
+                    disabled={!isQueueReady}
+                  >
+                    Build session
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={clearQueueSnapshot}
+                    disabled={queueMutationLocked}
+                  >
+                    Clear queue
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={resetDataSource}
+                    disabled={queueMutationLocked}
+                  >
+                    Reset source
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Dispatch</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void submitQueuedRows()}
+                    disabled={
+                      !canSubmitQueuedRows ||
+                      batchSubmit.phase === "submitting" ||
+                      isBridgeSubmitBlocked
+                    }
+                  >
+                    Dispatch queue
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+          {activeWorkspace === "audit" ? (
+            <>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Ledger</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditSearch(auditQuery);
+                    }}
+                  >
+                    Refresh audit
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditBackupBundles();
+                    }}
+                  >
+                    Refresh bundles
+                  </button>
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => {
+                      void runAuditExport();
+                    }}
+                    disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+                  >
+                    Export ledger
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Restore</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => {
+                      void runAuditRestore();
+                    }}
+                    disabled={!auditRestoreReady}
+                  >
+                    Restore bundle
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : null}
+          <div className="ribbon-group ribbon-group-summary">
+            <span className="ribbon-group-title">Focused lane</span>
             <div className="commandbar-context">
-              <span className="app-kicker">Focused lane</span>
-              <strong>{activeWorkspaceMeta.title}</strong>
-              <p>{activeWorkspaceMeta.summary}</p>
+              <span className="app-kicker">{activeWorkspaceMeta.title}</span>
+              <strong>{session.jobId}</strong>
+              <p>{activeWorkspaceFocus}</p>
             </div>
-            {activeWorkspace === "compose" ? (
-              <>
-                <button className="button-secondary" type="button" onClick={stageManualDraft}>
-                  Stage snapshot
-                </button>
-                <button
-                  className="button-primary"
-                  type="button"
-                  onClick={() => void submitManualDraft()}
-                  disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
-                >
-                  Submit current draft
-                </button>
-              </>
-            ) : null}
-            {activeWorkspace === "templates" ? (
-              <>
-                <button className="button-secondary" type="button" onClick={validateTemplateText}>
-                  Validate template
-                </button>
-                <button
-                  className="button-primary"
-                  type="button"
-                  onClick={() => void runTemplateCatalogSave()}
-                  disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
-                >
-                  Save to catalog
-                </button>
-              </>
-            ) : null}
-            {activeWorkspace === "queue" ? (
-              <>
-                <button
-                  className="button-secondary"
-                  type="button"
-                  onClick={buildQueueSnapshot}
-                  disabled={!isQueueReady}
-                >
-                  Build session
-                </button>
-                <button
-                  className="button-primary"
-                  type="button"
-                  onClick={() => void submitQueuedRows()}
-                  disabled={
-                    !canSubmitQueuedRows ||
-                    batchSubmit.phase === "submitting" ||
-                    isBridgeSubmitBlocked
-                  }
-                >
-                  Dispatch queue
-                </button>
-              </>
-            ) : null}
-            {activeWorkspace === "audit" ? (
-              <>
-                <button
-                  className="button-secondary"
-                  type="button"
-                  onClick={() => {
-                    void refreshAuditSearch(auditQuery);
-                  }}
-                >
-                  Refresh audit
-                </button>
-                <button
-                  className="button-primary"
-                  type="button"
-                  onClick={() => {
-                    void runAuditExport();
-                  }}
-                  disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
-                >
-                  Export ledger
-                </button>
-              </>
-            ) : null}
           </div>
         </div>
       </header>
 
       <div className="app-body">
         <aside className="app-rail">
-          <div className="rail-group">
+          <div className="rail-group rail-pane">
             <span className="rail-heading">Navigator</span>
             {workspaceItems.map((item) => (
               <button
                 key={item.id}
-                className={`rail-button ${activeWorkspace === item.id ? "active" : ""}`}
+                className={`rail-button rail-nav-item ${activeWorkspace === item.id ? "active" : ""}`}
                 type="button"
                 aria-pressed={activeWorkspace === item.id}
                 onClick={() => setActiveWorkspace(item.id)}
@@ -4839,8 +4950,145 @@ export function App() {
               </button>
             ))}
           </div>
-          <div className="rail-group rail-note-group">
-            <span className="rail-heading">Operating rules</span>
+
+          <div className="rail-group rail-pane">
+            <span className="rail-heading">
+              {activeWorkspace === "templates"
+                ? "Designer views"
+                : activeWorkspace === "queue"
+                  ? "Queue filters"
+                  : activeWorkspace === "audit"
+                    ? "Audit filters"
+                    : "Route detail"}
+            </span>
+            {activeWorkspace === "templates"
+              ? templateWorkspaceItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`rail-command ${templateWorkspaceMode === item.id ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setTemplateWorkspaceMode(item.id)}
+                  >
+                    {item.label} | {item.badge}
+                  </button>
+                ))
+              : null}
+            {activeWorkspace === "queue" ? (
+              <>
+                <button
+                  className={`rail-command ${queueViewFilter === "all" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("all");
+                    setQueuePage(1);
+                  }}
+                >
+                  All rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "ready" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("ready");
+                    setQueuePage(1);
+                  }}
+                >
+                  Ready rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "failed" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("failed");
+                    setQueuePage(1);
+                  }}
+                >
+                  Failed rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "submitted" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("submitted");
+                    setQueuePage(1);
+                  }}
+                >
+                  Submitted rows
+                </button>
+              </>
+            ) : null}
+            {activeWorkspace === "audit" ? (
+              <>
+                <button
+                  className={`rail-command ${auditModeFilter === "all" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("all");
+                    setAuditPage(1);
+                  }}
+                >
+                  All entries
+                </button>
+                <button
+                  className={`rail-command ${auditModeFilter === "proof" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("proof");
+                    setAuditPage(1);
+                  }}
+                >
+                  Proof only
+                </button>
+                <button
+                  className={`rail-command ${auditModeFilter === "print" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("print");
+                    setAuditPage(1);
+                  }}
+                >
+                  Print only
+                </button>
+                <button
+                  className={`rail-command ${auditProofFilter === "pending" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditProofFilter("pending");
+                    setAuditPage(1);
+                  }}
+                >
+                  Pending proof
+                </button>
+              </>
+            ) : null}
+            {activeWorkspace === "compose" ? (
+              <>
+                <p className="rail-note">
+                  Current execution route: {templateOptionLabel} / {executionModeLabel}.
+                </p>
+                <p className="rail-note">
+                  Stage is for frozen review only. Submit always uses the live form state.
+                </p>
+              </>
+            ) : null}
+          </div>
+
+          <div className="rail-group rail-pane rail-note-group">
+            <span className="rail-heading">Document</span>
+            <div className="rail-property-list">
+              <div>
+                <span>Job</span>
+                <strong>{session.jobId}</strong>
+              </div>
+              <div>
+                <span>Template</span>
+                <strong>{templateOptionLabel}</strong>
+              </div>
+              <div>
+                <span>Execution</span>
+                <strong>{executionModeLabel}</strong>
+              </div>
+            </div>
             <p className="rail-note">
               Saved local catalog entries are the only dispatchable template authority.
             </p>

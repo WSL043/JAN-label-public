@@ -35,6 +35,7 @@ pnpm format:check
 pnpm lint
 pnpm typecheck
 pnpm --filter @label/admin-web build
+dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
@@ -45,6 +46,7 @@ Notes:
 
 - `cargo test --workspace` may intermittently hit `os error 5` on local Windows. Re-run once and confirm `desktop-shell` tests also pass before treating it as a code failure.
 - If formatter checks start scanning a workspace-level `target-*` directory by mistake, remove that transient directory and re-run `pnpm format:check`.
+- If `dotnet` is unavailable on the local host, use the GitHub Actions `windows-shell-native` job as the authoritative validation path for `apps/windows-shell`.
 
 ## 4. Change Rules
 
@@ -54,12 +56,14 @@ Notes:
 - Record recurring traps in `docs/known-issues.md`.
 - If printer adapter behavior changes, review fixtures and print docs.
 - If `apps/admin-web`, `apps/desktop-shell`, or `packages/job-schema` contracts change, update both sides in the same pass.
+- If `apps/windows-shell` changes, sync ADR, handoff, and validation notes in the same pass.
 - If proof gate logic changes, update `docs/print-pipeline.md` and `docs/known-issues.md`.
 
 ## 5. Current Fronts
 
 - `apps/admin-web`
 - `apps/desktop-shell`
+- `apps/windows-shell`
 - `crates/render`
 - `crates/print-agent`
 - `crates/printer-adapters`

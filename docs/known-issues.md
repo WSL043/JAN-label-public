@@ -102,3 +102,8 @@
 - status: open
 - impact: `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml` and Tauri desktop builds fail immediately if `link.exe` is unavailable on the host
 - response: prefer GitHub Actions Windows runners for release verification; only install Visual Studio Build Tools with the C++ workload when local Tauri build/test is explicitly required
+
+## K-033 local Windows host may be missing the .NET SDK for the native shell
+- status: open
+- impact: `apps/windows-shell` cannot be built locally when `dotnet` is unavailable, so native-shell validation must move to GitHub Windows runners
+- response: treat the `windows-shell-native` CI job as the authoritative validation path unless local `.NET 8` is explicitly installed for shell work

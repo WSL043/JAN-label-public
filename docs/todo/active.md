@@ -50,7 +50,7 @@ Priority order for post-`v0.1.2` branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| None | - | clear | Codex | No active implementation blockers remain after the `v0.2.0` release cut | Refill `Now` from `Next` when the next milestone is chosen |
+| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` builds on GitHub Windows runners, the new Windows-only shell direction is documented, and native workstation structure is ready to absorb current lanes |
 
 ## Next
 

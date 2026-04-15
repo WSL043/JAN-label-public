@@ -4,7 +4,7 @@
 - Branch: `codex/t041-classic-workstation-governance`
 - Release base: `v0.2.0` (`0b6827e`)
 - Active PR: `#33`
-- Branch relation to `origin/main` on 2026-04-16: `codex/t041-classic-workstation-governance` is ahead of `origin/main` with local template catalog governance diagnostics, repair guidance, single-writer operating rules, and a classic desktop-tool workstation chrome pass
+- Branch relation to `origin/main` on 2026-04-16: `codex/t041-classic-workstation-governance` is ahead of `origin/main` with local template catalog governance diagnostics, repair guidance, single-writer operating rules, a Windows-first shell language pass, and the first native WPF workstation prototype under `apps/windows-shell`
 
 ## Shipping Now
 
@@ -38,6 +38,10 @@
   - `save_template_to_local_catalog`
   - `preview_template_draft`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
+- `apps/windows-shell`
+  - WPF operator shell prototype with native menu / ribbon / docking layout
+  - module navigation for `Job Setup`, `Designer`, `Batch Manager`, and `History`
+  - Windows-only shell language baseline for future operator UX work
 - release automation
 - `pnpm release:notes --version <version>`
 - `pnpm release:readiness --version <version>`
@@ -88,6 +92,10 @@
   - top-level shell now uses a titlebar plus toolbar layout
   - lane navigation, tables, and inspector panels are styled closer to traditional Windows label software
   - buttons, tabs, and metric cards now use denser desktop-oriented controls instead of rounded dark cards
+- A new migration front is now in place for the shell itself:
+  - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
+  - `apps/admin-web` remains the operational path until backend parity lands in the native shell
+  - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
 
 ## Release Boundary
 
@@ -118,6 +126,7 @@ Passed on this batch:
 - `pnpm typecheck`
 - `pnpm --filter @label/admin-web build`
 - Local Rust/Tauri validation for this branch still depends on a Windows MSVC linker and was not completed on this host
+- Local WPF validation for this branch also depends on a local `.NET` SDK and was not completed on this host
 
 Operational note:
 
@@ -127,7 +136,10 @@ Operational note:
   - `cargo test --workspace`
   - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
   - `pnpm release:readiness --version v0.2.0`
+- This host currently cannot complete native-shell verification because `dotnet` is not available:
+  - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - GitHub Actions has already passed the Windows desktop build/test path for PR `#31`, so local MSVC toolchain absence is no longer a release blocker as long as the remote Windows runner remains green.
+- Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
 - `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
 
 ## Release Status
@@ -145,9 +157,10 @@ Operational note:
 
 ## Next Main Tasks
 
-1. `T-042`: template library operator UX
-2. `T-044`: audit transaction hardening
-3. `T-012`: self-hosted runner / webhook operations
+1. `T-049`: Windows-native workstation shell migration
+2. `T-042`: template library operator UX
+3. `T-044`: audit transaction hardening
+4. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 
