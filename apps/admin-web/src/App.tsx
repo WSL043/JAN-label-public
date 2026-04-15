@@ -16,6 +16,9 @@ import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import {
   type AuditSearchEntry,
+  type BridgeWarning,
+  type LegacyProofSeedRequest,
+  type LegacyProofSeedResult,
   type PrintBridgeStatus,
   approveProof,
   dispatchPrintJob,
@@ -23,6 +26,8 @@ import {
   isTauriConnected,
   rejectProof,
   searchAuditLog,
+  seedLegacyProofs,
+  validateLegacyProofSeed,
 } from "./tauriClient";
 
 const corePillars = [
@@ -67,6 +72,20 @@ const TEMPLATE_ASSET_SCHEMA_VERSION = "template-asset-v1";
 
 const TEMPLATE_SCHEMA_VERSION = "template-spec-v1";
 const MAX_PERSISTED_SOURCE_ROWS = 200;
+const LEGACY_PROOF_SEED_REQUIRED_COLUMNS = [
+  "proofJobId",
+  "artifactPath",
+  "templateVersion",
+  "sku",
+  "brand",
+  "jan",
+  "qty",
+  "requestedByUserId",
+  "requestedByDisplayName",
+  "requestedAt",
+  "jobLineageId",
+  "notes",
+] as const;
 const HIGH_RISK_BRIDGE_WARNING_PATTERNS: ReadonlyArray<RegExp> = [
   /zint.*absolute path/i,
   /absolute path ['"].+?['"], but the file does not exist/i,
@@ -119,6 +138,7 @@ type BridgeStatusState = {
   status: PrintBridgeStatus | null;
   message: string;
 };
+type LegacyProofSeedPhase = "idle" | "validating" | "seeding" | "success" | "error";
 type AuditSearchPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
 type AuditSearchState = {
   phase: AuditSearchPhase;
@@ -130,6 +150,11 @@ type ProofReviewAction = "approve" | "reject" | null;
 type ProofReviewState = SubmitState & {
   proofJobId: string | null;
   action: ProofReviewAction;
+};
+type LegacyProofSeedState = {
+  phase: LegacyProofSeedPhase;
+  message: string;
+  result: LegacyProofSeedResult | null;
 };
 
 type FormState = {
@@ -187,11 +212,20 @@ type FormErrorKey =
 type FormErrors = Partial<Record<FormErrorKey, string>>;
 type FieldKey = "parentSku" | "sku" | "jan" | "qty" | "brand";
 type TemplateSpec = Record<string, unknown>;
+type XlsxCellMeta = {
+  isNumeric: boolean;
+  scientific: boolean;
+  decimal: boolean;
+};
+type XlsxSourceMeta = {
+  cellMetaRows: XlsxCellMeta[][];
+};
 type DataSource = {
   fileName: string;
   source: "csv" | "xlsx";
   headers: string[];
   rows: string[][];
+  xlsxMeta?: XlsxSourceMeta | null;
 };
 type DataRow = Record<string, string>;
 type ColumnMapping = Record<FieldKey, string>;
@@ -200,6 +234,7 @@ type PreparedRow = {
   sourceRow: DataRow;
   draft: PrintJobDraft | null;
   errors: string[];
+  warnings: string[];
   status: PreparedRowStatus;
   pendingReason: string | null;
 };
@@ -284,6 +319,24 @@ const ENABLED_SOURCE_ALIASES = [
   "is_active",
   "isactive",
 ];
+const LEGACY_PROOF_JOB_ID_ALIASES = ["proofjobid", "proof_job_id", "proof-job-id", "jobid"];
+const LEGACY_ARTIFACT_PATH_ALIASES = ["artifactpath", "artifact_path", "proofpath", "proof_path"];
+const LEGACY_TEMPLATE_VERSION_ALIASES = ["templateversion", "template_version", "template-version"];
+const LEGACY_REQUESTED_BY_USER_ID_ALIASES = [
+  "requestedbyuserid",
+  "requested_by_user_id",
+  "requested-by-user-id",
+  "requestedby",
+];
+const LEGACY_REQUESTED_BY_DISPLAY_NAME_ALIASES = [
+  "requestedbydisplayname",
+  "requested_by_display_name",
+  "requested-by-display-name",
+  "requestedbyname",
+];
+const LEGACY_REQUESTED_AT_ALIASES = ["requestedat", "requested_at", "requested-at"];
+const LEGACY_JOB_LINEAGE_ID_ALIASES = ["joblineageid", "job_lineage_id", "job-lineage-id"];
+const LEGACY_NOTES_ALIASES = ["notes", "note", "memo"];
 
 const requiredFieldList: Array<{ key: FieldKey; label: string }> = [
   { key: "parentSku", label: "Parent SKU" },
@@ -593,11 +646,68 @@ function spreadsheetCellToString(cell: unknown): string {
   return String(cell).trim();
 }
 
-function isHighRiskBridgeWarning(warning: string): boolean {
-  if (NON_BLOCKING_WARNING_PATTERNS.some((pattern) => pattern.test(warning))) {
-    return false;
+function spreadsheetCellMeta(cell: unknown): XlsxCellMeta {
+  if (cell === null || cell === undefined) {
+    return { isNumeric: false, scientific: false, decimal: false };
   }
-  return HIGH_RISK_BRIDGE_WARNING_PATTERNS.some((pattern) => pattern.test(warning));
+
+  if (typeof cell === "number") {
+    const text = String(cell);
+    return {
+      isNumeric: true,
+      scientific: /e/i.test(text),
+      decimal: !Number.isInteger(cell),
+    };
+  }
+
+  if (typeof cell !== "object") {
+    return { isNumeric: false, scientific: false, decimal: false };
+  }
+
+  const candidate = cell as { t?: unknown; w?: unknown; v?: unknown };
+  const formatted = typeof candidate.w === "string" ? candidate.w.trim() : "";
+  const numericValue = typeof candidate.v === "number" ? candidate.v : null;
+  const isNumeric = candidate.t === "n" || numericValue !== null;
+  if (!isNumeric) {
+    return { isNumeric: false, scientific: false, decimal: false };
+  }
+
+  return {
+    isNumeric: true,
+    scientific:
+      /e[+-]?\d+/i.test(formatted) ||
+      (typeof numericValue === "number" && /e/i.test(String(numericValue))),
+    decimal:
+      (formatted.includes(".") && /\d\.\d/.test(formatted)) ||
+      (typeof numericValue === "number" && !Number.isInteger(numericValue)),
+  };
+}
+
+function normalizeBridgeWarningSeverity(warning: string): BridgeWarning["severity"] {
+  if (NON_BLOCKING_WARNING_PATTERNS.some((pattern) => pattern.test(warning))) {
+    return "info";
+  }
+  return HIGH_RISK_BRIDGE_WARNING_PATTERNS.some((pattern) => pattern.test(warning))
+    ? "error"
+    : "warning";
+}
+
+function normalizeBridgeWarnings(status: PrintBridgeStatus | null): BridgeWarning[] {
+  if (!status) {
+    return [];
+  }
+  if (status.warningDetails && status.warningDetails.length > 0) {
+    return status.warningDetails;
+  }
+  return status.warnings.map((warning, index) => ({
+    code: `LEGACY_WARNING_${index + 1}`,
+    severity: normalizeBridgeWarningSeverity(warning),
+    message: warning,
+  }));
+}
+
+function isBlockingBridgeWarning(warning: BridgeWarning): boolean {
+  return warning.severity === "error";
 }
 
 function resolveTemplateFromSourceValue(
@@ -771,6 +881,7 @@ type PersistedSourcePayload = {
   sourceData: Omit<DataSource, "rows"> & {
     rows: string[][];
     source: "csv" | "xlsx";
+    xlsxMeta?: XlsxSourceMeta | null;
   };
   rowsTruncated: boolean;
   originalRowCount: number;
@@ -866,6 +977,23 @@ function proofStatusClass(status: string | null | undefined): string {
     default:
       return "";
   }
+}
+
+function normalizeXlsxSourceMeta(raw: unknown): XlsxSourceMeta | null {
+  if (!isPlainObject(raw) || !Array.isArray(raw.cellMetaRows)) {
+    return null;
+  }
+  return {
+    cellMetaRows: raw.cellMetaRows.map((row) =>
+      Array.isArray(row)
+        ? row.map((cell) => ({
+            isNumeric: Boolean((cell as XlsxCellMeta | null)?.isNumeric),
+            scientific: Boolean((cell as XlsxCellMeta | null)?.scientific),
+            decimal: Boolean((cell as XlsxCellMeta | null)?.decimal),
+          }))
+        : [],
+    ),
+  };
 }
 
 function normalizeColumnMapping(raw: unknown): ColumnMapping {
@@ -1026,6 +1154,7 @@ function restoreSourceFromStorage(): {
       source: data.source,
       headers: cleanedHeaders,
       rows: cleanedRows,
+      xlsxMeta: normalizeXlsxSourceMeta(data.xlsxMeta),
     },
     status: {
       savedAt: stored.savedAt ?? null,
@@ -1116,6 +1245,7 @@ function parseUploadedData(file: File): Promise<DataSource> {
             source: "csv",
             headers: rows.headers,
             rows: rows.rows,
+            xlsxMeta: null,
           });
         } catch (error) {
           reject(error instanceof Error ? error : new Error("Failed to parse CSV file."));
@@ -1147,16 +1277,21 @@ function parseUploadedData(file: File): Promise<DataSource> {
           }
           const range = xlsx.utils.decode_range(rangeRef);
           const table: string[][] = [];
+          const cellMetaRows: XlsxCellMeta[][] = [];
           for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
             const row: string[] = [];
+            const metaRow: XlsxCellMeta[] = [];
             for (let columnIndex = range.s.c; columnIndex <= range.e.c; columnIndex += 1) {
               const cellAddress = xlsx.utils.encode_cell({
                 r: rowIndex,
                 c: columnIndex,
               });
-              row.push(spreadsheetCellToString(sheet[cellAddress]));
+              const cell = sheet[cellAddress];
+              row.push(spreadsheetCellToString(cell));
+              metaRow.push(spreadsheetCellMeta(cell));
             }
             table.push(row);
+            cellMetaRows.push(metaRow);
           }
           if (!table.length) {
             reject(new Error("Spreadsheet has no data rows."));
@@ -1166,6 +1301,9 @@ function parseUploadedData(file: File): Promise<DataSource> {
           const dataRows = table
             .slice(1)
             .filter((row) => row.some((cell) => cell.trim().length > 0));
+          const metaRows = cellMetaRows
+            .slice(1)
+            .filter((_, index) => table[index + 1]?.some((cell) => cell.trim().length > 0));
           if (!headers.length) {
             reject(new Error("Spreadsheet header row is empty."));
             return;
@@ -1175,6 +1313,7 @@ function parseUploadedData(file: File): Promise<DataSource> {
             source: "xlsx",
             headers,
             rows: dataRows,
+            xlsxMeta: { cellMetaRows: metaRows },
           });
         } catch (error) {
           reject(error instanceof Error ? error : new Error("Failed to parse spreadsheet file."));
@@ -1289,9 +1428,48 @@ function toDispatchRequestWithActor(
   return toDispatchRequest(draft, dispatchActor, options);
 }
 
+function resolveXlsxJanWarnings(
+  sourceData: DataSource | null,
+  rowIndex: number,
+  mapping: ColumnMapping,
+  janDigits: string | null,
+): string[] {
+  if (!sourceData || sourceData.source !== "xlsx") {
+    return [];
+  }
+  const janHeader = mapping.jan;
+  const janColumnIndex = janHeader ? sourceData.headers.indexOf(janHeader) : -1;
+  if (janColumnIndex < 0) {
+    return [];
+  }
+  const meta = sourceData.xlsxMeta?.cellMetaRows[rowIndex]?.[janColumnIndex];
+  if (!meta?.isNumeric) {
+    return [];
+  }
+  if (meta.scientific || meta.decimal) {
+    return [
+      "JAN came from an XLSX numeric cell with scientific notation or decimals. Format the column as text before import.",
+    ];
+  }
+  if (!janDigits) {
+    return [
+      "JAN came from an XLSX numeric cell and could not be preserved as 12/13 digits. Format the column as text before import.",
+    ];
+  }
+  if (janDigits.length === 12) {
+    return [
+      "JAN came from an XLSX numeric cell with 12 digits. Leading zero intent is ambiguous; store the column as text before import.",
+    ];
+  }
+  return [
+    "JAN came from an XLSX numeric cell. Verify that leading zeros were preserved before dispatch.",
+  ];
+}
+
 function buildDraftFromRow(input: {
   rowIndex: number;
   sourceRow: DataRow;
+  sourceData: DataSource | null;
   mapping: ColumnMapping;
   templateRef: LabelTemplateRef | null;
   printerProfile: PrinterProfile | null;
@@ -1302,6 +1480,7 @@ function buildDraftFromRow(input: {
   janSourceHint: string;
 }): PreparedRow {
   const errors: string[] = [];
+  const warnings: string[] = [];
   const row = input.sourceRow;
   const actor = input.actor.trim();
   const enabledResolution = resolveEnabledSourceValue(row);
@@ -1311,6 +1490,7 @@ function buildDraftFromRow(input: {
       sourceRow: row,
       draft: null,
       errors: [enabledResolution.reason ?? "Enabled column is invalid."],
+      warnings,
       status: "error",
       pendingReason: null,
     };
@@ -1321,6 +1501,7 @@ function buildDraftFromRow(input: {
       sourceRow: row,
       draft: null,
       errors: [],
+      warnings,
       status: "pending",
       pendingReason: "Row disabled by enabled column.",
     };
@@ -1346,6 +1527,7 @@ function buildDraftFromRow(input: {
         sourceRow: row,
         draft: null,
         errors: [],
+        warnings,
         status: "pending",
         pendingReason: templateResolution.reason,
       };
@@ -1355,6 +1537,7 @@ function buildDraftFromRow(input: {
       sourceRow: row,
       draft: null,
       errors: ["Template reference is missing. Fix template import or template selection."],
+      warnings,
       status: "error",
       pendingReason: null,
     };
@@ -1366,6 +1549,7 @@ function buildDraftFromRow(input: {
         sourceRow: row,
         draft: null,
         errors: [],
+        warnings,
         status: "pending",
         pendingReason: printerResolution.reason,
       };
@@ -1375,6 +1559,7 @@ function buildDraftFromRow(input: {
       sourceRow: row,
       draft: null,
       errors: ["Printer profile is required."],
+      warnings,
       status: "error",
       pendingReason: null,
     };
@@ -1387,6 +1572,7 @@ function buildDraftFromRow(input: {
       draft: null,
       status: "error",
       errors: [`Map missing columns: ${missingColumn.map((entry) => entry.label).join(", ")}.`],
+      warnings,
       pendingReason: null,
     };
   }
@@ -1409,8 +1595,21 @@ function buildDraftFromRow(input: {
   if (!brand) errors.push("Brand is required.");
   if (!qtyText || !/^\d+$/.test(qtyText)) errors.push("Quantity must be an integer.");
   const janDigits = extractJanDigits(janRaw);
+  warnings.push(
+    ...resolveXlsxJanWarnings(input.sourceData, input.rowIndex, input.mapping, janDigits),
+  );
   if (!janDigits) {
     errors.push("JAN must be 12 or 13 digits with digits only.");
+  }
+  if (
+    warnings.some(
+      (warning) =>
+        warning.includes("could not be preserved") ||
+        warning.includes("ambiguous") ||
+        warning.includes("scientific notation"),
+    )
+  ) {
+    errors.push(...warnings);
   }
   const qty = Number.parseInt(qtyText.replace(/,/g, ""), 10);
   if (!Number.isFinite(qty) || qty < 1) errors.push("Quantity must be >= 1.");
@@ -1420,6 +1619,7 @@ function buildDraftFromRow(input: {
       sourceRow: row,
       draft: null,
       errors,
+      warnings,
       status: "error",
       pendingReason: null,
     };
@@ -1443,6 +1643,7 @@ function buildDraftFromRow(input: {
         sourceRow: row,
         draft: null,
         errors,
+        warnings,
         status: "error",
         pendingReason: null,
       };
@@ -1478,6 +1679,7 @@ function buildDraftFromRow(input: {
       requestedAt,
     },
     errors: [],
+    warnings,
     status: "ready",
     pendingReason: null,
   };
@@ -1639,6 +1841,13 @@ export function App() {
     proofJobId: null,
     action: null,
   });
+  const [legacyProofSeedSource, setLegacyProofSeedSource] = useState<DataSource | null>(null);
+  const [legacyProofSeedError, setLegacyProofSeedError] = useState<string | null>(null);
+  const [legacyProofSeedState, setLegacyProofSeedState] = useState<LegacyProofSeedState>({
+    phase: "idle",
+    message: "",
+    result: null,
+  });
 
   const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
   const [templateParseError, setTemplateParseError] = useState<string | null>(null);
@@ -1714,6 +1923,7 @@ export function App() {
       buildDraftFromRow({
         rowIndex,
         sourceRow,
+        sourceData,
         mapping: fieldMapping,
         templateRef: resolvedTemplateRef,
         templateRefs: templateCandidates,
@@ -1758,6 +1968,14 @@ export function App() {
   const sourceSummary = sourceData
     ? `${sourceData.rows.length} rows / ${sourceData.headers.length} columns (${sourceData.source})`
     : "No source loaded";
+  const legacyProofSeedRequest = useMemo(
+    () => buildLegacyProofSeedRequest(legacyProofSeedSource),
+    [legacyProofSeedSource],
+  );
+  const legacyProofSeedSummary = legacyProofSeedSource
+    ? `${legacyProofSeedSource.rows.length} rows / ${legacyProofSeedSource.headers.length} columns (${legacyProofSeedSource.source})`
+    : "No legacy proof seed file loaded";
+  const legacyProofSeedPreviewRows = legacyProofSeedRequest?.rows.slice(0, 6) ?? [];
   const previewBatchJson =
     queuedRows.length > 0 ? JSON.stringify(queuedRows[0].draft, null, 2) : null;
   const hasPersistedState =
@@ -1769,9 +1987,12 @@ export function App() {
     form.executionMode === "print" ? "Print-ready mode" : "Proof-only review mode";
   const executionModeChipClass = form.executionMode === "print" ? "print" : "proof";
   const bridgeStatusAvailable = bridgeStatus.status !== null && bridgeStatus.phase === "ready";
-  const bridgeWarnings = bridgeStatus.status?.warnings ?? [];
+  const bridgeWarnings = useMemo(
+    () => normalizeBridgeWarnings(bridgeStatus.status),
+    [bridgeStatus.status],
+  );
   const allowWithoutProofEnabled = bridgeStatus.status?.allowWithoutProofEnabled ?? false;
-  const blockingBridgeWarnings = bridgeWarnings.filter(isHighRiskBridgeWarning);
+  const blockingBridgeWarnings = bridgeWarnings.filter(isBlockingBridgeWarning);
   const hasBlockingBridgeWarnings = blockingBridgeWarnings.length > 0;
   const isBridgeSubmitAllowed = bridgeStatusAvailable && !hasBlockingBridgeWarnings;
   const isBridgeSubmitBlocked = !isBridgeSubmitAllowed || bridgeStatus.phase === "loading";
@@ -1929,6 +2150,28 @@ export function App() {
     }
   }
 
+  async function handleLegacyProofSeedUpload(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0];
+    if (!file) {
+      return;
+    }
+    setLegacyProofSeedError(null);
+    setLegacyProofSeedSource(null);
+    setLegacyProofSeedState({
+      phase: "idle",
+      message: "",
+      result: null,
+    });
+    try {
+      const parsed = await parseUploadedData(file);
+      setLegacyProofSeedSource(parsed);
+    } catch (error) {
+      setLegacyProofSeedError(
+        error instanceof Error ? error.message : "Legacy proof import failed.",
+      );
+    }
+  }
+
   function autoDetectMapping() {
     if (!sourceData) return;
     setFieldMapping(detectMapping(sourceData.headers));
@@ -1948,6 +2191,45 @@ export function App() {
         }))
         .slice(),
     );
+  }
+
+  async function runLegacyProofSeed(action: LegacyProofSeedPhase) {
+    if (!legacyProofSeedRequest) {
+      setLegacyProofSeedState({
+        phase: "error",
+        message: "Load a CSV/XLSX file before validating or seeding legacy proofs.",
+        result: null,
+      });
+      return;
+    }
+    setLegacyProofSeedState({
+      phase: action,
+      message:
+        action === "validating"
+          ? "Validating legacy proof seed rows..."
+          : "Seeding legacy proof rows as pending review...",
+      result: null,
+    });
+    try {
+      const result =
+        action === "validating"
+          ? await validateLegacyProofSeed(legacyProofSeedRequest)
+          : await seedLegacyProofs(legacyProofSeedRequest);
+      setLegacyProofSeedState({
+        phase: result.applied ? "success" : action === "validating" ? "success" : "error",
+        message: result.message,
+        result,
+      });
+      if (result.applied) {
+        void refreshAuditSearch(auditQuery);
+      }
+    } catch (error) {
+      setLegacyProofSeedState({
+        phase: "error",
+        message: `Legacy proof seed failed: ${formatErrorMessage(error)}`,
+        result: null,
+      });
+    }
   }
 
   const refreshAuditSearch = useEffectEvent(async (searchText?: string) => {
@@ -2067,6 +2349,39 @@ export function App() {
       ...options,
       jobLineageId: proofEntry.proof.jobLineageId,
     };
+  }
+
+  function buildLegacyProofSeedRequest(
+    sourceData: DataSource | null,
+  ): LegacyProofSeedRequest | null {
+    if (!sourceData) {
+      return null;
+    }
+    const rows = toSourceRows(sourceData).map((row) => {
+      const qtyText = readSourceValue(row, fieldAliases.qty).replace(/,/g, "").trim();
+      const qty = /^\d+$/.test(qtyText) ? Number.parseInt(qtyText, 10) : 0;
+      const jobLineageId = readSourceValue(row, LEGACY_JOB_LINEAGE_ID_ALIASES);
+      const notes = readSourceValue(row, LEGACY_NOTES_ALIASES);
+      return {
+        proofJobId: readSourceValue(row, LEGACY_PROOF_JOB_ID_ALIASES),
+        artifactPath: readSourceValue(row, LEGACY_ARTIFACT_PATH_ALIASES),
+        templateVersion: readSourceValue(row, LEGACY_TEMPLATE_VERSION_ALIASES),
+        matchSubject: {
+          sku: readSourceValue(row, fieldAliases.sku),
+          brand: readSourceValue(row, fieldAliases.brand),
+          jan: readSourceValue(row, fieldAliases.jan),
+          qty,
+        },
+        requestedBy: {
+          userId: readSourceValue(row, LEGACY_REQUESTED_BY_USER_ID_ALIASES),
+          displayName: readSourceValue(row, LEGACY_REQUESTED_BY_DISPLAY_NAME_ALIASES),
+        },
+        requestedAt: readSourceValue(row, LEGACY_REQUESTED_AT_ALIASES),
+        jobLineageId: jobLineageId || undefined,
+        notes: notes || undefined,
+      };
+    });
+    return { rows };
   }
 
   function applyApprovedProofToForm(entry: AuditSearchEntry) {
@@ -2340,6 +2655,7 @@ export function App() {
         source: sourceData.source,
         headers: sourceData.headers,
         rows: rowsToStore,
+        xlsxMeta: sourceData.xlsxMeta ?? null,
       },
       rowsTruncated: sourceData.rows.length > MAX_PERSISTED_SOURCE_ROWS,
       originalRowCount: sourceData.rows.length,
@@ -2567,14 +2883,20 @@ export function App() {
         {bridgeStatusAvailable && bridgeStatus.status ? (
           <div className="proof-note">
             <strong>Bridge warnings</strong>
-            {bridgeStatus.status.warnings.length > 0 ? (
+            {bridgeWarnings.length > 0 ? (
               <ul className="card-list">
-                {bridgeStatus.status.warnings.map((warning) => (
+                {bridgeWarnings.map((warning) => (
                   <li
-                    key={warning}
-                    className={isHighRiskBridgeWarning(warning) ? "status-fail" : undefined}
+                    key={`${warning.code}-${warning.message}`}
+                    className={
+                      warning.severity === "error"
+                        ? "status-fail"
+                        : warning.severity === "warning"
+                          ? "status-pending"
+                          : undefined
+                    }
                   >
-                    {warning}
+                    <strong>{warning.code}</strong>: {warning.message}
                   </li>
                 ))}
               </ul>
@@ -3109,7 +3431,10 @@ export function App() {
                       >
                         {entry.status === "pending"
                           ? `pending: ${entry.pendingReason ?? "requires operator review"}`
-                          : entry.errors.join(" / ") || "ready"}
+                          : entry.errors.join(" / ") ||
+                            (entry.warnings.length > 0
+                              ? `ready: ${entry.warnings.join(" / ")}`
+                              : "ready")}
                       </td>
                     </tr>
                   ))}
@@ -3225,6 +3550,149 @@ export function App() {
               placeholder="Optional approval or rejection note for the proof ledger."
             />
           </label>
+        </div>
+        <div className="proof-note">
+          <strong>Legacy proof seed</strong>
+          <p>
+            Import proof PDFs created before the approval ledger existed. Seeded rows stay pending
+            until they are approved in this inbox.
+          </p>
+          <small>
+            Required columns: {LEGACY_PROOF_SEED_REQUIRED_COLUMNS.join(", ")}
+            {bridgeStatusAvailable && bridgeStatus.status
+              ? ` / proof output dir: ${bridgeStatus.status.proofOutputDir}`
+              : ""}
+          </small>
+          <div className="toolbar">
+            <label className="button-secondary fake-button">
+              Upload legacy proof CSV/XLSX
+              <input
+                type="file"
+                accept=".csv,.xlsx,.xls,text/csv"
+                onChange={handleLegacyProofSeedUpload}
+              />
+            </label>
+            {legacyProofSeedSource ? (
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={() => {
+                  setLegacyProofSeedSource(null);
+                  setLegacyProofSeedError(null);
+                  setLegacyProofSeedState({
+                    phase: "idle",
+                    message: "",
+                    result: null,
+                  });
+                }}
+              >
+                Clear legacy proof file
+              </button>
+            ) : null}
+            <button
+              className="button-secondary"
+              type="button"
+              onClick={() => {
+                void runLegacyProofSeed("validating");
+              }}
+              disabled={
+                !legacyProofSeedSource ||
+                legacyProofSeedState.phase === "validating" ||
+                legacyProofSeedState.phase === "seeding" ||
+                !bridgeStatusAvailable
+              }
+            >
+              Validate legacy rows
+            </button>
+            <button
+              className="button-primary"
+              type="button"
+              onClick={() => {
+                void runLegacyProofSeed("seeding");
+              }}
+              disabled={
+                !legacyProofSeedSource ||
+                legacyProofSeedState.phase === "validating" ||
+                legacyProofSeedState.phase === "seeding" ||
+                !bridgeStatusAvailable
+              }
+            >
+              Seed pending proofs
+            </button>
+          </div>
+          <p className="data-summary">
+            {legacyProofSeedError ? legacyProofSeedError : legacyProofSeedSummary}
+          </p>
+          {legacyProofSeedState.phase === "validating" ||
+          legacyProofSeedState.phase === "seeding" ? (
+            <p className="notice-text">{legacyProofSeedState.message}</p>
+          ) : null}
+          {legacyProofSeedState.phase === "error" ? (
+            <p className="status-fail">{legacyProofSeedState.message}</p>
+          ) : null}
+          {legacyProofSeedState.phase === "success" ? (
+            <p className="status-ok">{legacyProofSeedState.message}</p>
+          ) : null}
+          {legacyProofSeedPreviewRows.length > 0 ? (
+            <div className="data-grid">
+              <div className="data-grid-header">
+                <strong>Legacy proof preview</strong>
+                <span>{legacyProofSeedRequest?.rows.length ?? 0} rows</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Proof job</th>
+                    <th>Template</th>
+                    <th>JAN</th>
+                    <th>Qty</th>
+                    <th>Requested by</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legacyProofSeedPreviewRows.map((row) => (
+                    <tr key={`${row.proofJobId}-${row.artifactPath}`}>
+                      <td>{row.proofJobId || "-"}</td>
+                      <td>{row.templateVersion || "-"}</td>
+                      <td>{row.matchSubject.jan || "-"}</td>
+                      <td>{row.matchSubject.qty || "-"}</td>
+                      <td>{row.requestedBy.displayName || row.requestedBy.userId || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
+          {legacyProofSeedState.result?.rows.length ? (
+            <div className="data-grid">
+              <div className="data-grid-header">
+                <strong>Legacy proof validation</strong>
+                <span>{legacyProofSeedState.result.rows.length} rows</span>
+              </div>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Row</th>
+                    <th>Proof job</th>
+                    <th>Status</th>
+                    <th>Result</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {legacyProofSeedState.result.rows.map((row) => (
+                    <tr key={`${row.rowIndex}-${row.proofJobId}`}>
+                      <td>{row.rowIndex + 1}</td>
+                      <td>{row.proofJobId || "-"}</td>
+                      <td className={row.status === "ok" ? "status-ok" : "status-fail"}>
+                        {row.status}
+                      </td>
+                      <td>{row.message}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          ) : null}
         </div>
         <div className="toolbar">
           <button

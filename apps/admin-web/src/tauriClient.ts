@@ -6,6 +6,16 @@ const PRINT_BRIDGE_STATUS_COMMAND = "print_bridge_status";
 const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
+const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
+const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
+
+export type BridgeWarningSeverity = "info" | "warning" | "error";
+
+export type BridgeWarning = {
+  code: string;
+  severity: BridgeWarningSeverity;
+  message: string;
+};
 
 export type PrintBridgeStatus = {
   availableAdapters: string[];
@@ -16,6 +26,7 @@ export type PrintBridgeStatus = {
   printAdapterKind: string;
   windowsPrinterName: string;
   allowWithoutProofEnabled: boolean;
+  warningDetails?: BridgeWarning[];
   warnings: string[];
 };
 
@@ -90,6 +101,45 @@ export type ProofReviewRequest = {
   notes?: string;
 };
 
+export type LegacyProofSeedRequest = {
+  rows: LegacyProofSeedRowRequest[];
+};
+
+export type LegacyProofSeedRowRequest = {
+  proofJobId: string;
+  artifactPath: string;
+  templateVersion: string;
+  matchSubject: {
+    sku: string;
+    brand: string;
+    jan: string;
+    qty: number;
+  };
+  requestedBy: AuditActor;
+  requestedAt: string;
+  jobLineageId?: string;
+  notes?: string;
+};
+
+export type LegacyProofSeedRowStatus = "ok" | "error";
+
+export type LegacyProofSeedRowResult = {
+  rowIndex: number;
+  proofJobId: string;
+  status: LegacyProofSeedRowStatus;
+  message: string;
+  normalizedJan?: string;
+  resolvedJobLineageId?: string;
+  artifactPath?: string;
+};
+
+export type LegacyProofSeedResult = {
+  applied: boolean;
+  seededCount: number;
+  message: string;
+  rows: LegacyProofSeedRowResult[];
+};
+
 export function isTauriConnected(): boolean {
   return isTauri();
 }
@@ -137,4 +187,26 @@ export async function rejectProof(request: ProofReviewRequest): Promise<ProofRec
     );
   }
   return invoke<ProofRecord>(REJECT_PROOF_COMMAND, { request });
+}
+
+export async function validateLegacyProofSeed(
+  request: LegacyProofSeedRequest,
+): Promise<LegacyProofSeedResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to validate legacy proof seed rows.",
+    );
+  }
+  return invoke<LegacyProofSeedResult>(VALIDATE_LEGACY_PROOF_SEED_COMMAND, { request });
+}
+
+export async function seedLegacyProofs(
+  request: LegacyProofSeedRequest,
+): Promise<LegacyProofSeedResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to seed legacy proofs.",
+    );
+  }
+  return invoke<LegacyProofSeedResult>(SEED_LEGACY_PROOFS_COMMAND, { request });
 }

@@ -3,6 +3,7 @@ use audit_log::{
     PersistedDispatchRecord, ProofRecord, ProofStatus,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::collections::HashSet;
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -21,6 +22,18 @@ const LOCK_WAIT_INTERVAL: Duration = Duration::from_millis(25);
 #[derive(Debug, Clone)]
 pub struct AuditStore {
     root: PathBuf,
+}
+
+#[derive(Debug, Clone)]
+pub struct AuditLedgerSnapshot {
+    pub dispatches: Vec<PersistedDispatchRecord>,
+    pub proofs: Vec<ProofRecord>,
+}
+
+#[derive(Debug, Clone)]
+pub struct LegacyProofSeedRecord {
+    pub dispatch: PersistedDispatchRecord,
+    pub proof: ProofRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -97,15 +110,21 @@ impl AuditStore {
             let proof_records = self.load_proof_records()?;
             let proof = approved_proof_from_records(&proof_records, proof_job_id)?;
             let dispatches = self.load_dispatch_records()?;
-            let proof_dispatch = dispatches
+            let mut matching_dispatches = dispatches
                 .into_iter()
-                .find(|record| record.mode == "proof" && record.audit.job_id.0 == proof_job_id)
-                .ok_or_else(|| {
-                    format!(
-                        "approved proof job '{}' has no persisted proof dispatch record",
-                        proof_job_id
-                    )
-                })?;
+                .filter(|record| record.mode == "proof" && record.audit.job_id.0 == proof_job_id);
+            let proof_dispatch = matching_dispatches.next().ok_or_else(|| {
+                format!(
+                    "approved proof job '{}' has no persisted proof dispatch record",
+                    proof_job_id
+                )
+            })?;
+            if matching_dispatches.next().is_some() {
+                return Err(format!(
+                    "approved proof job '{}' has multiple persisted proof dispatch records",
+                    proof_job_id
+                ));
+            }
 
             if proof.job_lineage_id != proof_dispatch.audit.job_lineage_id {
                 return Err(format!(
@@ -167,6 +186,31 @@ impl AuditStore {
         }
 
         Ok(AuditSearchResult { entries })
+    }
+
+    pub fn snapshot(&self) -> Result<AuditLedgerSnapshot, String> {
+        self.with_lock(|| {
+            Ok(AuditLedgerSnapshot {
+                dispatches: self.load_dispatch_records()?,
+                proofs: self.load_proof_records()?,
+            })
+        })
+    }
+
+    pub fn seed_legacy_proofs(&self, records: Vec<LegacyProofSeedRecord>) -> Result<(), String> {
+        self.with_lock(|| {
+            let mut dispatches = self.load_dispatch_records()?;
+            let mut proofs = self.load_proof_records()?;
+            validate_legacy_seed_records(&dispatches, &proofs, &records)?;
+
+            for record in records {
+                dispatches.push(record.dispatch);
+                proofs.push(record.proof);
+            }
+
+            self.save_dispatch_records(&dispatches)?;
+            self.save_proof_records(&proofs)
+        })
     }
 
     fn review_proof(
@@ -338,6 +382,58 @@ fn collect_dispatch_mismatches(
     mismatches
 }
 
+fn validate_legacy_seed_records(
+    existing_dispatches: &[PersistedDispatchRecord],
+    existing_proofs: &[ProofRecord],
+    records: &[LegacyProofSeedRecord],
+) -> Result<(), String> {
+    let mut existing_job_ids = HashSet::new();
+    let mut existing_lineages = HashSet::new();
+    for dispatch in existing_dispatches
+        .iter()
+        .filter(|record| record.mode == "proof")
+    {
+        existing_job_ids.insert(dispatch.audit.job_id.0.as_str());
+        existing_lineages.insert(dispatch.audit.job_lineage_id.0.as_str());
+    }
+    for proof in existing_proofs {
+        existing_job_ids.insert(proof.proof_job_id.0.as_str());
+        existing_lineages.insert(proof.job_lineage_id.0.as_str());
+    }
+
+    let mut batch_job_ids = HashSet::new();
+    let mut batch_lineages = HashSet::new();
+    for record in records {
+        let proof_job_id = record.proof.proof_job_id.0.as_str();
+        let job_lineage_id = record.proof.job_lineage_id.0.as_str();
+        if existing_job_ids.contains(proof_job_id) {
+            return Err(format!(
+                "legacy proof job '{}' already exists in the audit ledger",
+                proof_job_id
+            ));
+        }
+        if existing_lineages.contains(job_lineage_id) {
+            return Err(format!(
+                "legacy proof lineage '{}' already exists in the audit ledger",
+                job_lineage_id
+            ));
+        }
+        if !batch_job_ids.insert(proof_job_id) {
+            return Err(format!(
+                "legacy proof job '{}' is duplicated in the seed batch",
+                proof_job_id
+            ));
+        }
+        if !batch_lineages.insert(job_lineage_id) {
+            return Err(format!(
+                "legacy proof lineage '{}' is duplicated in the seed batch",
+                job_lineage_id
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn optional_trimmed_non_empty(value: Option<String>) -> Option<String> {
     let value = value?;
     let trimmed = value.trim();
@@ -481,7 +577,7 @@ impl ProofStatusLabel for ProofRecord {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuditStore, ProofReviewRequest};
+    use super::{AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
     use audit_log::{
         AuditActor, AuditQuery, DispatchMatchSubject, PersistedDispatchRecord, PrintAuditRecord,
         PrintJobId, PrintJobLineageId, ProofRecord, ProofStatus,
@@ -624,6 +720,63 @@ mod tests {
         assert!(err.contains("qty"));
     }
 
+    #[test]
+    fn duplicate_proof_dispatch_records_are_rejected() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-0005");
+        store
+            .register_pending_proof(proof.clone())
+            .expect("pending proof should persist");
+        store
+            .record_dispatch(sample_proof_dispatch(&proof))
+            .expect("dispatch should persist");
+        store
+            .record_dispatch(sample_proof_dispatch(&proof))
+            .expect("duplicate dispatch should persist for regression coverage");
+        store
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-PROOF-0005".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T12:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let err = store
+            .ensure_approved_proof_matches(
+                "JOB-PROOF-0005",
+                "basic-50x30@v1",
+                &sample_match_subject(),
+            )
+            .expect_err("duplicate proof dispatch rows must be rejected");
+
+        assert!(err.contains("multiple persisted proof dispatch records"));
+    }
+
+    #[test]
+    fn legacy_seed_rejects_existing_lineage_conflicts() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-0006");
+        store
+            .register_pending_proof(proof.clone())
+            .expect("pending proof should persist");
+        store
+            .record_dispatch(sample_proof_dispatch(&proof))
+            .expect("dispatch should persist");
+
+        let err = store
+            .seed_legacy_proofs(vec![sample_legacy_seed_record(
+                "JOB-LEGACY-0001",
+                &proof.job_lineage_id.0,
+            )])
+            .expect_err("existing lineage conflict should be rejected");
+
+        assert!(err.contains("already exists"));
+    }
+
     fn sample_proof(job_id: &str) -> ProofRecord {
         ProofRecord::pending(
             PrintJobId(job_id.to_string()),
@@ -636,6 +789,60 @@ mod tests {
             format!("proofs/{job_id}-proof.pdf"),
             Some("review".to_string()),
         )
+    }
+
+    fn sample_proof_dispatch(proof: &ProofRecord) -> PersistedDispatchRecord {
+        PersistedDispatchRecord {
+            audit: PrintAuditRecord::dispatch(
+                proof.proof_job_id.clone(),
+                proof.job_lineage_id.clone(),
+                None,
+                proof.requested_by.clone(),
+                proof.requested_at.clone(),
+                None,
+            ),
+            mode: "proof".to_string(),
+            template_version: "basic-50x30@v1".to_string(),
+            match_subject: sample_match_subject(),
+            artifact_media_type: "application/pdf".to_string(),
+            artifact_byte_size: 128,
+            submission_adapter_kind: "pdf".to_string(),
+            submission_external_job_id: "proof-0001".to_string(),
+        }
+    }
+
+    fn sample_legacy_seed_record(job_id: &str, lineage_id: &str) -> LegacyProofSeedRecord {
+        let proof = ProofRecord::pending(
+            PrintJobId(job_id.to_string()),
+            PrintJobLineageId(lineage_id.to_string()),
+            AuditActor {
+                user_id: "legacy.user".to_string(),
+                display_name: "Legacy Import".to_string(),
+            },
+            "2026-04-15T09:00:00Z".to_string(),
+            format!("proofs/{job_id}.pdf"),
+            Some("legacy seed".to_string()),
+        );
+        LegacyProofSeedRecord {
+            dispatch: PersistedDispatchRecord {
+                audit: PrintAuditRecord::dispatch(
+                    proof.proof_job_id.clone(),
+                    proof.job_lineage_id.clone(),
+                    None,
+                    proof.requested_by.clone(),
+                    proof.requested_at.clone(),
+                    Some("legacy proof seed".to_string()),
+                ),
+                mode: "proof".to_string(),
+                template_version: "basic-50x30@v1".to_string(),
+                match_subject: sample_match_subject(),
+                artifact_media_type: "application/pdf".to_string(),
+                artifact_byte_size: 128,
+                submission_adapter_kind: "pdf".to_string(),
+                submission_external_job_id: format!("legacy-seed:{job_id}"),
+            },
+            proof,
+        }
     }
 
     fn sample_match_subject() -> DispatchMatchSubject {

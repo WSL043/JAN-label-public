@@ -1,121 +1,79 @@
 # print-pipeline
 
-## 1. 現在の実装済みフロー
+## 1. 現在のフロー
 
-1. `admin-web` で parent SKU / SKU / JAN / 数量 / brand / template / printer profile を選ぶ
-2. UI は template schema / template asset を扱い、review queue を組み立てて `Ready` と `Pending` を分ける
-   `admin-web` は 12 桁と 13 桁の JAN を受け取り、最終正規化と検証は Rust 側へ委譲する
-3. CSV / XLSX は厳格 alias match で列マッピングされ、業務ヘッダ揺れ、`enabled=true/false`、行ごとの `template` / `printer_profile` 上書きを扱う
-4. snapshot を作り、proof route / live route を明示した payload preview を確認する
-5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認、approved proof ledger 照合、`templateVersion + sku + brand + jan(normalized) + qty` 一致確認を行う
-6. `desktop-shell` は local audit store に `dispatch-ledger.json` と `proof-ledger.json` を保持し、proof status を `pending / approved / rejected / superseded` で管理する
-7. `admin-web` は proof inbox / audit search から pending proof の approve / reject と、approved proof の `sourceProofJobId` 反映を行える
-8. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
+1. `admin-web` で parent SKU / SKU / JAN / qty / brand / template / printer profile を組む
+2. CSV / XLSX を取り込む場合は alias mapping で列を結び、`enabled` / `template` / `printer_profile` の列上書きを吸収する
+3. `admin-web` は row を `ready / pending / error` に振り分ける
+4. ready row を snapshot して manual / batch submit に流す
+5. desktop-shell 経由で `dispatch_print_job` を呼ぶ
+6. Rust 側で JAN 正規化、proof gate、printer route、adapter 制約、audit 記録を処理する
 
-現時点で submit は `desktop-shell` 経由なら接続済みです。  
-一方で browser 単体は preview-only のままで、proof と print 対象の厳密整合、audit ledger の長期運用、bridge warning の構造化は未完成です。
+## 2. print gate
 
-## 2. 接続後の目標フロー
+print 実行時の条件:
 
-1. `admin-web` で review 済み job を submit する
-2. `desktop-shell` が bridge status を返し、Tauri invoke で `print-agent` へ request を渡す
-3. `desktop-shell` が requested `printerProfile` と proof artifact 実在を確認し、必要時のみ `allowWithoutProof` policy を許可する
-4. `print-agent` が JAN と importer 正規化ルール、proof gate を検証する
-5. `barcode` が Zint へ描画依頼する
-6. `render` が template version と printer route に応じて SVG/PDF を生成する
-7. `printer-adapters` が proof file や Windows spool staging file へ送信する
-8. `audit-log` が lineage / parent job / reason を含む実行結果を永続化する
-9. `admin-web` が submit / completed / failed / reprinted を検索・再印刷できるようにする
+- `sourceProofJobId` がある
+- approved proof ledger に該当 proof がある
+- proof dispatch ledger に該当 proof dispatch がある
+- `templateVersion + sku + brand + jan(normalized) + qty + lineage` が approved proof と一致する
+- approved proof ledger の `artifactPath` が実在する
 
-## 3. MVP の出力優先順位
+`allowWithoutProof` は引き続き bypass 用には使わない。
 
-- 第 1 段階
-  SVG
-- 第 2 段階
-  PDF proof
-- 第 3 段階
-  Windows spool staging
-- 第 4 段階
-  ZPL / TSPL / QZ
+## 3. proof フロー
 
-現状で接続済みなのは `PDF proof` と `Windows spool staging` の骨格です。  
-`ZPL / TSPL / QZ` は printer profile 列挙上の将来候補であり、`print-agent` ではまだ reject します。
+- proof submit は PDF route で出す
+- desktop-shell は proof dispatch を `dispatch-ledger.json` に記録する
+- 同時に proof record を `proof-ledger.json` に `pending` で登録する
+- `admin-web` の proof inbox から `approve` / `reject` を実行する
+- approved proof は UI から print form に pin できる
 
-## 4. 擬似コード
+## 4. legacy proof seed フロー
 
-```text
-queue_item = ui.review_and_mark_ready()
-template_asset = ui.load_template_asset_or_schema()
-draft = ui.snapshot_ready_jobs(template_asset)
-validated_row = importer.validate_row(row_number, row_values)
-dispatch_request = ui.to_dispatch_request(draft)
-bridge_status = tauri.print_bridge_status()
-normalized = domain.normalize_jan(dispatch_request.jan)
-barcode_artifact = zint.render(normalized)
-label_artifact = render.by_profile(template_version, printer_profile)
-receipt = adapter.submit(label_artifact)
-audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
-```
+ledger 導入前の proof PDF 用:
 
-現在は `dispatch_request = ui.to_dispatch_request(draft)` と `desktop-shell` 側の submit までは接続済みです。  
-それ以降の proof 承認状態遷移、audit 永続化、browser 単体の bridge 代替は未接続です。
+1. `admin-web` の legacy proof seed UI で CSV / XLSX を読み込む
+2. `validate_legacy_proof_seed` で row 単位の妥当性を確認する
+3. `seed_legacy_proofs` で pending proof と proof dispatch を同時に seed する
+4. seed 後は通常の proof inbox で approve する
 
-## 5. proof / 承認フローの現状
+制約:
 
-- `admin-web` は review queue と snapshot を持つ
-- PDF proof route は UI 上で明示される
-- `admin-web` と `print-agent` は `sourceProofJobId` / `allowWithoutProof` の gate を共有する
-- `desktop-shell` は proof dispatch 成功時に pending proof を ledger 登録し、print 時は source proof PDF の実在、approved proof ledger 記録、proof dispatch payload 一致を確認する
-- `admin-web` は proof inbox から pending proof の approve / reject、approved proof の print form 反映を行える
-- `allowWithoutProof` は proof 承認ワークフロー完了まで拒否する
-- まだ未実装のもの:
-  - 承認履歴の多段保持
-  - legacy proof PDF の ledger 移行
-  - 却下 / 再作成専用 UI と再印刷 UI
+- `artifactPath` は configured proof output dir 配下の PDF のみ許可
+- 既存 `proofJobId` / `jobLineageId` と衝突する seed は拒否
+- 直接 approved では投入しない
 
-そのため現在の運用前提は「proof 承認の最小導線まで接続済み」だが、  
-本番向けの厳密照合と長期監査運用は次段で仕上げる。
+## 5. bridge status
 
-## 6. ゴールデンテスト
+`print_bridge_status` は次を返す:
 
-- `packages/fixtures/golden/*.svg`
-  SVG の期待出力
-- `packages/fixtures/golden/*.pdf`
-  PDF の期待出力
-- `render` crate のテストで fixture と完全一致比較する
-- 追加で PDF の header / xref / MediaBox / content stream / 文字列エスケープを検証する
-- 将来メタデータや外部ライブラリ由来の差分が入る場合は canonical compare を導入する
+- available adapters
+- resolved zint path
+- proof / print / spool output dirs
+- active print adapter
+- windows printer name
+- `warningDetails[]`
+  - `code`
+  - `severity`
+  - `message`
+- 旧互換の `warnings[]`
 
-## 7. 100% スケール固定の検証手順
+`admin-web` は `warningDetails` を正とし、`severity === "error"` の warning がある間は submit を block する。
 
-1. PDF 仮想プリンタで A4 に出力する
-2. 印刷ダイアログで拡大縮小を `100%` 固定にする
-3. 出力したラベルの幅と高さを定規とノギスで測る
-4. 物理ラベルプリンタで同じテンプレートを印刷する
-5. バーコードリーダーで読取確認する
-6. 測定結果を `docs/printer-matrix/` に残す
+## 6. Excel / CSV 取り込みの扱い
 
-## 8. 監査ログの現状
+- CSV / XLSX は strict DB 前処理なしで扱える
+- header は alias mapping で吸収する
+- XLSX 数値セル JAN は安全側に倒す
+  - scientific / decimal / ambiguous 12-digit numeric JAN は error
+  - 13-digit numeric JAN は warning
+- JAN の最終正規化と検証は Rust 側で行う
 
-- `print-agent` は lineage / parent job / reason を含む event record を生成できる
-- `desktop-shell` は local JSON ledger として `dispatch-ledger.json` / `proof-ledger.json` を保持する
-- `search_audit_log` は `searchText` / `limit` で recent dispatch と proof 状態を返す
-- `admin-web` は proof inbox / audit search UI で local ledger を検索できる
-- 未実装:
-  - 再印刷 UI
-  - ledger のローテーション / バックアップ
-  - multi-host / shared storage 前提の同期
-  - approved proof と print 対象の厳密整合追跡
+## 7. まだ未完の部分
 
-## 9. 将来の adapter 拡張原則
+- audit retention / export / backup
+- 実機プリンタでの printer matrix
+- template authoring の preview / proof 設計の仕上げ
+- multi-host / shared storage を前提にした audit / proof storage
 
-- adapter はレンダリングロジックを持たない
-- adapter は job ではなく render 済み artifact を受け取る
-- adapter 追加時は fixture、golden、printer profile、docs を同時更新する
-
-## 10. ラベル製作機能の最小スライス
-
-- BarTender 的なラベル製作機能はこのリポジトリでも必要とみなす
-- ただし最初の実装は自由配置 DTP ではなく、`packages` 配下の template schema / template asset と `render` の仕様駆動化から始める
-- `admin-web` はレイアウトロジックを所有せず、軽量テンプレート編集 UI、asset export / import、preview / proof 導線を担当する
-- したがって label authoring の主責務は `render` / `domain` / `packages` に置き、UI はその編集・確認レイヤに留める

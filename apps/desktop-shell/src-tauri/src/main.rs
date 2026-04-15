@@ -2,14 +2,16 @@
 
 mod audit_store;
 
+use std::collections::HashSet;
 use std::env;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use audit_log::{
     AuditActor, AuditQuery, AuditSearchResult, DispatchMatchSubject, PersistedDispatchRecord,
     ProofRecord, PrintJobId, PrintJobLineageId,
 };
-use audit_store::{AuditStore, ProofReviewRequest};
+use audit_store::{AuditLedgerSnapshot, AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
 use barcode::ZintCli;
 use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
@@ -111,6 +113,20 @@ fn reject_proof(request: ProofReviewRequest) -> Result<ProofRecord, String> {
     config.audit_store().reject_proof(request)
 }
 
+#[command]
+fn validate_legacy_proof_seed(
+    request: LegacyProofSeedRequest,
+) -> Result<LegacyProofSeedResult, String> {
+    let config = PrintBridgeConfig::load();
+    config.process_legacy_proof_seed(request, false)
+}
+
+#[command]
+fn seed_legacy_proofs(request: LegacyProofSeedRequest) -> Result<LegacyProofSeedResult, String> {
+    let config = PrintBridgeConfig::load();
+    config.process_legacy_proof_seed(request, true)
+}
+
 #[derive(Debug, Clone)]
 struct PrintBridgeConfig {
     print_output_dir: PathBuf,
@@ -133,7 +149,91 @@ struct PrintBridgeStatus {
     print_adapter_kind: String,
     windows_printer_name: String,
     allow_without_proof_enabled: bool,
+    warning_details: Vec<BridgeWarning>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct BridgeWarning {
+    code: &'static str,
+    severity: BridgeWarningSeverity,
+    message: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum BridgeWarningSeverity {
+    Info,
+    Warning,
+    Error,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProofSeedRequest {
+    rows: Vec<LegacyProofSeedRowInput>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProofSeedRowInput {
+    proof_job_id: String,
+    artifact_path: String,
+    template_version: String,
+    match_subject: LegacyProofSeedMatchSubjectInput,
+    requested_by: AuditActor,
+    requested_at: String,
+    #[serde(default)]
+    job_lineage_id: Option<String>,
+    #[serde(default)]
+    notes: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProofSeedMatchSubjectInput {
+    sku: String,
+    brand: String,
+    jan: String,
+    qty: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProofSeedResult {
+    applied: bool,
+    seeded_count: usize,
+    message: String,
+    rows: Vec<LegacyProofSeedRowResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProofSeedRowResult {
+    row_index: usize,
+    proof_job_id: String,
+    status: LegacyProofSeedRowStatus,
+    message: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    normalized_jan: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    resolved_job_lineage_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    artifact_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "lowercase")]
+enum LegacyProofSeedRowStatus {
+    Ok,
+    Error,
+}
+
+#[derive(Debug, Clone)]
+struct ValidatedLegacyProofSeedRow {
+    record: Option<LegacyProofSeedRecord>,
+    result: LegacyProofSeedRowResult,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -142,11 +242,51 @@ enum BridgePrintAdapter {
     WindowsSpooler,
 }
 
+const BRIDGE_PRINT_ADAPTER_UNSUPPORTED: &str = "BRIDGE_PRINT_ADAPTER_UNSUPPORTED";
+const BRIDGE_PRINT_ADAPTER_UNAVAILABLE_ON_HOST: &str =
+    "BRIDGE_PRINT_ADAPTER_UNAVAILABLE_ON_HOST";
+const BRIDGE_PRINT_ADAPTER_DEFAULTED: &str = "BRIDGE_PRINT_ADAPTER_DEFAULTED";
+const BRIDGE_ZINT_ABSOLUTE_PATH_MISSING: &str = "BRIDGE_ZINT_ABSOLUTE_PATH_MISSING";
+const BRIDGE_ZINT_DEFAULTED: &str = "BRIDGE_ZINT_DEFAULTED";
+const BRIDGE_OUTPUT_DIR_CONFIGURED_MISSING: &str = "BRIDGE_OUTPUT_DIR_CONFIGURED_MISSING";
+const BRIDGE_OUTPUT_DIR_DEFAULTED: &str = "BRIDGE_OUTPUT_DIR_DEFAULTED";
+const BRIDGE_OUTPUT_DIR_DEFAULTED_MISSING_WILL_CREATE: &str =
+    "BRIDGE_OUTPUT_DIR_DEFAULTED_MISSING_WILL_CREATE";
+const BRIDGE_WINDOWS_PRINTER_DEFAULTED_WHILE_SPOOLER: &str =
+    "BRIDGE_WINDOWS_PRINTER_DEFAULTED_WHILE_SPOOLER";
+const BRIDGE_ALLOW_WITHOUT_PROOF_IGNORED: &str = "BRIDGE_ALLOW_WITHOUT_PROOF_IGNORED";
+
 impl BridgePrintAdapter {
     fn kind(self) -> &'static str {
         match self {
             Self::Pdf => "pdf",
             Self::WindowsSpooler => "windows-spooler",
+        }
+    }
+}
+
+impl BridgeWarning {
+    fn info(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            severity: BridgeWarningSeverity::Info,
+            message: message.into(),
+        }
+    }
+
+    fn warning(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            severity: BridgeWarningSeverity::Warning,
+            message: message.into(),
+        }
+    }
+
+    fn error(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            severity: BridgeWarningSeverity::Error,
+            message: message.into(),
         }
     }
 }
@@ -187,6 +327,63 @@ impl PrintBridgeConfig {
 
     fn audit_store(&self) -> AuditStore {
         AuditStore::new(self.audit_log_dir.clone())
+    }
+
+    fn process_legacy_proof_seed(
+        &self,
+        request: LegacyProofSeedRequest,
+        apply: bool,
+    ) -> Result<LegacyProofSeedResult, String> {
+        if request.rows.is_empty() {
+            return Ok(LegacyProofSeedResult {
+                applied: false,
+                seeded_count: 0,
+                message: "No legacy proof rows were provided.".to_string(),
+                rows: Vec::new(),
+            });
+        }
+
+        let snapshot = self.audit_store().snapshot()?;
+        let validated_rows = validate_legacy_proof_seed_rows(self, request.rows, &snapshot);
+        let has_errors = validated_rows
+            .iter()
+            .any(|entry| entry.result.status == LegacyProofSeedRowStatus::Error);
+        let records = validated_rows
+            .iter()
+            .map(|entry| entry.record.clone())
+            .collect::<Option<Vec<_>>>();
+        let rows = validated_rows
+            .into_iter()
+            .map(|entry| entry.result)
+            .collect::<Vec<_>>();
+
+        if has_errors {
+            return Ok(LegacyProofSeedResult {
+                applied: false,
+                seeded_count: 0,
+                message: "Legacy proof seed validation failed. Fix row errors before seeding."
+                    .to_string(),
+                rows,
+            });
+        }
+
+        if !apply {
+            return Ok(LegacyProofSeedResult {
+                applied: false,
+                seeded_count: 0,
+                message: format!("Validated {} legacy proof rows.", rows.len()),
+                rows,
+            });
+        }
+
+        let records = records.unwrap_or_default();
+        self.audit_store().seed_legacy_proofs(records)?;
+        Ok(LegacyProofSeedResult {
+            applied: true,
+            seeded_count: rows.len(),
+            message: format!("Seeded {} legacy proof rows as pending review.", rows.len()),
+            rows,
+        })
     }
 
     fn proof_output_path(&self, job_id: &str) -> PathBuf {
@@ -255,7 +452,14 @@ impl PrintBridgeConfig {
                 "execution.sourceProofJobId is required when source proof gate is enforced"
                     .to_string()
             })?;
-        let proof_output_path = self.proof_output_path(source_proof_job_id);
+        let expected_template_version = resolve_template_version_for_request(request)?;
+        let expected_subject = build_dispatch_match_subject(request)?;
+        let approved_proof = self.audit_store().ensure_approved_proof_matches(
+            source_proof_job_id,
+            &expected_template_version,
+            &expected_subject,
+        )?;
+        let proof_output_path = PathBuf::from(approved_proof.artifact_path);
         if !proof_output_path.exists() {
             return Err(format!(
                 "source proof job '{}' was not found at '{}'",
@@ -263,13 +467,6 @@ impl PrintBridgeConfig {
                 proof_output_path.display()
             ));
         }
-        let expected_template_version = resolve_template_version_for_request(request)?;
-        let expected_subject = build_dispatch_match_subject(request)?;
-        self.audit_store().ensure_approved_proof_matches(
-            source_proof_job_id,
-            &expected_template_version,
-            &expected_subject,
-        )?;
 
         Ok(())
     }
@@ -345,7 +542,7 @@ impl PrintBridgeConfig {
 impl PrintBridgeStatus {
     fn from_environment() -> Self {
         let host_supports_windows_spooler = host_supports_windows_spooler();
-        let mut warnings = Vec::new();
+        let mut warning_details = Vec::new();
 
         let (print_output_dir, print_output_fallback_warning) = resolve_output_dir_with_warning(
             ENV_PRINT_OUTPUT_DIR,
@@ -355,10 +552,10 @@ impl PrintBridgeStatus {
             ENV_PRINT_OUTPUT_DIR,
             &print_output_dir,
             print_output_fallback_warning.is_some(),
-            &mut warnings,
+            &mut warning_details,
         );
-        if let Some(message) = print_output_fallback_warning {
-            warnings.push(message);
+        if let Some(warning) = print_output_fallback_warning {
+            warning_details.push(warning);
         }
 
         let (spool_output_dir, spool_output_fallback_warning) = resolve_output_dir_with_warning(
@@ -369,17 +566,17 @@ impl PrintBridgeStatus {
             ENV_SPOOL_OUTPUT_DIR,
             &spool_output_dir,
             spool_output_fallback_warning.is_some(),
-            &mut warnings,
+            &mut warning_details,
         );
-        if let Some(message) = spool_output_fallback_warning {
-            warnings.push(message);
+        if let Some(warning) = spool_output_fallback_warning {
+            warning_details.push(warning);
         }
 
         let (zint_binary_path, zint_warning) =
             resolve_zint_binary_path_with_warning(ENV_ZINT_BINARY_PATH, DEFAULT_ZINT_BINARY_PATH);
-        report_zint_warning(&zint_binary_path, &mut warnings);
-        if let Some(message) = zint_warning {
-            warnings.push(message);
+        report_zint_warning(&zint_binary_path, &mut warning_details);
+        if let Some(warning) = zint_warning {
+            warning_details.push(warning);
         }
 
         let print_adapter_raw = resolve_optional_env(ENV_PRINT_ADAPTER).unwrap_or_default();
@@ -387,8 +584,8 @@ impl PrintBridgeStatus {
             &print_adapter_raw,
             host_supports_windows_spooler,
         );
-        if let Some(message) = adapter_warning {
-            warnings.push(message);
+        if let Some(warning) = adapter_warning {
+            warning_details.push(warning);
         }
 
         let (windows_printer_name, printer_warning) = resolve_windows_printer_name_with_warning(
@@ -398,20 +595,26 @@ impl PrintBridgeStatus {
         let is_fallback_printer_name = printer_warning.is_some();
         let allow_print_without_proof_requested = resolve_bool_env(ENV_ALLOW_PRINT_WITHOUT_PROOF);
         if print_adapter == BridgePrintAdapter::WindowsSpooler {
-            if let Some(message) = printer_warning {
-                warnings.push(message);
+            if let Some(warning) = printer_warning {
+                warning_details.push(warning);
             }
             if is_fallback_printer_name {
-                warnings.push(
-                    "JAN_LABEL_WINDOWS_PRINTER_NAME is not set or empty; using fallback 'Default Printer' while windows-spooler is selected".to_string(),
-                );
+                warning_details.push(BridgeWarning::error(
+                    BRIDGE_WINDOWS_PRINTER_DEFAULTED_WHILE_SPOOLER,
+                    "JAN_LABEL_WINDOWS_PRINTER_NAME is not set or empty; using fallback 'Default Printer' while windows-spooler is selected",
+                ));
             }
         }
         if allow_print_without_proof_requested {
-            warnings.push(
-                "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF is set, but allowWithoutProof stays disabled until proof approval workflow is implemented".to_string(),
-            );
+            warning_details.push(BridgeWarning::warning(
+                BRIDGE_ALLOW_WITHOUT_PROOF_IGNORED,
+                "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF is set, but allowWithoutProof stays disabled until proof approval workflow is implemented",
+            ));
         }
+        let warnings = warning_details
+            .iter()
+            .map(|warning| warning.message.clone())
+            .collect::<Vec<_>>();
 
         Self {
             available_adapters: available_adapters_for_host(host_supports_windows_spooler),
@@ -422,6 +625,7 @@ impl PrintBridgeStatus {
             print_adapter_kind: print_adapter.kind().to_string(),
             windows_printer_name,
             allow_without_proof_enabled: false,
+            warning_details,
             warnings,
         }
     }
@@ -457,7 +661,7 @@ fn resolve_print_adapter_for_host(
 fn resolve_print_adapter_with_warning_for_host(
     raw: &str,
     host_supports_windows_spooler: bool,
-) -> (BridgePrintAdapter, Option<String>) {
+) -> (BridgePrintAdapter, Option<BridgeWarning>) {
     let normalized = raw.trim().to_ascii_lowercase();
     let default_adapter = default_print_adapter();
     let default_kind = default_adapter.kind();
@@ -465,8 +669,9 @@ fn resolve_print_adapter_with_warning_for_host(
     if normalized.is_empty() {
         return (
             default_adapter,
-            Some(format!(
-                "{ENV_PRINT_ADAPTER} is not set; defaulting to {default_kind}"
+            Some(BridgeWarning::info(
+                BRIDGE_PRINT_ADAPTER_DEFAULTED,
+                format!("{ENV_PRINT_ADAPTER} is not set; defaulting to {default_kind}"),
             )),
         );
     }
@@ -479,16 +684,20 @@ fn resolve_print_adapter_with_warning_for_host(
             } else {
                 (
                     default_adapter,
-                    Some(format!(
-                        "{ENV_PRINT_ADAPTER}='{raw}' is not available on this host; defaulting to {default_kind}"
+                    Some(BridgeWarning::error(
+                        BRIDGE_PRINT_ADAPTER_UNAVAILABLE_ON_HOST,
+                        format!(
+                            "{ENV_PRINT_ADAPTER}='{raw}' is not available on this host; defaulting to {default_kind}"
+                        ),
                     )),
                 )
             }
         }
         _ => (
             default_adapter,
-            Some(format!(
-                "{ENV_PRINT_ADAPTER}='{raw}' is unsupported; defaulting to {default_kind}"
+            Some(BridgeWarning::error(
+                BRIDGE_PRINT_ADAPTER_UNSUPPORTED,
+                format!("{ENV_PRINT_ADAPTER}='{raw}' is unsupported; defaulting to {default_kind}"),
             )),
         ),
     }
@@ -501,14 +710,17 @@ fn resolve_output_dir(env_key: &str, fallback: PathBuf) -> PathBuf {
     }
 }
 
-fn resolve_output_dir_with_warning(env_key: &str, fallback: PathBuf) -> (PathBuf, Option<String>) {
+fn resolve_output_dir_with_warning(
+    env_key: &str,
+    fallback: PathBuf,
+) -> (PathBuf, Option<BridgeWarning>) {
     match resolve_optional_env(env_key).map(|value| value.trim().to_string()) {
         Some(value) if !value.is_empty() => (PathBuf::from(value), None),
         _ => (
             fallback.clone(),
-            Some(format!(
-                "{env_key} is not set; defaulting to {}",
-                fallback.display()
+            Some(BridgeWarning::info(
+                BRIDGE_OUTPUT_DIR_DEFAULTED,
+                format!("{env_key} is not set; defaulting to {}", fallback.display()),
             )),
         ),
     }
@@ -583,6 +795,16 @@ fn require_trimmed_non_empty(field_name: &str, value: &str) -> Result<String, St
     }
 }
 
+fn optional_trimmed_non_empty(value: Option<String>) -> Option<String> {
+    let value = value?;
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 fn jan_error_message(error: JanError) -> String {
     match error {
         JanError::Empty => "jan must not be empty".to_string(),
@@ -594,6 +816,235 @@ fn jan_error_message(error: JanError) -> String {
             format!("jan checksum is invalid: expected {expected}, got {actual}")
         }
     }
+}
+
+fn validate_legacy_proof_seed_rows(
+    config: &PrintBridgeConfig,
+    rows: Vec<LegacyProofSeedRowInput>,
+    snapshot: &AuditLedgerSnapshot,
+) -> Vec<ValidatedLegacyProofSeedRow> {
+    let mut existing_job_ids = HashSet::new();
+    let mut existing_lineages = HashSet::new();
+    for dispatch in snapshot.dispatches.iter().filter(|record| record.mode == "proof") {
+        existing_job_ids.insert(dispatch.audit.job_id.0.clone());
+        existing_lineages.insert(dispatch.audit.job_lineage_id.0.clone());
+    }
+    for proof in &snapshot.proofs {
+        existing_job_ids.insert(proof.proof_job_id.0.clone());
+        existing_lineages.insert(proof.job_lineage_id.0.clone());
+    }
+
+    let mut batch_job_ids = HashSet::new();
+    let mut batch_lineages = HashSet::new();
+    rows.into_iter()
+        .enumerate()
+        .map(|(row_index, row)| {
+            match validate_legacy_proof_seed_row(
+                config,
+                row_index,
+                row,
+                &existing_job_ids,
+                &existing_lineages,
+                &mut batch_job_ids,
+                &mut batch_lineages,
+            ) {
+                Ok(validated) => validated,
+                Err(result) => ValidatedLegacyProofSeedRow {
+                    record: None,
+                    result,
+                },
+            }
+        })
+        .collect()
+}
+
+fn validate_legacy_proof_seed_row(
+    config: &PrintBridgeConfig,
+    row_index: usize,
+    row: LegacyProofSeedRowInput,
+    existing_job_ids: &HashSet<String>,
+    existing_lineages: &HashSet<String>,
+    batch_job_ids: &mut HashSet<String>,
+    batch_lineages: &mut HashSet<String>,
+) -> Result<ValidatedLegacyProofSeedRow, LegacyProofSeedRowResult> {
+    let proof_job_id = row.proof_job_id.trim().to_string();
+    let error = |message: String| LegacyProofSeedRowResult {
+        row_index,
+        proof_job_id: proof_job_id.clone(),
+        status: LegacyProofSeedRowStatus::Error,
+        message,
+        normalized_jan: None,
+        resolved_job_lineage_id: None,
+        artifact_path: None,
+    };
+
+    if proof_job_id.is_empty() {
+        return Err(error("proofJobId is required.".to_string()));
+    }
+
+    let resolved_job_lineage_id = row
+        .job_lineage_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&proof_job_id)
+        .to_string();
+    if existing_job_ids.contains(&proof_job_id) {
+        return Err(error(format!(
+            "proofJobId '{}' already exists in the audit ledger.",
+            proof_job_id
+        )));
+    }
+    if existing_lineages.contains(&resolved_job_lineage_id) {
+        return Err(error(format!(
+            "jobLineageId '{}' already exists in the audit ledger.",
+            resolved_job_lineage_id
+        )));
+    }
+    if !batch_job_ids.insert(proof_job_id.clone()) {
+        return Err(error(format!(
+            "proofJobId '{}' is duplicated in this seed batch.",
+            proof_job_id
+        )));
+    }
+    if !batch_lineages.insert(resolved_job_lineage_id.clone()) {
+        return Err(error(format!(
+            "jobLineageId '{}' is duplicated in this seed batch.",
+            resolved_job_lineage_id
+        )));
+    }
+
+    let template_version = require_trimmed_non_empty("templateVersion", &row.template_version)
+        .map_err(error)?;
+    let requested_by = validate_legacy_seed_actor(&row.requested_by).map_err(error)?;
+    let requested_at = validate_legacy_seed_requested_at(&row.requested_at).map_err(error)?;
+    let notes = optional_trimmed_non_empty(row.notes);
+    let match_subject =
+        validate_legacy_seed_match_subject(&row.match_subject).map_err(error)?;
+    let artifact_path = validate_legacy_seed_artifact_path(config, &row.artifact_path).map_err(error)?;
+    let artifact_size = fs::metadata(&artifact_path)
+        .map_err(|err| error(format!("failed to stat artifactPath '{}': {err}", artifact_path.display())))?
+        .len() as usize;
+
+    let proof_record = ProofRecord::pending(
+        PrintJobId(proof_job_id.clone()),
+        PrintJobLineageId(resolved_job_lineage_id.clone()),
+        requested_by.clone(),
+        requested_at.clone(),
+        artifact_path.to_string_lossy().into_owned(),
+        notes.clone(),
+    );
+    let dispatch_record = PersistedDispatchRecord {
+        audit: audit_log::PrintAuditRecord::dispatch(
+            PrintJobId(proof_job_id.clone()),
+            PrintJobLineageId(resolved_job_lineage_id.clone()),
+            None,
+            requested_by,
+            requested_at,
+            Some("legacy proof seed".to_string()),
+        ),
+        mode: "proof".to_string(),
+        template_version,
+        match_subject: match_subject.clone(),
+        artifact_media_type: "application/pdf".to_string(),
+        artifact_byte_size: artifact_size,
+        submission_adapter_kind: "pdf".to_string(),
+        submission_external_job_id: format!("legacy-seed:{proof_job_id}"),
+    };
+
+    Ok(ValidatedLegacyProofSeedRow {
+        record: Some(LegacyProofSeedRecord {
+            dispatch: dispatch_record,
+            proof: proof_record,
+        }),
+        result: LegacyProofSeedRowResult {
+            row_index,
+            proof_job_id,
+            status: LegacyProofSeedRowStatus::Ok,
+            message: "Ready to seed as pending proof.".to_string(),
+            normalized_jan: Some(match_subject.jan_normalized),
+            resolved_job_lineage_id: Some(resolved_job_lineage_id),
+            artifact_path: Some(artifact_path.to_string_lossy().into_owned()),
+        },
+    })
+}
+
+fn validate_legacy_seed_actor(actor: &AuditActor) -> Result<AuditActor, String> {
+    Ok(AuditActor {
+        user_id: require_trimmed_non_empty("requestedBy.userId", &actor.user_id)?,
+        display_name: require_trimmed_non_empty(
+            "requestedBy.displayName",
+            &actor.display_name,
+        )?,
+    })
+}
+
+fn validate_legacy_seed_requested_at(value: &str) -> Result<String, String> {
+    require_trimmed_non_empty("requestedAt", value)
+}
+
+fn validate_legacy_seed_match_subject(
+    input: &LegacyProofSeedMatchSubjectInput,
+) -> Result<DispatchMatchSubject, String> {
+    let sku = require_trimmed_non_empty("matchSubject.sku", &input.sku)?;
+    let brand = require_trimmed_non_empty("matchSubject.brand", &input.brand)?;
+    if input.qty == 0 {
+        return Err("matchSubject.qty must be greater than or equal to 1.".to_string());
+    }
+    let jan_normalized = Jan::parse(&input.jan)
+        .map(|value| value.as_str().to_string())
+        .map_err(jan_error_message)?;
+    Ok(DispatchMatchSubject {
+        sku,
+        brand,
+        jan_normalized,
+        qty: input.qty,
+    })
+}
+
+fn validate_legacy_seed_artifact_path(
+    config: &PrintBridgeConfig,
+    artifact_path: &str,
+) -> Result<PathBuf, String> {
+    let artifact_path = require_trimmed_non_empty("artifactPath", artifact_path)?;
+    let artifact_path = PathBuf::from(artifact_path);
+    if !artifact_path.is_absolute() {
+        return Err("artifactPath must be an absolute path.".to_string());
+    }
+    if artifact_path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| !value.eq_ignore_ascii_case("pdf"))
+        .unwrap_or(true)
+    {
+        return Err("artifactPath must point to a PDF file.".to_string());
+    }
+    if !artifact_path.exists() {
+        return Err(format!(
+            "artifactPath '{}' does not exist.",
+            artifact_path.display()
+        ));
+    }
+    let canonical_artifact = fs::canonicalize(&artifact_path).map_err(|err| {
+        format!(
+            "failed to canonicalize artifactPath '{}': {err}",
+            artifact_path.display()
+        )
+    })?;
+    let canonical_proof_dir = fs::canonicalize(&config.print_output_dir).map_err(|err| {
+        format!(
+            "failed to canonicalize proof output dir '{}': {err}",
+            config.print_output_dir.display()
+        )
+    })?;
+    if !canonical_artifact.starts_with(&canonical_proof_dir) {
+        return Err(format!(
+            "artifactPath '{}' must stay under proof output dir '{}'.",
+            canonical_artifact.display(),
+            canonical_proof_dir.display()
+        ));
+    }
+    Ok(canonical_artifact)
 }
 
 fn log_non_fatal_audit_error(context: &str, job_id: &str, error: &str) {
@@ -613,20 +1064,26 @@ fn map_event_kind(event: &print_agent::PrintDispatchAuditEvent) -> audit_log::Au
 fn resolve_zint_binary_path_with_warning(
     env_key: &str,
     fallback: &str,
-) -> (String, Option<String>) {
+) -> (String, Option<BridgeWarning>) {
     match resolve_optional_env(env_key).map(|value| value.trim().to_string()) {
         Some(value) if !value.is_empty() => (value, None),
         _ => (
             fallback.to_string(),
-            Some(format!("{env_key} is not set; defaulting to {fallback}")),
+            Some(BridgeWarning::info(
+                BRIDGE_ZINT_DEFAULTED,
+                format!("{env_key} is not set; defaulting to {fallback}"),
+            )),
         ),
     }
 }
 
-fn report_zint_warning(path: &str, warnings: &mut Vec<String>) {
+fn report_zint_warning(path: &str, warnings: &mut Vec<BridgeWarning>) {
     if Path::new(path).is_absolute() && !Path::new(path).exists() {
-        warnings.push(format!(
-            "{ENV_ZINT_BINARY_PATH} is set to absolute path '{path}', but the file does not exist"
+        warnings.push(BridgeWarning::error(
+            BRIDGE_ZINT_ABSOLUTE_PATH_MISSING,
+            format!(
+                "{ENV_ZINT_BINARY_PATH} is set to absolute path '{path}', but the file does not exist"
+            ),
         ));
     }
 }
@@ -635,21 +1092,27 @@ fn report_output_dir_warning(
     env_key: &str,
     dir: &Path,
     from_fallback: bool,
-    warnings: &mut Vec<String>,
+    warnings: &mut Vec<BridgeWarning>,
 ) {
     if dir.exists() {
         return;
     }
 
     if from_fallback {
-        warnings.push(format!(
-            "{env_key} is not set; defaulting to {}; directory does not exist and will be created on demand",
-            dir.display()
+        warnings.push(BridgeWarning::info(
+            BRIDGE_OUTPUT_DIR_DEFAULTED_MISSING_WILL_CREATE,
+            format!(
+                "{env_key} is not set; defaulting to {}; directory does not exist and will be created on demand",
+                dir.display()
+            ),
         ));
     } else {
-        warnings.push(format!(
-            "{env_key} is set to {} but does not exist; it will be created on demand",
-            dir.display()
+        warnings.push(BridgeWarning::error(
+            BRIDGE_OUTPUT_DIR_CONFIGURED_MISSING,
+            format!(
+                "{env_key} is set to {} but does not exist; it will be created on demand",
+                dir.display()
+            ),
         ));
     }
 }
@@ -657,12 +1120,15 @@ fn report_output_dir_warning(
 fn resolve_windows_printer_name_with_warning(
     env_key: &str,
     fallback: &str,
-) -> (String, Option<String>) {
+) -> (String, Option<BridgeWarning>) {
     match resolve_optional_env(env_key).map(|value| value.trim().to_string()) {
         Some(value) if !value.is_empty() => (value, None),
         _ => (
             fallback.to_string(),
-            Some(format!("{env_key} is not set; defaulting to '{fallback}'")),
+            Some(BridgeWarning::info(
+                BRIDGE_WINDOWS_PRINTER_DEFAULTED_WHILE_SPOOLER,
+                format!("{env_key} is not set; defaulting to '{fallback}'"),
+            )),
         ),
     }
 }
@@ -684,7 +1150,9 @@ fn main() {
             print_bridge_status,
             search_audit_log,
             approve_proof,
-            reject_proof
+            reject_proof,
+            validate_legacy_proof_seed,
+            seed_legacy_proofs
         ])
         .run(tauri::generate_context!())
         .expect("failed to run desktop shell");
@@ -740,8 +1208,8 @@ mod tests {
         let (adapter, warning) = resolve_print_adapter_with_warning_for_host("", true);
         assert_eq!(adapter, BridgePrintAdapter::Pdf);
         assert!(warning
-            .as_deref()
-            .is_some_and(|message| message.contains("defaulting to pdf")));
+            .as_ref()
+            .is_some_and(|warning| warning.message.contains("defaulting to pdf")));
     }
 
     #[test]
@@ -750,8 +1218,8 @@ mod tests {
             resolve_print_adapter_with_warning_for_host("windows-spooler", false);
         assert_eq!(adapter, BridgePrintAdapter::Pdf);
         assert!(warning
-            .as_deref()
-            .is_some_and(|message| message.contains("not available on this host")));
+            .as_ref()
+            .is_some_and(|warning| warning.message.contains("not available on this host")));
     }
 
     #[test]
@@ -1036,8 +1504,11 @@ mod tests {
     fn print_bridge_config_rejects_missing_source_proof_file() {
         let temp_root = env::temp_dir().join("jan-label-proof-check");
         let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
         let config = PrintBridgeConfig {
-            print_output_dir: temp_root.join("proofs"),
+            print_output_dir: proof_dir,
             spool_output_dir: temp_root.join("spool"),
             audit_log_dir: temp_root.join("audit"),
             zint_binary_path: "zint".to_string(),
@@ -1052,6 +1523,26 @@ mod tests {
             dpi: 300,
             scale_policy: "fixed-100".to_string(),
         }));
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
 
         let err = config
             .validate_request(&request)
