@@ -3,6 +3,7 @@
 - Updated: 2026-04-15
 - Branch: `codex/release-bridge-proof-hardening`
 - Release base: `v0.1.1` (`0b95f41`)
+- Release target: `v0.1.2`
 - Active PR: `#25`
 - Branch relation to `origin/main` on 2026-04-15 before this batch: `0 behind / 11 ahead`
 
@@ -86,10 +87,10 @@ Operational note:
 
 - Local Windows may intermittently return `os error 5` during `cargo test --workspace`. Re-run once and confirm `desktop-shell` tests pass before treating it as a regression.
 
-## Release Estimate
+## Release Status
 
-- Earliest PDF-only release candidate: `2026-04-16`
-- Realistic PDF-only release target: `2026-04-16` to `2026-04-17`
+- `v0.1.2` is the PDF-only patch release target from this branch.
+- Tag is ready once version bump and validation commit are pushed.
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation

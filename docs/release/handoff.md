@@ -14,13 +14,14 @@
 ## 2. Tag policy
 
 - `vMAJOR.MINOR.PATCH`
-- Current release target is `v0.1.1`
+- Current release target is `v0.1.2`
 - Use patch releases for stability work in print pipeline and audit path
 
 ### Historical tags
 
 - `v0.1.0` used `Release` workflow preflight; output is release candidate.
 - `v0.1.1` used bugfix hardening for proof/print gating and catalog logic.
+- `v0.1.2` is the PDF-first patch release for local catalog parity, audit backup listing, and release-scope reclassification.
 
 ## 3. Preflight checks and tag workflow
 
