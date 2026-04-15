@@ -80,7 +80,6 @@ jobs:
         if: steps.meta.outputs.skip != 'true'
         uses: actions/setup-node@v5
         with:
-          cache: pnpm
           node-version: lts/*
 
       - name: Enable Corepack
