@@ -2100,13 +2100,16 @@ function describeAuditTrimResult(result: AuditRetentionResult): string {
   const summary = `${result.removedDispatchCount} dispatch and ${result.removedProofCount} proof entr${
     result.removedDispatchCount + result.removedProofCount === 1 ? "y" : "ies"
   }`;
+  const retainedSummary = `${result.retainedDispatchCount} dispatch and ${result.retainedProofCount} proof entr${
+    result.retainedDispatchCount + result.retainedProofCount === 1 ? "y" : "ies"
+  } remain`;
   if (result.dryRun) {
-    return `Dry run complete. ${summary} would be removed.`;
+    return `Dry run complete. ${summary} would be removed. ${retainedSummary} remain.`;
   }
   if (result.backup) {
-    return `Trim complete. ${summary} moved with backup at ${result.backup.filePath}.`;
+    return `Trim complete. ${summary} removed and ${retainedSummary}. Backup saved at ${result.backup.filePath}.`;
   }
-  return `Trim complete. ${summary} removed.`;
+  return `Trim complete. ${summary} removed. ${retainedSummary}.`;
 }
 
 function buildTemplateAssetPayload(
@@ -2917,14 +2920,12 @@ export function App() {
     try {
       const result = await exportAuditLedger({ scope: auditScope });
       const exportedAt = new Date().toISOString();
-      downloadText(
-        buildAuditExportFilename(result.scope, exportedAt),
-        buildAuditExportDocument(result),
-      );
+      const fileName = buildAuditExportFilename(result.scope, exportedAt);
+      downloadText(fileName, buildAuditExportDocument(result));
       setAuditExportState({
         phase: "success",
         message: `Exported ${result.dispatchCount} dispatch and ${result.proofCount} proof entries as JSON.`,
-        detail: null,
+        detail: `Saved ${fileName}.`,
       });
     } catch (error) {
       setAuditExportState({
@@ -4892,6 +4893,9 @@ export function App() {
           {auditExportState.phase === "success" ? (
             <p className="status-ok">{auditExportState.message}</p>
           ) : null}
+          {auditExportState.detail ? (
+            <p className="data-summary">{auditExportState.detail}</p>
+          ) : null}
           {auditTrimState.phase === "submitting" ? (
             <p className="notice-text">{auditTrimState.message}</p>
           ) : null}
@@ -4901,6 +4905,7 @@ export function App() {
           {auditTrimState.phase === "success" ? (
             <p className="status-ok">{auditTrimState.message}</p>
           ) : null}
+          {auditTrimState.detail ? <p className="data-summary">{auditTrimState.detail}</p> : null}
         </div>
         <div className="proof-note">
           <strong>Legacy proof seed</strong>
