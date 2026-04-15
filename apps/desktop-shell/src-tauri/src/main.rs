@@ -121,12 +121,12 @@ fn trim_audit_ledger(request: AuditRetentionRequest) -> Result<AuditRetentionRes
 }
 
 #[command]
-fn list_audit_backup_bundles() -> Result<AuditBackupListResult, String> {
+fn list_audit_backup_bundles() -> Result<Vec<AuditBackupEntry>, String> {
     let config = PrintBridgeConfig::load();
     let backup_dir = config.audit_store().backup_dir();
     let bundles = collect_audit_backup_bundles(&backup_dir)
         .map_err(|error| format!("failed to list audit backups from '{}': {error}", backup_dir.display()))?;
-    Ok(AuditBackupListResult { bundles })
+    Ok(bundles)
 }
 
 #[command]
@@ -525,12 +525,6 @@ struct AuditBackupEntry {
     file_path: String,
     created_at_utc: String,
     size_bytes: u64,
-}
-
-#[derive(Debug, Clone, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct AuditBackupListResult {
-    bundles: Vec<AuditBackupEntry>,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -2069,7 +2063,7 @@ mod tests {
         env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
 
         let response = list_audit_backup_bundles().expect("list backups should succeed");
-        assert!(response.bundles.is_empty());
+        assert!(response.is_empty());
 
         restore_env_vars(backup);
         let _ = fs::remove_dir_all(&root);
@@ -2120,7 +2114,6 @@ mod tests {
 
         let response = list_audit_backup_bundles().expect("list backups should succeed");
         let observed = response
-            .bundles
             .into_iter()
             .find(|bundle| bundle.file_name == backup_file.file_name)
             .expect("backup bundle should be listed");
