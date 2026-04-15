@@ -57,6 +57,14 @@ Lineage rules:
   - `dryRun`
 - Trim preserves proof/proof-dispatch dependency chains.
 - Applied trim writes a backup bundle under `audit/backups/`.
+- `restore_audit_backup_bundle` merges a selected backup bundle back into the active ledger.
+
+Restore rules:
+
+- restore is explicit operator action from the audit lane
+- conflicts against existing dispatch/proof job ids fail the whole restore
+- invalid bundle schema fails the whole restore
+- after successful restore, `admin-web` refreshes audit search and backup inventory
 
 ## 5. Legacy Proof Seed Flow
 
@@ -129,5 +137,4 @@ Important distinctions:
 ## 9. Remaining Gaps
 
 - Physical printer matrix and scan validation
-- Audit backup list / restore UX
 - Local template catalog governance for backup/restore and multi-writer guidance

@@ -39,19 +39,22 @@ Priority order for post-`v0.1.2` branch work.
 | T-046 | P1 | done | Codex + Sub-Agent | Queue and audit desktop grid tooling | Queue/audit lanes support desktop-oriented sort, filter, page navigation, and submit-time mutation guards |
 | T-047 | P1 | done | Codex + Sub-Agent | Template authoring interaction hardening | Template lane separates structure/fields/review/catalog concerns and compose/template review makes live-vs-staged-vs-dispatch authority explicit |
 | T-045b | P1 | done | Codex + Sub-Agent | Cut `v0.1.3` desktop shell release | Tag, GitHub Release workflow, and Windows installer asset are published for the desktop UI reset |
+| T-028f-restore | P2 | done | Codex | Audit backup restore flow | Backup bundles can be restored from the desktop UI through `restore_audit_backup_bundle` with conflict-safe merge semantics |
+| T-016 | P3 | done | Codex | Release notes automation | `pnpm release:notes --version <version>` writes `docs/release/<version>.md` from handoff, git summary, and Maintenance Ledger context |
+| T-043 | P3 | done | Codex | Release checklist automation | `pnpm release:readiness --version <version>` writes machine-readable release readiness artifacts and the release workflow uploads them |
+| T-048 | P1 | done | Codex | `v0.2.0` operator workstation redesign | `admin-web` uses a dark-neutral, dense three-pane workstation with lane-aware inspector focus across compose/template/queue/audit |
 
 ## Now
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-028f-restore | P2 | pending | Codex + Sub-Agent | Audit backup restore flow | Backup bundles can be restored from the desktop UI or documented operator procedure |
-| T-016 | P3 | pending | Codex | Release notes automation | Release notes can be generated from the maintenance ledger with low manual cleanup |
-| T-043 | P3 | pending | Codex + Sub-Agent | Release checklist automation | The release branch can emit a concise machine-readable readiness report |
+| None | - | clear | Codex | No active implementation blockers remain for the `v0.2.0` batch | Cut and verify the release on a Windows host with the required linker/toolchain installed |
 
 ## Next
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
+| T-045c | P1 | pending | Codex | Cut `v0.2.0` operator workstation release | Windows desktop build, release notes draft, readiness artifact, and release workflow all pass for `v0.2.0` |
 | T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
 | T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |

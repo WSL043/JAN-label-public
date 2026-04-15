@@ -16,6 +16,7 @@ import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { CSSProperties, ChangeEvent, FormEvent } from "react";
 import {
   type AuditArtifactInfo,
+  type AuditBackupRestoreResult,
   type AuditExportResult,
   type AuditLedgerScope,
   type AuditRetentionResult,
@@ -37,6 +38,7 @@ import {
   listAuditBackupBundles,
   previewTemplateDraft,
   rejectProof,
+  restoreAuditBackupBundle,
   saveTemplateToLocalCatalog,
   searchAuditLog,
   seedLegacyProofs,
@@ -188,6 +190,10 @@ type AuditBackupBundleState = {
 };
 type AuditMaintenanceState = SubmitState & {
   detail: string | null;
+};
+type AuditRestoreState = SubmitState & {
+  filePath: string | null;
+  result: AuditBackupRestoreResult | null;
 };
 type ProofReviewAction = "approve" | "reject" | null;
 type ProofReviewState = SubmitState & {
@@ -2386,6 +2392,14 @@ export function App() {
     message: "Audit backups have not been loaded yet.",
     bundles: [],
   });
+  const [selectedAuditBackupPath, setSelectedAuditBackupPath] = useState<string | null>(null);
+  const [auditRestoreConfirmed, setAuditRestoreConfirmed] = useState(false);
+  const [auditRestoreState, setAuditRestoreState] = useState<AuditRestoreState>({
+    phase: "idle",
+    message: "",
+    filePath: null,
+    result: null,
+  });
   const [auditExportState, setAuditExportState] = useState<AuditMaintenanceState>({
     phase: "idle",
     message: "",
@@ -2417,6 +2431,7 @@ export function App() {
   });
   const [templateWorkspaceMode, setTemplateWorkspaceMode] =
     useState<TemplateWorkspaceMode>("structure");
+  const [selectedTemplateFieldIndex, setSelectedTemplateFieldIndex] = useState(0);
 
   const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
   const [templateParseError, setTemplateParseError] = useState<string | null>(null);
@@ -2433,6 +2448,8 @@ export function App() {
   );
   const [mappingPersistedState, setMappingPersistedState] = useState(initialMappingState.status);
   const [queuedRows, setQueuedRows] = useState<QueuedRow[]>([]);
+  const [selectedQueueRowJobId, setSelectedQueueRowJobId] = useState<string | null>(null);
+  const [selectedAuditEntryJobId, setSelectedAuditEntryJobId] = useState<string | null>(null);
   const [restoreStateNotice, setRestoreStateNotice] = useState<string | null>(null);
   const [sourcePersistedState, setSourcePersistedState] = useState(initialSourceState.status);
 
@@ -2905,6 +2922,36 @@ export function App() {
     filteredAuditEntries.length === 0
       ? 0
       : Math.min(auditVisiblePage * auditPageSize, filteredAuditEntries.length);
+  const selectedTemplateField =
+    templateEditorModel?.fields[
+      Math.min(selectedTemplateFieldIndex, Math.max(templateEditorModel.fields.length - 1, 0))
+    ] ?? null;
+  const queueFocusRow =
+    queuedRows.find((entry) => entry.draft?.jobId === selectedQueueRowJobId) ??
+    pagedQueuedRows.find((entry) => entry.submissionStatus === "submitting") ??
+    pagedQueuedRows.find((entry) => entry.submissionStatus === "failed") ??
+    pagedQueuedRows[0] ??
+    null;
+  const auditFocusEntry =
+    filteredAuditEntries.find((entry) => entry.dispatch.audit.jobId === selectedAuditEntryJobId) ??
+    pagedAuditEntries.find((entry) => entry.proof?.status === "pending") ??
+    pagedAuditEntries[0] ??
+    null;
+  const selectedAuditBackupBundle =
+    auditBackupBundles.bundles.find((bundle) => bundle.filePath === selectedAuditBackupPath) ??
+    auditBackupBundles.bundles[0] ??
+    null;
+  const queueFocusSummary = queueFocusRow
+    ? `${queueFocusRow.draft?.jobId ?? `row-${queueFocusRow.rowIndex + 1}`} / ${queueFocusRow.submissionStatus}`
+    : "No queue row in focus";
+  const auditFocusSummary = auditFocusEntry
+    ? `${auditFocusEntry.dispatch.audit.jobId} / ${auditFocusEntry.dispatch.mode}`
+    : "No audit record in focus";
+  const auditRestoreReady =
+    !!selectedAuditBackupBundle &&
+    auditRestoreConfirmed &&
+    auditRestoreState.phase !== "submitting" &&
+    bridgeStatusAvailable;
   const workspaceItems: Array<{
     id: WorkspaceMode;
     label: string;
@@ -2956,6 +3003,46 @@ export function App() {
     },
   };
   const activeWorkspaceMeta = workspaceDetailById[activeWorkspace];
+  const workstationStatusCards = [
+    {
+      id: "bridge",
+      label: "Bridge",
+      value: bridgeStatus.phase === "ready" ? "ready" : bridgeStatus.phase,
+      detail: bridgeStatusAvailable ? (bridgeStatus.status?.printAdapterKind ?? "desktop") : "n/a",
+    },
+    {
+      id: "draft",
+      label: "Live payload",
+      value: draft ? "armed" : "missing",
+      detail: executionModeLabel,
+    },
+    {
+      id: "queue",
+      label: "Queue session",
+      value: queueFocusSummary,
+      detail: `${queuedReadyRowsCount} ready / ${queuedFailedRowsCount} failed`,
+    },
+    {
+      id: "audit",
+      label: "Audit focus",
+      value: auditFocusSummary,
+      detail: `${pendingProofCount} pending / ${approvedProofEntries.length} approved`,
+    },
+  ];
+  const activeWorkspaceFocus =
+    activeWorkspace === "compose"
+      ? draft
+        ? "Live payload is authoritative for submit; staged snapshot stays review-only."
+        : "Compose lane is waiting for a valid live payload."
+      : activeWorkspace === "templates"
+        ? "Canvas and Rust preview are split from catalog authority so local draft edits do not silently dispatch."
+        : activeWorkspace === "queue"
+          ? queueMutationLocked
+            ? "Queue mutation lock is active until the batch session completes."
+            : "Grid state is idle. Build or retry rows from the current submit session."
+          : selectedAuditBackupBundle
+            ? `Restore target armed: ${selectedAuditBackupBundle.fileName}.`
+            : "Audit lane covers proof review, retention, bundle inventory, and restore.";
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
     const pushItem = (
@@ -3066,6 +3153,18 @@ export function App() {
             : "neutral",
     );
     pushItem(
+      "audit-restore",
+      "Audit restore",
+      auditRestoreState.message,
+      auditRestoreState.phase === "error"
+        ? "error"
+        : auditRestoreState.phase === "success"
+          ? "ok"
+          : auditRestoreState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
       "legacy-proof",
       "Legacy proof",
       legacyProofSeedState.message,
@@ -3098,6 +3197,8 @@ export function App() {
     auditSearch.phase,
     auditTrimState.message,
     auditTrimState.phase,
+    auditRestoreState.message,
+    auditRestoreState.phase,
     batchSubmit.message,
     batchSubmit.phase,
     bridgeStatus.message,
@@ -3119,6 +3220,28 @@ export function App() {
       setForm((current) => ({ ...current, executionAllowWithoutProof: false }));
     }
   }, [allowWithoutProofEnabled, form.executionAllowWithoutProof]);
+
+  useEffect(() => {
+    if (!templateEditorModel || templateEditorModel.fields.length === 0) {
+      setSelectedTemplateFieldIndex(0);
+      return;
+    }
+    setSelectedTemplateFieldIndex((current) =>
+      Math.min(current, templateEditorModel.fields.length - 1),
+    );
+  }, [templateEditorModel]);
+
+  useEffect(() => {
+    if (!selectedAuditBackupBundle) {
+      if (selectedAuditBackupPath !== null) {
+        setSelectedAuditBackupPath(null);
+      }
+      return;
+    }
+    if (selectedAuditBackupPath !== selectedAuditBackupBundle.filePath) {
+      setSelectedAuditBackupPath(selectedAuditBackupBundle.filePath);
+    }
+  }, [selectedAuditBackupBundle, selectedAuditBackupPath]);
 
   useEffect(() => {
     setQueuedRows((current) => {
@@ -3762,6 +3885,66 @@ export function App() {
         phase: "error",
         message: `Audit backup bundle list failed: ${formatErrorMessage(error)}`,
         bundles: [],
+      });
+    }
+  });
+
+  const runAuditRestore = useEffectEvent(async () => {
+    if (!selectedAuditBackupBundle) {
+      setAuditRestoreState({
+        phase: "error",
+        message: "Select an audit backup bundle before running restore.",
+        filePath: null,
+        result: null,
+      });
+      return;
+    }
+    if (!isTauriConnected()) {
+      setAuditRestoreState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
+      });
+      return;
+    }
+    if (!auditRestoreConfirmed) {
+      setAuditRestoreState({
+        phase: "error",
+        message: "Confirm merge restore before restoring the selected backup bundle.",
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
+      });
+      return;
+    }
+
+    setAuditRestoreState({
+      phase: "submitting",
+      message: `Restoring ${selectedAuditBackupBundle.fileName} into the active desktop audit ledger...`,
+      filePath: selectedAuditBackupBundle.filePath,
+      result: null,
+    });
+
+    try {
+      const result = await restoreAuditBackupBundle({
+        filePath: selectedAuditBackupBundle.filePath,
+      });
+      setAuditRestoreState({
+        phase: "success",
+        message: result.message,
+        filePath: selectedAuditBackupBundle.filePath,
+        result,
+      });
+      setAuditRestoreConfirmed(false);
+      void refreshAuditSearch(auditQuery);
+      void refreshAuditBackupBundles();
+    } catch (error) {
+      setAuditRestoreState({
+        phase: "error",
+        message: `Audit restore failed: ${formatErrorMessage(error)}`,
+        filePath: selectedAuditBackupBundle.filePath,
+        result: null,
       });
     }
   });
@@ -4414,6 +4597,11 @@ export function App() {
     setDraftSnapshot(draft);
   }
 
+  function selectAuditBackupBundle(filePath: string) {
+    setSelectedAuditBackupPath(filePath);
+    setAuditRestoreConfirmed(false);
+  }
+
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     stageManualDraft();
@@ -4423,22 +4611,35 @@ export function App() {
     <main className="page app-shell">
       <header className="app-topbar">
         <div className="app-brand">
-          <span className="app-kicker">JAN Label Desktop</span>
-          <strong>Operations Console</strong>
-          <p>{activeWorkspaceMeta.summary}</p>
+          <span className="app-kicker">JAN Label / v0.2.0</span>
+          <strong>Operator Workstation</strong>
+          <p>Desktop-first proof, queue, template, and audit control surface.</p>
         </div>
         <div className="app-current-view">
           <h1>{activeWorkspaceMeta.title}</h1>
-          <p>
-            Session {session.jobId} / template {templateOptionLabel} / execution{" "}
-            {executionModeLabel}
-          </p>
+          <p>{activeWorkspaceFocus}</p>
+          <div className="workspace-meta-grid shell-metrics">
+            {workstationStatusCards.map((item) => (
+              <div key={item.id}>
+                <span>{item.label}</span>
+                <strong>{item.value}</strong>
+                <small>{item.detail}</small>
+              </div>
+            ))}
+          </div>
         </div>
         <div className="app-commandbar">
+          <div className="commandbar-context">
+            <span className="app-kicker">Current route</span>
+            <strong>{session.jobId}</strong>
+            <p>
+              {templateOptionLabel} / {executionModeLabel}
+            </p>
+          </div>
           {activeWorkspace === "compose" ? (
             <>
               <button className="button-secondary" type="button" onClick={stageManualDraft}>
-                Stage draft
+                Stage snapshot
               </button>
               <button
                 className="button-primary"
@@ -4473,7 +4674,7 @@ export function App() {
                 onClick={buildQueueSnapshot}
                 disabled={!isQueueReady}
               >
-                Build queue
+                Build session
               </button>
               <button
                 className="button-primary"
@@ -4508,7 +4709,7 @@ export function App() {
                 }}
                 disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
               >
-                Export audit
+                Export ledger
               </button>
             </>
           ) : null}
@@ -4551,22 +4752,35 @@ export function App() {
         <section className="app-workspace">
           <div className="workspace-header-shell">
             <div className="workspace-title-group">
-              <span className="workspace-kicker">Current workspace</span>
+              <span className="workspace-kicker">Current lane</span>
               <h2>{activeWorkspaceMeta.title}</h2>
               <p>{activeWorkspaceMeta.summary}</p>
+              <small className="workspace-focus-note">{activeWorkspaceFocus}</small>
             </div>
             <div className="workspace-meta-grid">
               <div>
                 <span>Bridge</span>
                 <strong>{bridgeStatus.phase === "ready" ? "Ready" : bridgeStatus.phase}</strong>
+                <small>
+                  {bridgeStatusAvailable ? bridgeStatus.status?.printAdapterKind : "n/a"}
+                </small>
+              </div>
+              <div>
+                <span>Session</span>
+                <strong>{session.jobId}</strong>
+                <small>{formatSavedAt(session.requestedAt)}</small>
               </div>
               <div>
                 <span>Queue</span>
-                <strong>{queuedRows.length} staged</strong>
+                <strong>{queuedRows.length} rows</strong>
+                <small>
+                  {queuedReadyRowsCount} ready / {queuedFailedRowsCount} failed
+                </small>
               </div>
               <div>
                 <span>Audit</span>
                 <strong>{pendingProofCount} pending</strong>
+                <small>{approvedProofEntries.length} approved proofs</small>
               </div>
             </div>
           </div>
@@ -4620,7 +4834,7 @@ export function App() {
                   </section>
                 ) : null}
 
-                <section className="workspace">
+                <section className="workspace compose-workbench">
                   <form className="panel form-panel" noValidate onSubmit={handleSubmit}>
                     <div className="section-heading">
                       <h2>Draft composer</h2>
@@ -4956,7 +5170,24 @@ export function App() {
 
                     {previewJson ? (
                       <>
-                        <pre className="json-block">{previewJson}</pre>
+                        <div className="payload-compare">
+                          <div>
+                            <div className="data-grid-header">
+                              <strong>Live payload</strong>
+                              <span>{draft ? "authoritative" : "missing"}</span>
+                            </div>
+                            <pre className="json-block">{liveDraftJson ?? previewJson}</pre>
+                          </div>
+                          <div>
+                            <div className="data-grid-header">
+                              <strong>Staged snapshot</strong>
+                              <span>{draftSnapshot ? "review-only" : "not pinned"}</span>
+                            </div>
+                            <pre className="json-block">
+                              {snapshotJson ?? "No staged snapshot yet."}
+                            </pre>
+                          </div>
+                        </div>
                         {draftIsStale ? (
                           <p className="notice-text">
                             Live input has moved past the staged snapshot. The preview shows the
@@ -4988,7 +5219,7 @@ export function App() {
             ) : null}
 
             {activeWorkspace === "templates" ? (
-              <section className="panel">
+              <section className="panel template-lane">
                 <div className="section-heading">
                   <h2>Template editor</h2>
                   <p>
@@ -5184,7 +5415,9 @@ export function App() {
                             <div className="template-field-list">
                               {templateEditorModel.fields.map((field, index) => (
                                 <article
-                                  className="template-field-card"
+                                  className={`template-field-card ${
+                                    selectedTemplateFieldIndex === index ? "active" : ""
+                                  }`}
                                   key={`${field.name}-${index}`}
                                 >
                                   <div className="template-field-header">
@@ -5196,6 +5429,13 @@ export function App() {
                                       </small>
                                     </div>
                                     <div className="template-field-actions">
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => setSelectedTemplateFieldIndex(index)}
+                                      >
+                                        Focus
+                                      </button>
                                       <button
                                         className="button-secondary"
                                         type="button"
@@ -5654,7 +5894,7 @@ export function App() {
             ) : null}
 
             {activeWorkspace === "queue" ? (
-              <div className="workspace-stack">
+              <div className="workspace-stack queue-workbench">
                 <section className="panel">
                   <div className="section-heading">
                     <h2>Data source (Excel / CSV)</h2>
@@ -5911,13 +6151,25 @@ export function App() {
                             pagedQueuedRows.map((entry, index) => (
                               <tr
                                 key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}
-                                className={
+                                className={[
                                   entry.submissionStatus === "submitting"
                                     ? "table-row-submitting"
-                                    : entry.submissionStatus === "failed"
-                                      ? "table-row-failed"
-                                      : undefined
-                                }
+                                    : "",
+                                  entry.submissionStatus === "failed" ? "table-row-failed" : "",
+                                  queueFocusRow?.draft?.jobId === entry.draft?.jobId
+                                    ? "table-row-focus"
+                                    : "",
+                                ]
+                                  .filter(Boolean)
+                                  .join(" ")}
+                                tabIndex={0}
+                                onClick={() => setSelectedQueueRowJobId(entry.draft?.jobId ?? null)}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter" || event.key === " ") {
+                                    event.preventDefault();
+                                    setSelectedQueueRowJobId(entry.draft?.jobId ?? null);
+                                  }
+                                }}
                               >
                                 <td>{entry.rowIndex + 1}</td>
                                 <td className="mono-data">
@@ -6037,7 +6289,7 @@ export function App() {
             ) : null}
 
             {activeWorkspace === "audit" ? (
-              <section className="panel">
+              <section className="panel audit-lane">
                 <div className="section-heading">
                   <h2>Proof inbox / audit search</h2>
                   <p>
@@ -6168,7 +6420,7 @@ export function App() {
                   <strong>Audit backup bundles</strong>
                   <p>
                     List backup JSON bundles written by retention runs from the desktop audit backup
-                    directory.
+                    directory, then restore a selected bundle back into the active ledger.
                   </p>
                   <div className="toolbar">
                     <button
@@ -6212,6 +6464,7 @@ export function App() {
                         <table>
                           <thead>
                             <tr>
+                              <th>Select</th>
                               <th>File</th>
                               <th>Created</th>
                               <th>Size</th>
@@ -6220,7 +6473,24 @@ export function App() {
                           </thead>
                           <tbody>
                             {auditBackupBundles.bundles.map((bundle) => (
-                              <tr key={bundle.filePath}>
+                              <tr
+                                key={bundle.filePath}
+                                className={
+                                  selectedAuditBackupBundle?.filePath === bundle.filePath
+                                    ? "table-row-focus"
+                                    : undefined
+                                }
+                              >
+                                <td>
+                                  <input
+                                    type="radio"
+                                    name="audit-backup-bundle"
+                                    checked={
+                                      selectedAuditBackupBundle?.filePath === bundle.filePath
+                                    }
+                                    onChange={() => selectAuditBackupBundle(bundle.filePath)}
+                                  />
+                                </td>
                                 <td>{bundle.fileName}</td>
                                 <td>{formatSavedAt(bundle.createdAtUtc)}</td>
                                 <td>{formatAuditBundleSize(bundle.sizeBytes)}</td>
@@ -6234,6 +6504,62 @@ export function App() {
                       <p className="data-summary">No backup bundles found.</p>
                     )
                   ) : null}
+                  <div className="restore-panel">
+                    <div className="section-heading">
+                      <h3>Restore selected bundle</h3>
+                      <p>
+                        Restore merges the selected backup bundle into the current desktop ledger.
+                        Conflicts or invalid bundles fail the whole restore.
+                      </p>
+                    </div>
+                    <p className="data-summary">
+                      {selectedAuditBackupBundle
+                        ? `${selectedAuditBackupBundle.fileName} / ${formatSavedAt(selectedAuditBackupBundle.createdAtUtc)} / ${formatAuditBundleSize(selectedAuditBackupBundle.sizeBytes)}`
+                        : "Select a bundle from the inventory table first."}
+                    </p>
+                    <label className="checkbox-row restore-confirm-row">
+                      <input
+                        type="checkbox"
+                        checked={auditRestoreConfirmed}
+                        onChange={(event) => setAuditRestoreConfirmed(event.target.checked)}
+                        disabled={!selectedAuditBackupBundle}
+                      />
+                      <span>
+                        Confirm merge restore into the active audit ledger. Conflicts abort the
+                        whole operation.
+                      </span>
+                    </label>
+                    <div className="toolbar">
+                      <button
+                        className="button-primary"
+                        type="button"
+                        onClick={() => {
+                          void runAuditRestore();
+                        }}
+                        disabled={!auditRestoreReady}
+                      >
+                        {auditRestoreState.phase === "submitting"
+                          ? "Restoring bundle..."
+                          : "Restore selected bundle"}
+                      </button>
+                    </div>
+                    {auditRestoreState.phase === "submitting" ? (
+                      <p className="notice-text">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.phase === "error" ? (
+                      <p className="status-fail">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.phase === "success" ? (
+                      <p className="status-ok">{auditRestoreState.message}</p>
+                    ) : null}
+                    {auditRestoreState.result ? (
+                      <p className="data-summary">
+                        Restored {auditRestoreState.result.restoredDispatchCount} dispatch /{" "}
+                        {auditRestoreState.result.restoredProofCount} proof rows from{" "}
+                        {auditRestoreState.result.bundle.filePath}.
+                      </p>
+                    ) : null}
+                  </div>
                 </div>
                 <div className="proof-note">
                   <strong>Legacy proof seed</strong>
@@ -6530,7 +6856,22 @@ export function App() {
                       <tbody>
                         {pagedAuditEntries.length > 0 ? (
                           pagedAuditEntries.map((entry) => (
-                            <tr key={entry.dispatch.audit.jobId}>
+                            <tr
+                              key={entry.dispatch.audit.jobId}
+                              className={
+                                auditFocusEntry?.dispatch.audit.jobId === entry.dispatch.audit.jobId
+                                  ? "table-row-focus"
+                                  : undefined
+                              }
+                              tabIndex={0}
+                              onClick={() => setSelectedAuditEntryJobId(entry.dispatch.audit.jobId)}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  setSelectedAuditEntryJobId(entry.dispatch.audit.jobId);
+                                }
+                              }}
+                            >
                               <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
                               <td>
                                 <strong className="mono-data">{entry.dispatch.audit.jobId}</strong>
@@ -6659,7 +7000,7 @@ export function App() {
           <section className="inspector-section">
             <div className="section-heading">
               <h2>Session</h2>
-              <p>Current operator context and active execution route.</p>
+              <p>Current operator context and active route across the workstation.</p>
             </div>
             <div className="inspector-grid">
               <div>
@@ -6679,6 +7020,7 @@ export function App() {
                 <strong>{executionModeLabel}</strong>
               </div>
             </div>
+            <p className="data-summary">{activeWorkspaceFocus}</p>
           </section>
 
           <section className="inspector-section">
@@ -6743,37 +7085,191 @@ export function App() {
             )}
           </section>
 
-          <section className="inspector-section">
-            <div className="section-heading">
-              <h2>Workspace snapshot</h2>
-              <p>Live counters for queue, proofs, templates, and draft state.</p>
-            </div>
-            <div className="inspector-grid">
-              <div>
-                <span>Manual draft</span>
-                <strong>{draft ? "ready" : "incomplete"}</strong>
+          {activeWorkspace === "compose" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Compose Inspector</h2>
+                <p>Live payload, staged snapshot, and proof-gated dispatch authority.</p>
               </div>
-              <div>
-                <span>Queue rows</span>
-                <strong>{queuedRows.length}</strong>
+              <div className="inspector-grid">
+                <div>
+                  <span>Live payload</span>
+                  <strong>{draft ? "Current form" : "Missing"}</strong>
+                </div>
+                <div>
+                  <span>Staged snapshot</span>
+                  <strong>
+                    {draftSnapshot ? (draftIsStale ? "Pinned, stale" : "Pinned") : "None"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Dispatch gate</span>
+                  <strong>{isBridgeSubmitBlocked ? "Blocked" : "Ready"}</strong>
+                </div>
+                <div>
+                  <span>Proof lineage</span>
+                  <strong>{form.executionSourceProofJobId || "Pending proof selection"}</strong>
+                </div>
               </div>
-              <div>
-                <span>Approved proofs</span>
-                <strong>{approvedProofEntries.length}</strong>
+              {templateCatalogIssue ? <p className="status-fail">{templateCatalogIssue}</p> : null}
+              {draftIsStale ? (
+                <p className="notice-text">
+                  Staged snapshot is a fixed comparison copy only. Submit still uses the live
+                  payload.
+                </p>
+              ) : null}
+            </section>
+          ) : null}
+
+          {activeWorkspace === "templates" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Template Inspector</h2>
+                <p>Page geometry, active submode, and the currently selected field binding.</p>
               </div>
-              <div>
-                <span>Catalog</span>
-                <strong>{templateCatalogState.templates.length}</strong>
+              <div className="inspector-grid">
+                <div>
+                  <span>Submode</span>
+                  <strong>{templateWorkspaceMode}</strong>
+                </div>
+                <div>
+                  <span>Catalog</span>
+                  <strong>{templateCatalogHeadline}</strong>
+                </div>
+                <div>
+                  <span>Page</span>
+                  <strong>
+                    {templateEditorModel
+                      ? `${templateEditorModel.page.widthMm} x ${templateEditorModel.page.heightMm} mm`
+                      : "Invalid JSON"}
+                  </strong>
+                </div>
+                <div>
+                  <span>Fields</span>
+                  <strong>{templateEditorModel?.fields.length ?? 0}</strong>
+                </div>
               </div>
-            </div>
-            {templateCatalogIssue ? <p className="status-fail">{templateCatalogIssue}</p> : null}
-            {draftIsStale ? (
-              <p className="notice-text">
-                Draft snapshot is stale against the current form. The live preview already reflects
-                the current payload.
-              </p>
-            ) : null}
-          </section>
+              {selectedTemplateField ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Selected field</strong>
+                  <p>
+                    {selectedTemplateField.name || "unnamed"} /{" "}
+                    {selectedTemplateField.xMm.toFixed(1)}
+                    mm / {selectedTemplateField.yMm.toFixed(1)}mm /{" "}
+                    {selectedTemplateField.fontSizeMm.toFixed(1)}mm
+                  </p>
+                  <small className="mono-data">{selectedTemplateField.template}</small>
+                </div>
+              ) : (
+                <p className="notice-text">Select a field card to inspect its binding.</p>
+              )}
+            </section>
+          ) : null}
+
+          {activeWorkspace === "queue" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Queue Inspector</h2>
+                <p>Focused row, submit session state, and retry semantics.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Submit session</span>
+                  <strong>{queueMutationLocked ? "Locked" : "Idle"}</strong>
+                </div>
+                <div>
+                  <span>Visible rows</span>
+                  <strong>{filteredQueuedRows.length}</strong>
+                </div>
+                <div>
+                  <span>Ready / failed</span>
+                  <strong>
+                    {queuedReadyRowsCount} / {queuedFailedRowsCount}
+                  </strong>
+                </div>
+                <div>
+                  <span>Focus row</span>
+                  <strong>{queueFocusRow?.draft?.jobId ?? "None"}</strong>
+                </div>
+              </div>
+              {queueFocusRow ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Focused queue row</strong>
+                  <p>
+                    Row {queueFocusRow.rowIndex + 1} / {queueFocusRow.draft?.sku ?? "-"} /{" "}
+                    {queueFocusRow.submissionStatus}
+                  </p>
+                  <small className="mono-data">
+                    {queueFocusRow.dispatchError ||
+                      queueFocusRow.retryLineageJobId ||
+                      formatQueuedRowResult(queueFocusRow)}
+                  </small>
+                </div>
+              ) : (
+                <p className="notice-text">Build or filter queue rows to focus a dispatch row.</p>
+              )}
+            </section>
+          ) : null}
+
+          {activeWorkspace === "audit" ? (
+            <section className="inspector-section">
+              <div className="section-heading">
+                <h2>Audit Inspector</h2>
+                <p>Focused ledger row, proof detail, and backup restore target.</p>
+              </div>
+              <div className="inspector-grid">
+                <div>
+                  <span>Focus entry</span>
+                  <strong>{auditFocusEntry?.dispatch.audit.jobId ?? "None"}</strong>
+                </div>
+                <div>
+                  <span>Proof state</span>
+                  <strong>{auditFocusEntry?.proof?.status ?? "n/a"}</strong>
+                </div>
+                <div>
+                  <span>Restore target</span>
+                  <strong>{selectedAuditBackupBundle?.fileName ?? "None"}</strong>
+                </div>
+                <div>
+                  <span>Last restore</span>
+                  <strong>{auditRestoreState.phase === "success" ? "Applied" : "Idle"}</strong>
+                </div>
+              </div>
+              {auditFocusEntry ? (
+                <div className="proof-note inspector-focus-card">
+                  <strong>Focused audit row</strong>
+                  <p>
+                    {auditFocusEntry.dispatch.mode} /{" "}
+                    {auditFocusEntry.dispatch.audit.actor.displayName} /{" "}
+                    {formatSavedAt(auditFocusEntry.dispatch.audit.occurredAt)}
+                  </p>
+                  <small className="mono-data">
+                    lineage {auditFocusEntry.dispatch.audit.jobLineageId}
+                    {auditFocusEntry.proof?.decision
+                      ? ` / reviewed by ${auditFocusEntry.proof.decision.actor.displayName}`
+                      : ""}
+                  </small>
+                </div>
+              ) : (
+                <p className="notice-text">
+                  Refresh audit search to inspect proof or dispatch rows.
+                </p>
+              )}
+              {auditRestoreState.message ? (
+                <p
+                  className={
+                    auditRestoreState.phase === "error"
+                      ? "status-fail"
+                      : auditRestoreState.phase === "success"
+                        ? "status-ok"
+                        : "notice-text"
+                  }
+                >
+                  {auditRestoreState.message}
+                </p>
+              ) : null}
+            </section>
+          ) : null}
 
           <section className="inspector-section">
             <div className="section-heading">

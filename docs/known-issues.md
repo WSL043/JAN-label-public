@@ -60,9 +60,8 @@
 - resolution: `desktop-shell` now validates path, directory scope, non-empty PDF content, and `%PDF-` header before print
 
 ## K-023 audit backup restore is still manual
-- status: open
-- impact: backup bundles are produced and can now be listed, but restore remains manual
-- response: implement `T-028f-restore`
+- status: resolved
+- resolution: backup bundles can now be selected and restored from the `admin-web` audit lane through `restore_audit_backup_bundle`
 
 ## K-024 local template catalog is local-filesystem only
 - status: open
@@ -99,3 +98,8 @@
 ## K-031 staged review and live dispatch semantics are still ambiguous
 - status: resolved
 - resolution: compose preview and template authoring now call out the live payload, staged snapshot, and saved catalog dispatch boundary separately so submit authority is explicit
+
+## K-032 local Windows host may be missing the MSVC linker toolchain
+- status: open
+- impact: `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml` and Tauri desktop builds fail immediately if `link.exe` is unavailable on the host
+- response: install Visual Studio Build Tools with the C++ workload before treating Windows desktop build/test failures as code regressions

@@ -7,6 +7,7 @@ const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
 const EXPORT_AUDIT_LEDGER_COMMAND = "export_audit_ledger";
 const TRIM_AUDIT_LEDGER_COMMAND = "trim_audit_ledger";
 const LIST_AUDIT_BACKUP_BUNDLES_COMMAND = "list_audit_backup_bundles";
+const RESTORE_AUDIT_BACKUP_BUNDLE_COMMAND = "restore_audit_backup_bundle";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
@@ -141,6 +142,17 @@ export type AuditRetentionResult = {
   removedDispatchCount: number;
   removedProofCount: number;
   backup?: AuditArtifactInfo;
+};
+
+export type AuditBackupRestoreRequest = {
+  filePath: string;
+};
+
+export type AuditBackupRestoreResult = {
+  restoredDispatchCount: number;
+  restoredProofCount: number;
+  bundle: AuditArtifactInfo;
+  message: string;
 };
 
 export type ProofReviewRequest = {
@@ -296,6 +308,17 @@ export async function listAuditBackupBundles(): Promise<AuditArtifactInfo[]> {
     );
   }
   return invoke<AuditArtifactInfo[]>(LIST_AUDIT_BACKUP_BUNDLES_COMMAND, {});
+}
+
+export async function restoreAuditBackupBundle(
+  request: AuditBackupRestoreRequest,
+): Promise<AuditBackupRestoreResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to restore audit bundles.",
+    );
+  }
+  return invoke<AuditBackupRestoreResult>(RESTORE_AUDIT_BACKUP_BUNDLE_COMMAND, { request });
 }
 
 export async function approveProof(request: ProofReviewRequest): Promise<ProofRecord> {

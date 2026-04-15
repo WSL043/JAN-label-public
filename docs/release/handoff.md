@@ -14,8 +14,8 @@
 ## 2. Tag policy
 
 - `vMAJOR.MINOR.PATCH`
-- Current release target is `v0.1.3`
-- Use patch releases for stability work in print pipeline and audit path
+- Current release target is `v0.2.0`
+- Use a minor release for the operator workstation redesign, audit restore, and release automation cut
 
 ### Historical tags
 
@@ -30,6 +30,8 @@
 git fetch origin
 git checkout main
 git pull --ff-only
+pnpm release:notes --version vNEXT
+pnpm release:readiness --version vNEXT
 pnpm fixture:validate
 pnpm format:check
 pnpm lint
@@ -50,6 +52,8 @@ git push origin vNEXT
 - `main` must be passing CI and the local branch must not have unresolved blockers.
 - Release workflow must run successfully with `desktop-shell` Windows installer output.
 - `maintenance ledger` issue and CI summary should be attached to release notes.
+- Release notes now draft to `docs/release/vNEXT.md`.
+- Release readiness now drafts `artifacts/release-readiness.json` and `artifacts/release-readiness.md`.
 
 ## 5. Smoke check
 
@@ -69,10 +73,11 @@ git push origin vNEXT
   - deterministic SVG/PDF generation path,
   - strict proof approval + lineage checks,
   - local audit persistence/export/retention,
+  - local audit backup restore,
   - template catalog save/dispatch parity for packaged + local overlay.
 - `T-030` (GitHub Actions `OPENAI_API_KEY`) is explicitly **non-blocking** for this release.
 - `T-031` (physical printer matrix and scan validation) is explicitly **non-blocking** for this release.
-- Audit backup bundle listing is included in this release; restore is still a manual operator step.
+- Audit backup bundle listing and restore are included in this release.
 - Non-PDF items are moved to post-PDF milestones unless they become mandatory for correctness.
 
 ## 8. PDF-only operator runbook

@@ -34,6 +34,13 @@ pub struct LegacyProofSeedRecord {
     pub proof: ProofRecord,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuditBackupRestoreResult {
+    pub restored_dispatch_count: usize,
+    pub restored_proof_count: usize,
+    pub bundle: AuditArtifactInfo,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProofReviewRequest {
@@ -265,6 +272,35 @@ impl AuditStore {
         })
     }
 
+    pub fn restore_backup_bundle(
+        &self,
+        bundle_path: &Path,
+    ) -> Result<AuditBackupRestoreResult, String> {
+        self.with_lock(|| {
+            let bundle = read_backup_bundle(bundle_path)?;
+            let mut dispatches = self.load_dispatch_records()?;
+            let mut proofs = self.load_proof_records()?;
+
+            validate_restore_bundle(&dispatches, &proofs, &bundle)?;
+
+            let restored_dispatch_count = bundle.dispatches.len();
+            let restored_proof_count = bundle.proofs.len();
+            let bundle_artifact = bundle.artifact.clone();
+
+            dispatches.extend(bundle.dispatches);
+            proofs.extend(bundle.proofs);
+
+            self.save_dispatch_records(&dispatches)?;
+            self.save_proof_records(&proofs)?;
+
+            Ok(AuditBackupRestoreResult {
+                restored_dispatch_count,
+                restored_proof_count,
+                bundle: bundle_artifact,
+            })
+        })
+    }
+
     pub fn seed_legacy_proofs(&self, records: Vec<LegacyProofSeedRecord>) -> Result<(), String> {
         self.with_lock(|| {
             let mut dispatches = self.load_dispatch_records()?;
@@ -367,10 +403,10 @@ impl AuditStore {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct AuditLedgerBundle {
-    schema_version: &'static str,
+    schema_version: String,
     created_at_utc: String,
     scope: AuditLedgerScope,
     dispatches: Vec<PersistedDispatchRecord>,
@@ -640,13 +676,120 @@ fn build_backup_bundle(
     };
 
     AuditLedgerBundle {
-        schema_version: AUDIT_BUNDLE_SCHEMA_VERSION,
+        schema_version: AUDIT_BUNDLE_SCHEMA_VERSION.to_string(),
         created_at_utc,
         scope,
         dispatches: removed_dispatches.to_vec(),
         proofs: removed_proofs.to_vec(),
         artifact,
     }
+}
+
+fn read_backup_bundle(path: &Path) -> Result<AuditLedgerBundle, String> {
+    if !path.exists() {
+        return Err(format!(
+            "audit backup bundle '{}' does not exist",
+            path.display()
+        ));
+    }
+    let raw = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "failed to read audit backup bundle '{}': {error}",
+            path.display()
+        )
+    })?;
+    let mut bundle: AuditLedgerBundle = serde_json::from_str(&raw).map_err(|error| {
+        format!(
+            "failed to parse audit backup bundle '{}': {error}",
+            path.display()
+        )
+    })?;
+    if bundle.schema_version != AUDIT_BUNDLE_SCHEMA_VERSION {
+        return Err(format!(
+            "audit backup bundle '{}' uses unsupported schema version '{}'",
+            path.display(),
+            bundle.schema_version
+        ));
+    }
+
+    let metadata = fs::metadata(path).map_err(|error| {
+        format!(
+            "failed to inspect audit backup bundle '{}': {error}",
+            path.display()
+        )
+    })?;
+    let file_name = path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .ok_or_else(|| format!("audit backup bundle '{}' has invalid file name", path.display()))?;
+    if bundle.artifact.file_name.trim().is_empty() {
+        bundle.artifact.file_name = file_name.to_string();
+    }
+    bundle.artifact.file_path = path.to_string_lossy().into_owned();
+    bundle.artifact.size_bytes = metadata.len();
+    if bundle.artifact.created_at_utc.trim().is_empty() {
+        bundle.artifact.created_at_utc = bundle.created_at_utc.clone();
+    }
+
+    Ok(bundle)
+}
+
+fn validate_restore_bundle(
+    dispatches: &[PersistedDispatchRecord],
+    proofs: &[ProofRecord],
+    bundle: &AuditLedgerBundle,
+) -> Result<(), String> {
+    if bundle.dispatches.is_empty() && bundle.proofs.is_empty() {
+        return Err("audit backup bundle does not contain any ledger rows".to_string());
+    }
+
+    let mut seen_bundle_dispatch_ids = HashSet::new();
+    for record in &bundle.dispatches {
+        if !seen_bundle_dispatch_ids.insert(record.audit.job_id.0.clone()) {
+            return Err(format!(
+                "audit backup bundle contains duplicate dispatch job '{}'",
+                record.audit.job_id.0
+            ));
+        }
+    }
+
+    let mut seen_bundle_proof_ids = HashSet::new();
+    for record in &bundle.proofs {
+        if !seen_bundle_proof_ids.insert(record.proof_job_id.0.clone()) {
+            return Err(format!(
+                "audit backup bundle contains duplicate proof job '{}'",
+                record.proof_job_id.0
+            ));
+        }
+    }
+
+    let existing_dispatch_ids = dispatches
+        .iter()
+        .map(|record| record.audit.job_id.0.as_str())
+        .collect::<HashSet<_>>();
+    for record in &bundle.dispatches {
+        if existing_dispatch_ids.contains(record.audit.job_id.0.as_str()) {
+            return Err(format!(
+                "restore would collide with existing dispatch job '{}'",
+                record.audit.job_id.0
+            ));
+        }
+    }
+
+    let existing_proof_ids = proofs
+        .iter()
+        .map(|record| record.proof_job_id.0.as_str())
+        .collect::<HashSet<_>>();
+    for record in &bundle.proofs {
+        if existing_proof_ids.contains(record.proof_job_id.0.as_str()) {
+            return Err(format!(
+                "restore would collide with existing proof job '{}'",
+                record.proof_job_id.0
+            ));
+        }
+    }
+
+    Ok(())
 }
 
 fn scope_file_token(scope: AuditLedgerScope) -> &'static str {
@@ -1518,6 +1661,202 @@ mod tests {
 
         let snapshot = store.snapshot().expect("snapshot should load");
         assert_eq!(snapshot.dispatches.len(), 1);
+    }
+
+    #[test]
+    fn restore_backup_bundle_restores_trimmed_entries_and_updates_snapshot() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof_a = sample_proof("JOB-PROOF-RESTORE-A");
+        let mut proof_b = sample_proof("JOB-PROOF-RESTORE-B");
+        proof_b.requested_at = "2026-04-16T09:00:00Z".to_string();
+
+        store
+            .register_pending_proof(proof_a.clone())
+            .expect("proof a should persist");
+        store
+            .register_pending_proof(proof_b.clone())
+            .expect("proof b should persist");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof_a,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("proof a dispatch should persist");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof_b,
+                "2026-04-16T09:00:00Z",
+            ))
+            .expect("proof b dispatch should persist");
+
+        let trim = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::All),
+                max_age_days: None,
+                max_entries: Some(1),
+                dry_run: false,
+            })
+            .expect("trim should succeed");
+        let backup = trim.backup.expect("backup bundle should be created");
+
+        let restore = store
+            .restore_backup_bundle(Path::new(&backup.file_path))
+            .expect("restore should succeed");
+
+        assert_eq!(restore.restored_dispatch_count, 1);
+        assert_eq!(restore.restored_proof_count, 1);
+        assert_eq!(restore.bundle.file_name, backup.file_name);
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 2);
+        assert_eq!(snapshot.proofs.len(), 2);
+        assert!(snapshot
+            .dispatches
+            .iter()
+            .any(|record| record.audit.job_id.0 == "JOB-PROOF-RESTORE-A"));
+        assert!(snapshot
+            .proofs
+            .iter()
+            .any(|record| record.proof_job_id.0 == "JOB-PROOF-RESTORE-A"));
+    }
+
+    #[test]
+    fn restore_backup_bundle_rejects_conflicts_without_partial_write() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof_a = sample_proof("JOB-PROOF-RESTORE-CONFLICT-A");
+        let mut proof_b = sample_proof("JOB-PROOF-RESTORE-CONFLICT-B");
+        proof_b.requested_at = "2026-04-16T09:00:00Z".to_string();
+
+        store
+            .register_pending_proof(proof_a.clone())
+            .expect("proof a should persist");
+        store
+            .register_pending_proof(proof_b.clone())
+            .expect("proof b should persist");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof_a,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("proof a dispatch should persist");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof_b,
+                "2026-04-16T09:00:00Z",
+            ))
+            .expect("proof b dispatch should persist");
+
+        let trim = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::All),
+                max_age_days: None,
+                max_entries: Some(1),
+                dry_run: false,
+            })
+            .expect("trim should succeed");
+        let backup = trim.backup.expect("backup bundle should be created");
+
+        store
+            .register_pending_proof(proof_a.clone())
+            .expect("proof a can be reintroduced for collision coverage");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof_a,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("proof a dispatch can be reintroduced");
+        let snapshot_before = store.snapshot().expect("snapshot should load");
+
+        let error = store
+            .restore_backup_bundle(Path::new(&backup.file_path))
+            .expect_err("restore should reject collisions");
+        assert!(error.contains("collide"));
+
+        let snapshot_after = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot_before.dispatches.len(), snapshot_after.dispatches.len());
+        assert_eq!(snapshot_before.proofs.len(), snapshot_after.proofs.len());
+        assert_eq!(
+            snapshot_before
+                .dispatches
+                .iter()
+                .map(|record| record.audit.job_id.0.as_str())
+                .collect::<Vec<_>>(),
+            snapshot_after
+                .dispatches
+                .iter()
+                .map(|record| record.audit.job_id.0.as_str())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            snapshot_before
+                .proofs
+                .iter()
+                .map(|record| record.proof_job_id.0.as_str())
+                .collect::<Vec<_>>(),
+            snapshot_after
+                .proofs
+                .iter()
+                .map(|record| record.proof_job_id.0.as_str())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn restore_backup_bundle_rejects_invalid_bundle_without_partial_write() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-RESTORE-BASE",
+                "JOB-PRINT-RESTORE-BASE",
+                None,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("dispatch should persist");
+
+        let bundle_path = store.backup_dir().join("invalid-bundle.json");
+        fs::create_dir_all(store.backup_dir()).expect("backup dir should be creatable");
+        fs::write(
+            &bundle_path,
+            r#"{
+  "schemaVersion": "audit-ledger-bundle-v0",
+  "createdAtUtc": "2026-04-16T10:00:00Z",
+  "scope": "all",
+  "dispatches": [],
+  "proofs": [],
+  "artifact": {
+    "fileName": "invalid-bundle.json",
+    "filePath": "backups/invalid-bundle.json",
+    "createdAtUtc": "2026-04-16T10:00:00Z",
+    "sizeBytes": 0
+  }
+}"#,
+        )
+        .expect("invalid bundle fixture should write");
+        let snapshot_before = store.snapshot().expect("snapshot should load");
+
+        let error = store
+            .restore_backup_bundle(&bundle_path)
+            .expect_err("invalid bundle should fail");
+        assert!(error.contains("unsupported schema version"));
+
+        let snapshot_after = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot_before.dispatches.len(), snapshot_after.dispatches.len());
+        assert_eq!(snapshot_before.proofs.len(), snapshot_after.proofs.len());
+        assert_eq!(
+            snapshot_before
+                .dispatches
+                .iter()
+                .map(|record| record.audit.job_id.0.as_str())
+                .collect::<Vec<_>>(),
+            snapshot_after
+                .dispatches
+                .iter()
+                .map(|record| record.audit.job_id.0.as_str())
+                .collect::<Vec<_>>()
+        );
     }
 
     fn sample_proof(job_id: &str) -> ProofRecord {

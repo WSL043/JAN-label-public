@@ -14,7 +14,10 @@ use audit_log::{
     AuditRetentionRequest, AuditRetentionResult, AuditSearchResult, DispatchMatchSubject,
     PersistedDispatchRecord, ProofRecord, PrintJobId, PrintJobLineageId,
 };
-use audit_store::{AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
+use audit_store::{
+    AuditBackupRestoreResult as StoreAuditBackupRestoreResult, AuditStore, LegacyProofSeedRecord,
+    ProofReviewRequest,
+};
 use barcode::ZintCli;
 use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
@@ -127,6 +130,22 @@ fn list_audit_backup_bundles() -> Result<Vec<AuditBackupEntry>, String> {
     let bundles = collect_audit_backup_bundles(&backup_dir)
         .map_err(|error| format!("failed to list audit backups from '{}': {error}", backup_dir.display()))?;
     Ok(bundles)
+}
+
+#[command]
+fn restore_audit_backup_bundle(
+    request: AuditBackupRestoreRequest,
+) -> Result<AuditBackupRestoreResult, String> {
+    let file_path = request.file_path.trim();
+    if file_path.is_empty() {
+        return Err("filePath must not be empty".to_string());
+    }
+
+    let config = PrintBridgeConfig::load();
+    let result = config
+        .audit_store()
+        .restore_backup_bundle(Path::new(file_path))?;
+    Ok(AuditBackupRestoreResult::from_store(result))
 }
 
 #[command]
@@ -529,8 +548,45 @@ struct AuditBackupEntry {
 
 #[derive(Debug, Clone, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct AuditBackupRestoreRequest {
+    file_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditBackupRestoreResult {
+    restored_dispatch_count: usize,
+    restored_proof_count: usize,
+    bundle: AuditArtifactInfo,
+    message: String,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct AuditBundleEnvelope {
     artifact: AuditArtifactInfo,
+}
+
+impl AuditBackupRestoreResult {
+    fn from_store(result: StoreAuditBackupRestoreResult) -> Self {
+        let restored_dispatch_count = result.restored_dispatch_count;
+        let restored_proof_count = result.restored_proof_count;
+        let bundle = result.bundle;
+        let message = format!(
+            "Restored {} dispatch entr{} and {} proof entr{} from {}.",
+            restored_dispatch_count,
+            if restored_dispatch_count == 1 { "y" } else { "ies" },
+            restored_proof_count,
+            if restored_proof_count == 1 { "y" } else { "ies" },
+            bundle.file_name
+        );
+        Self {
+            restored_dispatch_count,
+            restored_proof_count,
+            bundle,
+            message,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1713,6 +1769,7 @@ fn main() {
             export_audit_ledger,
             trim_audit_ledger,
             list_audit_backup_bundles,
+            restore_audit_backup_bundle,
             approve_proof,
             reject_proof,
             template_catalog_command,
@@ -1732,7 +1789,7 @@ mod tests {
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
         save_template_to_local_catalog, TemplateCatalogWritebackRequest,
-        list_audit_backup_bundles,
+        list_audit_backup_bundles, restore_audit_backup_bundle,
         BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
         TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
