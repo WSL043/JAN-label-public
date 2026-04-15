@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "PrintDispatchResult",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["mode", "templateVersion", "artifact", "submission", "audit"],
+  "properties": {
+    "mode": {
+      "type": "string",
+      "enum": ["proof", "print"]
+    },
+    "templateVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mediaType", "byteSize"],
+      "properties": {
+        "mediaType": {
+          "type": "string",
+          "minLength": 1
+        },
+        "byteSize": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "submission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["adapterKind", "externalJobId"],
+      "properties": {
+        "adapterKind": {
+          "type": "string",
+          "enum": ["pdf", "windows-spooler", "zpl", "tspl", "qz"]
+        },
+        "externalJobId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "audit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["event", "occurredAt", "jobId", "jobLineageId"],
+      "properties": {
+        "event": {
+          "type": "string",
+          "enum": ["submitted", "reprinted", "created", "completed", "failed"]
+        },
+        "occurredAt": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "jobId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "jobLineageId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "parentJobId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    }
+  }
+}

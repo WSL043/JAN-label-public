@@ -7,9 +7,13 @@ version.workspace = true
 [dependencies]
 audit-log = { path = "../audit-log" }
 barcode = { path = "../barcode" }
+domain = { path = "../domain" }
 printer-adapters = { path = "../printer-adapters" }
 render = { path = "../render" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
 
 [lib]
 path = "src/lib.rs"
-

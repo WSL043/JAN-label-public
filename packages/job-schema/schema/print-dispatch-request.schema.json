@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "DispatchRequest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "jobId",
+    "sku",
+    "jan",
+    "qty",
+    "brand",
+    "actorUserId",
+    "actorDisplayName",
+    "requestedAt"
+  ],
+  "properties": {
+    "jobId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sku": {
+      "type": "string",
+      "minLength": 1
+    },
+    "jan": {
+      "type": "string",
+      "pattern": "^[0-9]{12,13}$"
+    },
+    "qty": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "brand": {
+      "type": "string",
+      "minLength": 1
+    },
+    "templateVersion": {
+      "type": "string",
+      "minLength": 1
+    },
+    "template": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "version"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "version": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "printerProfile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "adapter", "paperSize", "dpi", "scalePolicy"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "adapter": {
+          "type": "string",
+          "enum": ["pdf", "windows-spooler", "zpl", "tspl", "qz"]
+        },
+        "paperSize": {
+          "type": "string",
+          "minLength": 1
+        },
+        "dpi": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "scalePolicy": {
+          "type": "string",
+          "enum": ["fixed-100"]
+        }
+      }
+    },
+    "execution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode"],
+      "oneOf": [
+        {
+          "properties": {
+            "mode": {
+              "const": "proof"
+            },
+            "requestedBy": {
+              "type": "string",
+              "minLength": 1
+            },
+            "notes": {
+              "type": "string",
+              "minLength": 1
+            },
+            "expiresAt": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          "required": ["mode"]
+        },
+        {
+          "allOf": [
+            {
+              "properties": {
+                "mode": {
+                  "const": "print"
+                },
+                "approvedBy": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "approvedAt": {
+                  "type": "string",
+                  "format": "date-time"
+                },
+                "sourceProofJobId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "allowWithoutProof": {
+                  "type": "boolean"
+                }
+              },
+              "required": ["mode"]
+            },
+            {
+              "if": {
+                "not": {
+                  "properties": {
+                    "allowWithoutProof": {
+                      "const": true
+                    }
+                  },
+                  "required": ["allowWithoutProof"]
+                }
+              },
+              "then": {
+                "required": ["sourceProofJobId"]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "actorUserId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "actorDisplayName": {
+      "type": "string",
+      "minLength": 1
+    },
+    "requestedAt": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "jobLineageId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reprintOfJobId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "reason": {
+      "type": "string",
+      "minLength": 1
+    }
+  },
+  "oneOf": [
+    {
+      "required": ["templateVersion"],
+      "not": {
+        "required": ["template"]
+      }
+    },
+    {
+      "required": ["template"],
+      "not": {
+        "required": ["templateVersion"]
+      }
+    }
+  ]
+}

@@ -24,6 +24,7 @@ body {
 
 input,
 select,
+textarea,
 button {
   font: inherit;
 }
@@ -135,6 +136,11 @@ button {
   gap: 16px;
 }
 
+.operator-form {
+  display: grid;
+  gap: 6px;
+}
+
 .field {
   display: grid;
   gap: 8px;
@@ -160,6 +166,17 @@ button {
   color: var(--ink);
 }
 
+.batch-text {
+  width: 100%;
+  min-height: 120px;
+  border: 1px solid rgba(20, 18, 15, 0.14);
+  background: var(--surface-strong);
+  color: var(--ink);
+  padding: 12px 14px;
+  font-size: 13px;
+  resize: vertical;
+}
+
 .field input:focus,
 .field select:focus {
   outline: 2px solid var(--accent-soft);
@@ -178,6 +195,32 @@ button {
 
 .error-text {
   color: var(--danger);
+}
+
+.validation-block {
+  margin-top: 12px;
+  display: grid;
+  gap: 8px;
+}
+
+.proof-note {
+  margin: 16px 0 0;
+  padding: 12px 14px;
+  border: 1px solid rgba(20, 18, 15, 0.12);
+  background: rgba(255, 252, 247, 0.72);
+  display: grid;
+  gap: 6px;
+}
+
+.proof-note strong {
+  color: #6d533e;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  font-size: 12px;
+}
+
+.proof-note p {
+  margin: 0;
 }
 
 .toolbar {
@@ -250,6 +293,16 @@ button {
   color: var(--danger);
 }
 
+.status-pill.proof {
+  background: rgba(40, 67, 181, 0.12);
+  color: #2449b5;
+}
+
+.status-pill.print {
+  background: rgba(31, 106, 67, 0.12);
+  color: var(--ok);
+}
+
 .json-block {
   margin: 18px 0 0;
   padding: 18px;
@@ -286,6 +339,114 @@ button {
   grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
   gap: 16px;
   margin-top: 24px;
+}
+
+.mapping-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.data-summary {
+  margin: 12px 0 14px;
+  color: #6a594a;
+}
+
+.data-grid {
+  margin-top: 12px;
+}
+
+.data-grid table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.data-grid th,
+.data-grid td {
+  text-align: left;
+  padding: 8px;
+  border: 1px solid rgba(20, 18, 15, 0.12);
+  vertical-align: top;
+}
+
+.data-grid-header {
+  display: flex;
+  justify-content: space-between;
+  margin: 0 0 8px;
+}
+
+.data-grid-header strong {
+  margin: 0;
+}
+
+.status-ok {
+  color: var(--ok);
+}
+
+.status-pending {
+  color: #96601f;
+}
+
+.status-submitting {
+  color: #2449b5;
+}
+
+.status-fail {
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.fake-button {
+  position: relative;
+  overflow: hidden;
+  cursor: pointer;
+}
+
+.fake-button input[type="file"] {
+  position: absolute;
+  inset: 0;
+  opacity: 0;
+  cursor: pointer;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.job-table {
+  display: grid;
+  gap: 12px;
+}
+
+.job-row {
+  display: grid;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid rgba(20, 18, 15, 0.14);
+  background: rgba(255, 252, 247, 0.9);
+}
+
+.job-row h3 {
+  margin: 0 0 4px;
+}
+
+.job-row p {
+  margin: 0;
+  line-height: 1.5;
+}
+
+.job-row .muted {
+  color: #6a594a;
+}
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
 }
 
 .card {

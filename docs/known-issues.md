@@ -1,59 +1,74 @@
 # known-issues
 
-継続開発で再発しやすい問題や、現時点で残している制約を記録します。
-
-## K-001 branch protection が未適用
+## K-001 branch protection 未設定
 
 - 状態: open
-- 影響: `main` への直接 push を GitHub 側で強制できない
-- 回避: 運用で PR ベースを維持し、CI green を確認してから反映する
-- 恒久対応: GitHub Pro / Team 以上で ruleset を適用
+- 影響: `main` への直接 push が可能で、レビューと CI の通過ルートを飛び越せる。
+- 対策: GitHub 側で branch protection / ruleset を有効化し、少なくとも PR + 1 Approvals + 必須チェックを必須化する。
 
-## K-002 third-party Actions が Node 20 target 警告を出す
-
-- 状態: open
-- 影響: 今は通るが将来の runner 変更で壊れる可能性がある
-- 回避: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を workflow に設定
-- 恒久対応: `pnpm/action-setup`, `dorny/paths-filter`, `actions/upload-artifact` の後継バージョンを追う
-
-## K-003 Zint adapter は実装済みだが実バイナリ導入が未完了
+## K-002 Node 実行環境依存
 
 - 状態: open
-- 影響: `barcode` crate は fake executable テストで安定化したが、実 Zint を使う E2E / CI はまだ未接続
-- 回避: 外部注入の `zint` バイナリパスでローカル確認し、CI は fake executable テストを維持する
-- 恒久対応: Windows / CI で Zint を導入し render / proof 経路まで結線する
+- 影響: 旧来アクション (`pnpm/action-setup`, `dorny/paths-filter`, `actions/upload-artifact`) の Node 20 対応が一貫しない。
+- 対策: `FORCE_JAVASCRIPT_ACTIONS_TO_NODE24=true` を有効にするなど、workflow 側での明示的なランタイム固定を検討する。
 
-## K-004 物理プリンタの実測データがまだない
-
-- 状態: open
-- 影響: `v0.1.1` は PDF proof baseline で release 済みだが、物理プリンタでの 100% scale / scan 検証は未完了
-- 回避: `docs/printer-matrix/2026-04-15-pdf-proof-baseline.md` を baseline として維持する
-- 恒久対応: `docs/printer-matrix/` に物理プリンタ実測を追加する
-
-## K-005 ローカル Windows に `link.exe` がないと `cargo test --workspace` が失敗する
+## K-003 Zint 実体連携
 
 - 状態: open
-- 影響: ローカルでは full test を完走できなくても、CI 上は green という差が出る
-- 回避: `cargo check --workspace --tests` を補助で回しつつ、GitHub Actions の `rust-test` / `golden-tests` を正として確認する
-- 恒久対応: Windows Build Tools を導入し、`link.exe` が解決できる開発環境手順を整える
+- 影響: テスト・E2E で実バイナリ `zint` 代わりにモック実装に依存しているため、実環境との差分を取りこぼす。
+- 対策: `barcode` 側の zint バイナリ導入手順を整備し、CI/ローカルの双方で実体実行を確認する。
 
-## K-006 Codex CI Autofix は same-repo PR 前提
-
-- 状態: open
-- 影響: fork PR や GitHub Actions の PR 作成権限が不足する repo では draft autofix PR まで完了しない
-- 回避: same-repo PR では autofix を使い、fork PR では triage comment を正とする
-- 恒久対応: 必要なら self-hosted runner / webhook と明示的な bot 権限で fork 対応経路を別に作る
-
-## K-007 Windows 配布シェルは CI / release で build できるがローカル bundle は未検証
+## K-004 PDF proof ベースラインの網羅不足
 
 - 状態: open
-- 影響: GitHub-hosted `windows-latest` では `v0.1.1` release まで通っても、一部ローカル Windows では `link.exe` 不在により bundle を再現できない
-- 回避: PR では `desktop-shell-windows` job を正とし、tag release は GitHub-hosted Windows runner に任せる
-- 恒久対応: Build Tools 入りの Windows で `pnpm --filter @label/desktop-shell build` を通し、ローカルでも installer を再現できるようにする
+- 影響: `v0.1.1` の baseline では 100% 比較と scan 目視までは進んだが、機種・環境ごとの差分再現が不足している。
+- 対策: `docs/printer-matrix/` に機種追加時の定例実機サンプルと再測定結果を積み上げる。
 
-## K-008 GitHub Actions の `OPENAI_API_KEY` secret が未設定
+## K-005 local Windows で `cargo test --workspace` が不安定
 
 - 状態: open
-- 影響: `Codex PR Review`, `Codex Maintenance`, `Codex CI Autofix` などの cloud-side Codex 実行は preflight で skip される
-- 回避: ローカル Codex で実装を進め、GitHub 側は ledger / triage の fallback 出力を使う
-- 恒久対応: repository secret に `OPENAI_API_KEY` を設定する
+- 影響: `os error 5` / `link.exe` 系の権限制約で full test が断続的に失敗することがある。
+- 対策: 問題再現時は `cargo test -p render` / `cargo test -p print-agent` など分割実行へ切替え、CI 成果を基準に判断する。Windows Build Tools あり環境での再現手順を `windows-bootstrap` 側で再確認する。
+
+## K-006 Codex CI Autofix の PR 境界
+
+- 状態: open
+- 影響: fork PR 以外で draft autofix を作成すると、レビュー負荷が増える。
+- 対策: same-repo PR では基本 autofix を行わず、triggered コメント/triage 指摘ルートへ集約する。
+
+## K-007 Windows 配布シェルは CI が先行
+
+- 状態: open
+- 影響: `windows-latest` では問題なく通るが、ローカル Windows では Build Tools 不備や `link.exe` 不在で bundle が再現しない。
+- 対策: `desktop-shell-windows` と Release workflow を真の green 条件とし、ローカルは手順化された CI 比較テストでのみ検証する。
+
+## K-008 GitHub Actions の `OPENAI_API_KEY`
+
+- 状態: open
+- 影響: cloud-side Codex の一部 preflight が skip され、レビュー・保守の自動化が遅延する。
+- 対策: リポジトリ secret に `OPENAI_API_KEY` を追加し、関連 workflow が参照可能であることを事前確認する。
+
+## K-009 browser 単体は submit 非対応
+
+- 状態: open
+- 影響: `apps/admin-web` はブラウザで起動した場合、`preview-only` でしか使えず、`dispatchPrintJob` / `fetchPrintBridgeStatus` は `Tauri` 未接続エラーで失敗する。
+- 対策: 運用時は desktop-shell 経由に統一し、Web プレビューはあくまで確認用として扱う。  
+  最低限、起動ログ/画面上に「desktop mode only」の案内を残し、submit ボタンは bridge 未接続時に明示的に無効化する。
+
+## K-010 bridge の env fallback 依存
+
+- 状態: open
+- 影響: `desktop-shell` の `print_bridge_status` は既定値へフォールバックするため、設定漏れが実運用時の adapter / 出力先 / printer 名のずれを生む。高リスク warning は UI で block されるが、設定自体の修正は運用側で必要。
+- 対策: 運用前は `print_bridge_status` を最初に確認し、`warnings` が空かを必須チェックにする。特に `JAN_LABEL_PRINT_ADAPTER` / `JAN_LABEL_ZINT_BINARY_PATH` / `JAN_LABEL_PRINT_OUTPUT_DIR` / `JAN_LABEL_SPOOL_OUTPUT_DIR` / `JAN_LABEL_WINDOWS_PRINTER_NAME` は明示設定する。
+
+## K-011 admin-web の spreadsheet 依存は lazy-load 前提
+
+- 状態: watch
+- 影響: `xlsx` は lazy-load 化済みだが、Excel import を含む chunk 自体は依然として大きい。
+- 対策: spreadsheet 導線を維持したまま、将来リリースでは worker 化や更なる chunk 分割を検討する。現状は main chunk warning は解消済み。
+
+## K-012 proof 承認の実体は filesystem ベース
+
+- 状態: open
+- 影響: `sourceProofJobId` は desktop-shell で proof PDF の実在確認まで行うが、承認メモ、却下状態、失効、再作成履歴はまだ永続化されていない。
+- 対策: `T-027` / `T-028` で proof 承認メタデータと監査永続化を導入し、`sourceProofJobId` を audit-log と結びつける。

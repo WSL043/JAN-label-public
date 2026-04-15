@@ -1,17 +1,31 @@
 # print-pipeline
 
-## 1. 基本フロー
+## 1. 現在の実装済みフロー
 
-1. UI で parent SKU / SKU / JAN / 数量 / brand / template / printer profile を選ぶ
-2. `job-schema` に沿ってドラフトを作る
-   `admin-web` は canonical な 13 桁 JAN だけを preview に載せ、12 桁補完は Rust 側へ委譲する
-3. `print-agent` が JAN と importer 正規化ルールを検証する
-4. `barcode` が Zint へ描画依頼する
-5. `render` が printer profile に応じて SVG/PDF を生成する
-6. `printer-adapters` が proof file や Windows spool staging file へ送信する
-7. `audit-log` が lineage / parent job / reason を含む実行結果を記録する
+1. `admin-web` で parent SKU / SKU / JAN / 数量 / brand / template / printer profile を選ぶ
+2. UI は template schema / template asset を扱い、review queue を組み立てて `Ready` と `Pending` を分ける
+   `admin-web` は 12 桁と 13 桁の JAN を受け取り、最終正規化と検証は Rust 側へ委譲する
+3. CSV / XLSX は厳格 alias match で列マッピングされ、業務ヘッダ揺れ、`enabled=true/false`、行ごとの `template` / `printer_profile` 上書きを扱う
+4. snapshot を作り、proof route / live route を明示した payload preview を確認する
+5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認を行う
+6. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
 
-## 2. MVP の出力優先順位
+現時点で submit は `desktop-shell` 経由なら接続済みです。  
+一方で browser 単体は preview-only のままで、proof 承認、audit-log 永続化、bridge warning 可視化は未完成です。
+
+## 2. 接続後の目標フロー
+
+1. `admin-web` で review 済み job を submit する
+2. `desktop-shell` が bridge status を返し、Tauri invoke で `print-agent` へ request を渡す
+3. `desktop-shell` が requested `printerProfile` と proof artifact 実在を確認し、必要時のみ `allowWithoutProof` policy を許可する
+4. `print-agent` が JAN と importer 正規化ルール、proof gate を検証する
+5. `barcode` が Zint へ描画依頼する
+6. `render` が template version と printer route に応じて SVG/PDF を生成する
+7. `printer-adapters` が proof file や Windows spool staging file へ送信する
+8. `audit-log` が lineage / parent job / reason を含む実行結果を永続化する
+9. `admin-web` が submit / completed / failed / reprinted を検索・再印刷できるようにする
+
+## 3. MVP の出力優先順位
 
 - 第 1 段階
   SVG
@@ -22,30 +36,54 @@
 - 第 4 段階
   ZPL / TSPL / QZ
 
-## 3. 擬似コード
+現状で接続済みなのは `PDF proof` と `Windows spool staging` の骨格です。  
+`ZPL / TSPL / QZ` は printer profile 列挙上の将来候補であり、`print-agent` ではまだ reject します。
+
+## 4. 擬似コード
 
 ```text
-draft = ui.create_job()
-normalized = domain.normalize_jan(draft.jan)
-validated = importer.validate_columns(input_headers)
+queue_item = ui.review_and_mark_ready()
+template_asset = ui.load_template_asset_or_schema()
+draft = ui.snapshot_ready_jobs(template_asset)
 validated_row = importer.validate_row(row_number, row_values)
+dispatch_request = ui.to_dispatch_request(draft)
+bridge_status = tauri.print_bridge_status()
+normalized = domain.normalize_jan(dispatch_request.jan)
 barcode_artifact = zint.render(normalized)
 label_artifact = render.by_profile(template_version, printer_profile)
 receipt = adapter.submit(label_artifact)
 audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 ```
 
-## 4. ゴールデンテスト
+現在は `dispatch_request = ui.to_dispatch_request(draft)` と `desktop-shell` 側の submit までは接続済みです。  
+それ以降の proof 承認状態遷移、audit 永続化、browser 単体の bridge 代替は未接続です。
+
+## 5. proof / 承認フローの現状
+
+- `admin-web` は review queue と snapshot を持つ
+- PDF proof route は UI 上で明示される
+- `admin-web` と `print-agent` は `sourceProofJobId` / `allowWithoutProof` の gate を共有する
+- `desktop-shell` は print 時に source proof PDF の実在を確認し、`JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF` が無効なら bypass を拒否する
+- まだ未実装のもの:
+  - proof ファイル保存
+  - 承認メモ
+  - 承認なし本印刷のブロック
+  - 却下 / 再作成の状態遷移
+
+そのため現在の運用前提は「proof 先行の UI を用意した段階」であり、  
+正式な承認付き印刷フローは次段で実装する。
+
+## 6. ゴールデンテスト
 
 - `packages/fixtures/golden/*.svg`
   SVG の期待出力
 - `packages/fixtures/golden/*.pdf`
   PDF の期待出力
-- `render` crate のテストで fixture と完全一致比較
-- 現在の PDF は deterministic な最小 writer を使うため完全一致比較する
+- `render` crate のテストで fixture と完全一致比較する
+- 追加で PDF の header / xref / MediaBox / content stream / 文字列エスケープを検証する
 - 将来メタデータや外部ライブラリ由来の差分が入る場合は canonical compare を導入する
 
-## 5. 100% スケール固定の検証手順
+## 7. 100% スケール固定の検証手順
 
 1. PDF 仮想プリンタで A4 に出力する
 2. 印刷ダイアログで拡大縮小を `100%` 固定にする
@@ -54,8 +92,21 @@ audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 5. バーコードリーダーで読取確認する
 6. 測定結果を `docs/printer-matrix/` に残す
 
-## 6. 将来の adapter 拡張原則
+## 8. 監査ログの現状
+
+- `print-agent` は lineage / parent job / reason を含む event record を生成できる
+- ただし保存先、検索 API、再印刷 UI は未接続
+- したがって監査モデルは実装済みだが、監査運用はまだ完成していない
+
+## 9. 将来の adapter 拡張原則
 
 - adapter はレンダリングロジックを持たない
 - adapter は job ではなく render 済み artifact を受け取る
 - adapter 追加時は fixture、golden、printer profile、docs を同時更新する
+
+## 10. ラベル製作機能の最小スライス
+
+- BarTender 的なラベル製作機能はこのリポジトリでも必要とみなす
+- ただし最初の実装は自由配置 DTP ではなく、`packages` 配下の template schema / template asset と `render` の仕様駆動化から始める
+- `admin-web` はレイアウトロジックを所有せず、軽量テンプレート編集 UI、asset export / import、preview / proof 導線を担当する
+- したがって label authoring の主責務は `render` / `domain` / `packages` に置き、UI はその編集・確認レイヤに留める
