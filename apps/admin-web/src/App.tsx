@@ -212,6 +212,11 @@ type ActivityItem = {
   message: string;
   tone: ActivityTone;
 };
+type QueueViewFilter = "all" | QueuedRowStatus;
+type QueueSortMode = "row-asc" | "row-desc" | "job-asc" | "status";
+type AuditModeFilter = "all" | "proof" | "print";
+type AuditProofFilter = "all" | "pending" | "approved" | "rejected" | "missing" | "other";
+type AuditSortMode = "occurred-desc" | "occurred-asc" | "mode" | "proof-status";
 
 type FormState = {
   parentSku: string;
@@ -418,6 +423,7 @@ const LEGACY_REQUESTED_BY_DISPLAY_NAME_ALIASES = [
 ];
 const LEGACY_REQUESTED_AT_ALIASES = ["requestedat", "requested_at", "requested-at"];
 const LEGACY_JOB_LINEAGE_ID_ALIASES = ["joblineageid", "job_lineage_id", "job-lineage-id"];
+const AUDIT_SEARCH_RESULT_LIMIT = 120;
 const LEGACY_NOTES_ALIASES = ["notes", "note", "memo"];
 
 const requiredFieldList: Array<{ key: FieldKey; label: string }> = [
@@ -1164,6 +1170,21 @@ function queuedRowStatusClass(status: QueuedRowStatus): string {
   }
 }
 
+function queuedRowStatusRank(status: QueuedRowStatus): number {
+  switch (status) {
+    case "submitting":
+      return 0;
+    case "failed":
+      return 1;
+    case "ready":
+      return 2;
+    case "submitted":
+      return 3;
+    default:
+      return 99;
+  }
+}
+
 function formatQueuedRowResult(row: QueuedRow): string {
   if (row.dispatchResult) {
     return `Dispatch accepted (${row.dispatchResult.mode} / ${row.dispatchResult.submission.externalJobId})`;
@@ -1178,6 +1199,102 @@ function formatQueuedRowResult(row: QueuedRow): string {
     return "Submitting...";
   }
   return "Not submitted";
+}
+
+function matchesQueueSearch(row: QueuedRow, searchText: string): boolean {
+  const normalized = searchText.trim().toLowerCase();
+  if (!normalized) {
+    return true;
+  }
+  const values = [
+    row.draft?.jobId,
+    row.draft?.sku,
+    row.draft?.brand,
+    row.draft?.jan.normalized,
+    row.draft ? templateVersionOf(row.draft.template) : null,
+    row.dispatchError,
+    row.dispatchResult?.audit.jobId,
+    row.dispatchResult?.submission.externalJobId,
+  ];
+  return values.some((value) => value?.toLowerCase().includes(normalized));
+}
+
+function compareQueuedRows(left: QueuedRow, right: QueuedRow, sortMode: QueueSortMode): number {
+  switch (sortMode) {
+    case "row-desc":
+      return right.rowIndex - left.rowIndex;
+    case "job-asc":
+      return (left.draft?.jobId ?? "").localeCompare(right.draft?.jobId ?? "");
+    case "status":
+      return (
+        queuedRowStatusRank(left.submissionStatus) - queuedRowStatusRank(right.submissionStatus) ||
+        left.rowIndex - right.rowIndex
+      );
+    default:
+      return left.rowIndex - right.rowIndex;
+  }
+}
+
+function auditProofFilterValue(entry: AuditSearchEntry): AuditProofFilter {
+  if (!entry.proof) {
+    return "missing";
+  }
+  if (entry.proof.status === "pending") {
+    return "pending";
+  }
+  if (entry.proof.status === "approved") {
+    return "approved";
+  }
+  if (entry.proof.status === "rejected") {
+    return "rejected";
+  }
+  return "other";
+}
+
+function auditProofStatusRank(entry: AuditSearchEntry): number {
+  switch (auditProofFilterValue(entry)) {
+    case "pending":
+      return 0;
+    case "approved":
+      return 1;
+    case "rejected":
+      return 2;
+    case "other":
+      return 3;
+    default:
+      return 4;
+  }
+}
+
+function compareAuditEntries(
+  left: AuditSearchEntry,
+  right: AuditSearchEntry,
+  sortMode: AuditSortMode,
+): number {
+  switch (sortMode) {
+    case "occurred-asc":
+      return left.dispatch.audit.occurredAt.localeCompare(right.dispatch.audit.occurredAt);
+    case "mode":
+      return (
+        left.dispatch.mode.localeCompare(right.dispatch.mode) ||
+        right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt)
+      );
+    case "proof-status":
+      return (
+        auditProofStatusRank(left) - auditProofStatusRank(right) ||
+        right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt)
+      );
+    default:
+      return right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt);
+  }
+}
+
+function pageCount(total: number, pageSize: number): number {
+  return Math.max(1, Math.ceil(total / pageSize));
+}
+
+function clampPage(page: number, total: number, pageSize: number): number {
+  return Math.min(Math.max(page, 1), pageCount(total, pageSize));
 }
 
 function pickTemplateRef(
@@ -2227,6 +2344,11 @@ export function App() {
     message: "",
     results: [],
   });
+  const [queueViewFilter, setQueueViewFilter] = useState<QueueViewFilter>("all");
+  const [queueSearchText, setQueueSearchText] = useState("");
+  const [queueSortMode, setQueueSortMode] = useState<QueueSortMode>("row-asc");
+  const [queuePageSize, setQueuePageSize] = useState(10);
+  const [queuePage, setQueuePage] = useState(1);
   const [bridgeStatus, setBridgeStatus] = useState<BridgeStatusState>({
     phase: "loading",
     status: null,
@@ -2243,6 +2365,11 @@ export function App() {
     message: "",
   });
   const [auditQuery, setAuditQuery] = useState("");
+  const [auditModeFilter, setAuditModeFilter] = useState<AuditModeFilter>("all");
+  const [auditProofFilter, setAuditProofFilter] = useState<AuditProofFilter>("all");
+  const [auditSortMode, setAuditSortMode] = useState<AuditSortMode>("occurred-desc");
+  const [auditPageSize, setAuditPageSize] = useState(10);
+  const [auditPage, setAuditPage] = useState(1);
   const [auditSearch, setAuditSearch] = useState<AuditSearchState>({
     phase: "idle",
     entries: [],
@@ -2458,11 +2585,34 @@ export function App() {
   const queuedFailedRowsCount = queuedRows.filter(
     (entry) => entry.submissionStatus === "failed",
   ).length;
+  const isBatchSubmitting = batchSubmit.phase === "submitting";
+  const queueMutationLocked = isBatchSubmitting;
+  const queueMutationLockMessage = queueMutationLocked
+    ? "Queue mutation is locked while batch submit is active."
+    : null;
   const canSubmitQueuedRows =
     !templateCatalogIssue &&
     queuedRows.some(
       (entry) => entry.submissionStatus === "ready" || entry.submissionStatus === "failed",
     );
+  const filteredQueuedRows = useMemo(() => {
+    return [...queuedRows]
+      .filter((entry) => queueViewFilter === "all" || entry.submissionStatus === queueViewFilter)
+      .filter((entry) => matchesQueueSearch(entry, queueSearchText))
+      .sort((left, right) => compareQueuedRows(left, right, queueSortMode));
+  }, [queueSearchText, queueSortMode, queueViewFilter, queuedRows]);
+  const queueVisiblePage = clampPage(queuePage, filteredQueuedRows.length, queuePageSize);
+  const pagedQueuedRows = filteredQueuedRows.slice(
+    (queueVisiblePage - 1) * queuePageSize,
+    queueVisiblePage * queuePageSize,
+  );
+  const queuePageTotal = pageCount(filteredQueuedRows.length, queuePageSize);
+  const queueRangeStart =
+    filteredQueuedRows.length === 0 ? 0 : (queueVisiblePage - 1) * queuePageSize + 1;
+  const queueRangeEnd =
+    filteredQueuedRows.length === 0
+      ? 0
+      : Math.min(queueVisiblePage * queuePageSize, filteredQueuedRows.length);
   const isQueueReady = sourceRows.length > 0 && readyRowsCount > 0;
   const sourceSummary = sourceData
     ? `${sourceData.rows.length} rows / ${sourceData.headers.length} columns (${sourceData.source})`
@@ -2550,6 +2700,27 @@ export function App() {
   const pendingProofCount = auditSearch.entries.filter(
     (entry) => entry.proof?.status === "pending",
   ).length;
+  const filteredAuditEntries = useMemo(() => {
+    return [...auditSearch.entries]
+      .filter((entry) => auditModeFilter === "all" || entry.dispatch.mode === auditModeFilter)
+      .filter(
+        (entry) => auditProofFilter === "all" || auditProofFilterValue(entry) === auditProofFilter,
+      )
+      .sort((left, right) => compareAuditEntries(left, right, auditSortMode));
+  }, [auditModeFilter, auditProofFilter, auditSearch.entries, auditSortMode]);
+  const auditSearchMayBeTruncated = auditSearch.entries.length >= AUDIT_SEARCH_RESULT_LIMIT;
+  const auditVisiblePage = clampPage(auditPage, filteredAuditEntries.length, auditPageSize);
+  const pagedAuditEntries = filteredAuditEntries.slice(
+    (auditVisiblePage - 1) * auditPageSize,
+    auditVisiblePage * auditPageSize,
+  );
+  const auditPageTotal = pageCount(filteredAuditEntries.length, auditPageSize);
+  const auditRangeStart =
+    filteredAuditEntries.length === 0 ? 0 : (auditVisiblePage - 1) * auditPageSize + 1;
+  const auditRangeEnd =
+    filteredAuditEntries.length === 0
+      ? 0
+      : Math.min(auditVisiblePage * auditPageSize, filteredAuditEntries.length);
   const workspaceItems: Array<{
     id: WorkspaceMode;
     label: string;
@@ -3114,6 +3285,10 @@ export function App() {
     if (!file) {
       return;
     }
+    if (queueMutationLocked) {
+      event.currentTarget.value = "";
+      return;
+    }
     setSourceError(null);
     setSourceData(null);
     setQueuedRows([]);
@@ -3154,6 +3329,9 @@ export function App() {
   }
 
   function buildQueueSnapshot() {
+    if (queueMutationLocked) {
+      return;
+    }
     setBatchSubmit({ phase: "idle", message: "", results: [] });
     setQueuedRows(
       preparedRows
@@ -3170,6 +3348,9 @@ export function App() {
   }
 
   function clearQueueSnapshot() {
+    if (queueMutationLocked) {
+      return;
+    }
     setQueuedRows([]);
     setBatchSubmit({ phase: "idle", message: "", results: [] });
   }
@@ -3234,7 +3415,7 @@ export function App() {
     try {
       const result = await searchAuditLog({
         searchText: searchText?.trim() || auditQuery.trim() || undefined,
-        limit: 40,
+        limit: AUDIT_SEARCH_RESULT_LIMIT,
       });
       setAuditSearch({
         phase: "ready",
@@ -3722,6 +3903,9 @@ export function App() {
   }
 
   async function submitQueuedRows() {
+    if (queueMutationLocked) {
+      return;
+    }
     const rows = queuedRows
       .map((entry, queueIndex) => ({ entry, queueIndex }))
       .filter(
@@ -3855,6 +4039,9 @@ export function App() {
   }
 
   function resetDataSource() {
+    if (queueMutationLocked) {
+      return;
+    }
     setSourceData(null);
     setSourceError(null);
     setFieldMapping({
@@ -5152,6 +5339,7 @@ export function App() {
                       <input
                         type="file"
                         accept=".csv,.xlsx,.xls,text/csv"
+                        disabled={queueMutationLocked}
                         onChange={handleDataUpload}
                       />
                     </label>
@@ -5161,6 +5349,7 @@ export function App() {
                           className="button-secondary"
                           type="button"
                           onClick={autoDetectMapping}
+                          disabled={queueMutationLocked}
                         >
                           Auto detect mapping
                         </button>
@@ -5168,6 +5357,7 @@ export function App() {
                           className="button-secondary"
                           type="button"
                           onClick={resetDataSource}
+                          disabled={queueMutationLocked}
                         >
                           Clear source
                         </button>
@@ -5177,13 +5367,16 @@ export function App() {
                       className="button-primary"
                       type="button"
                       onClick={buildQueueSnapshot}
-                      disabled={!isQueueReady}
+                      disabled={!isQueueReady || queueMutationLocked}
                     >
                       Snapshot valid rows
                     </button>
                   </div>
 
                   <p className="data-summary">{sourceError ? sourceError : sourceSummary}</p>
+                  {queueMutationLockMessage ? (
+                    <p className="section-lock-note">{queueMutationLockMessage}</p>
+                  ) : null}
 
                   {sourceData ? (
                     <>
@@ -5193,6 +5386,7 @@ export function App() {
                             <span>Map {entry.label}</span>
                             <select
                               value={fieldMapping[entry.key]}
+                              disabled={queueMutationLocked}
                               onChange={(event) =>
                                 updateFieldMapping(entry.key, event.target.value)
                               }
@@ -5289,48 +5483,197 @@ export function App() {
                       {queuedSubmittingRowsCount}, submitted: {queuedSubmittedRowsCount}, failed:{" "}
                       {queuedFailedRowsCount}.
                     </p>
+                    <div className="grid-toolbar">
+                      <div className="grid-toolbar-group">
+                        <label className="field">
+                          <span>Queue filter</span>
+                          <select
+                            value={queueViewFilter}
+                            onChange={(event) => {
+                              setQueueViewFilter(event.target.value as QueueViewFilter);
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="all">All statuses</option>
+                            <option value="ready">Ready</option>
+                            <option value="submitting">Submitting</option>
+                            <option value="submitted">Submitted</option>
+                            <option value="failed">Failed</option>
+                          </select>
+                        </label>
+                        <label className="field field-wide">
+                          <span>Find queued row</span>
+                          <input
+                            value={queueSearchText}
+                            onChange={(event) => {
+                              setQueueSearchText(event.target.value);
+                              setQueuePage(1);
+                            }}
+                            placeholder="job id, sku, jan, template, result"
+                          />
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Sort</span>
+                          <select
+                            value={queueSortMode}
+                            onChange={(event) => {
+                              setQueueSortMode(event.target.value as QueueSortMode);
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="row-asc">Row ascending</option>
+                            <option value="row-desc">Row descending</option>
+                            <option value="job-asc">Job id</option>
+                            <option value="status">Status</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Page size</span>
+                          <select
+                            value={String(queuePageSize)}
+                            onChange={(event) => {
+                              setQueuePageSize(Number(event.target.value));
+                              setQueuePage(1);
+                            }}
+                          >
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-meta">
+                        <div className="grid-chip-list">
+                          <span
+                            className={`grid-chip ${queueViewFilter === "all" ? "active" : ""}`}
+                          >
+                            {filteredQueuedRows.length} visible
+                          </span>
+                          <span className="grid-chip">{queuedRows.length} total</span>
+                          <span className={`grid-chip ${queueMutationLocked ? "active" : ""}`}>
+                            {queueMutationLocked ? "Submit lock active" : "Queue idle"}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
                     <div className="data-grid">
                       <div className="data-grid-header">
                         <strong>Queue progress</strong>
+                        <span>
+                          page {queueVisiblePage} / {queuePageTotal}
+                        </span>
                       </div>
                       <table>
                         <thead>
                           <tr>
                             <th>Row</th>
                             <th>Job ID</th>
+                            <th>SKU / JAN</th>
+                            <th>Template</th>
                             <th>Status</th>
                             <th>Result</th>
                           </tr>
                         </thead>
                         <tbody>
-                          {queuedRows.map((entry, index) => (
-                            <tr key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}>
-                              <td>{index + 1}</td>
-                              <td>{entry.draft ? entry.draft.jobId : "-"}</td>
-                              <td className={queuedRowStatusClass(entry.submissionStatus)}>
-                                {entry.submissionStatus}
+                          {pagedQueuedRows.length > 0 ? (
+                            pagedQueuedRows.map((entry, index) => (
+                              <tr
+                                key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}
+                                className={
+                                  entry.submissionStatus === "submitting"
+                                    ? "table-row-submitting"
+                                    : entry.submissionStatus === "failed"
+                                      ? "table-row-failed"
+                                      : undefined
+                                }
+                              >
+                                <td>{entry.rowIndex + 1}</td>
+                                <td className="mono-data">
+                                  {entry.draft ? entry.draft.jobId : "-"}
+                                </td>
+                                <td>
+                                  {entry.draft ? (
+                                    <>
+                                      <strong>{entry.draft.sku}</strong>
+                                      <br />
+                                      <small className="mono-data">
+                                        {entry.draft.jan.normalized}
+                                      </small>
+                                    </>
+                                  ) : (
+                                    "-"
+                                  )}
+                                </td>
+                                <td className="mono-data">
+                                  {entry.draft ? templateVersionOf(entry.draft.template) : "-"}
+                                </td>
+                                <td className={queuedRowStatusClass(entry.submissionStatus)}>
+                                  {entry.submissionStatus}
+                                </td>
+                                <td>{formatQueuedRowResult(entry)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={6} className="data-summary">
+                                No queued rows match the current filter.
                               </td>
-                              <td>{formatQueuedRowResult(entry)}</td>
                             </tr>
-                          ))}
+                          )}
                         </tbody>
                       </table>
+                    </div>
+                    <div className="grid-pager">
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => setQueuePage((current) => Math.max(current - 1, 1))}
+                        disabled={queueVisiblePage <= 1}
+                      >
+                        Previous page
+                      </button>
+                      <span className="grid-pager-status">
+                        showing {queueRangeStart}-{queueRangeEnd} of {filteredQueuedRows.length}
+                      </span>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() =>
+                          setQueuePage((current) =>
+                            Math.min(
+                              current + 1,
+                              pageCount(filteredQueuedRows.length, queuePageSize),
+                            ),
+                          )
+                        }
+                        disabled={queueVisiblePage >= queuePageTotal}
+                      >
+                        Next page
+                      </button>
                     </div>
                     <button
                       className="button-primary"
                       type="button"
                       onClick={submitQueuedRows}
                       disabled={
-                        !canSubmitQueuedRows ||
-                        batchSubmit.phase === "submitting" ||
-                        isBridgeSubmitBlocked
+                        !canSubmitQueuedRows || queueMutationLocked || isBridgeSubmitBlocked
                       }
                     >
                       Submit queued rows
                     </button>
-                    <button className="button-secondary" type="button" onClick={clearQueueSnapshot}>
+                    <button
+                      className={`button-danger${queueMutationLocked ? " is-locked" : ""}`}
+                      type="button"
+                      onClick={clearQueueSnapshot}
+                      disabled={queueMutationLocked}
+                    >
                       Clear batch snapshot
                     </button>
+                    {queueMutationLockMessage ? (
+                      <p className="section-lock-note">{queueMutationLockMessage}</p>
+                    ) : null}
                     {batchSubmit.phase === "submitting" ? (
                       <p className="notice-text">{batchSubmit.message}</p>
                     ) : null}
@@ -5750,8 +6093,99 @@ export function App() {
                   <div className="data-grid">
                     <div className="data-grid-header">
                       <strong>Recent dispatches</strong>
-                      <span>{auditSearch.entries.length} entries</span>
+                      <span>
+                        {filteredAuditEntries.length} visible / {auditSearch.entries.length} entries
+                      </span>
                     </div>
+                    <div className="grid-toolbar">
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Mode</span>
+                          <select
+                            value={auditModeFilter}
+                            onChange={(event) => {
+                              setAuditModeFilter(event.target.value as AuditModeFilter);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="all">All modes</option>
+                            <option value="proof">Proof</option>
+                            <option value="print">Print</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Proof state</span>
+                          <select
+                            value={auditProofFilter}
+                            onChange={(event) => {
+                              setAuditProofFilter(event.target.value as AuditProofFilter);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="all">All proof states</option>
+                            <option value="pending">Pending</option>
+                            <option value="approved">Approved</option>
+                            <option value="rejected">Rejected</option>
+                            <option value="other">Other proof state</option>
+                            <option value="missing">No proof record</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-group grid-inline-controls">
+                        <label className="field">
+                          <span>Sort</span>
+                          <select
+                            value={auditSortMode}
+                            onChange={(event) => {
+                              setAuditSortMode(event.target.value as AuditSortMode);
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="occurred-desc">Newest first</option>
+                            <option value="occurred-asc">Oldest first</option>
+                            <option value="mode">Mode</option>
+                            <option value="proof-status">Proof status</option>
+                          </select>
+                        </label>
+                        <label className="field">
+                          <span>Page size</span>
+                          <select
+                            value={String(auditPageSize)}
+                            onChange={(event) => {
+                              setAuditPageSize(Number(event.target.value));
+                              setAuditPage(1);
+                            }}
+                          >
+                            <option value="10">10</option>
+                            <option value="25">25</option>
+                            <option value="50">50</option>
+                          </select>
+                        </label>
+                      </div>
+                      <div className="grid-toolbar-meta">
+                        <div className="grid-chip-list">
+                          <span
+                            className={`grid-chip ${auditModeFilter === "all" ? "active" : ""}`}
+                          >
+                            {auditModeFilter}
+                          </span>
+                          <span
+                            className={`grid-chip ${auditProofFilter === "all" ? "active" : ""}`}
+                          >
+                            {auditProofFilter}
+                          </span>
+                          <span className="grid-chip">
+                            page {auditVisiblePage} / {auditPageTotal}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    {auditSearchMayBeTruncated ? (
+                      <p className="section-lock-note">
+                        Audit search currently loads the newest {AUDIT_SEARCH_RESULT_LIMIT} entries.
+                        Refine server search terms to reach older records outside this window.
+                      </p>
+                    ) : null}
                     <table>
                       <thead>
                         <tr>
@@ -5764,78 +6198,118 @@ export function App() {
                         </tr>
                       </thead>
                       <tbody>
-                        {auditSearch.entries.map((entry) => (
-                          <tr key={entry.dispatch.audit.jobId}>
-                            <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
-                            <td>
-                              <strong>{entry.dispatch.audit.jobId}</strong>
-                              <br />
-                              <small>{entry.dispatch.templateVersion}</small>
-                            </td>
-                            <td>
-                              <span
-                                className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
-                              >
-                                {entry.dispatch.mode}
-                              </span>
-                            </td>
-                            <td>
-                              {entry.dispatch.audit.actor.displayName}
-                              <br />
-                              <small>{entry.dispatch.audit.actor.userId}</small>
-                            </td>
-                            <td className={proofStatusClass(entry.proof?.status)}>
-                              {entry.proof ? (
-                                <>
-                                  <strong>{entry.proof.status}</strong>
-                                  <br />
-                                  <small>{entry.proof.proofJobId}</small>
-                                </>
-                              ) : (
-                                <span>not a proof record</span>
-                              )}
-                            </td>
-                            <td>
-                              <div className="audit-actions">
-                                {entry.proof?.status === "pending" ? (
+                        {pagedAuditEntries.length > 0 ? (
+                          pagedAuditEntries.map((entry) => (
+                            <tr key={entry.dispatch.audit.jobId}>
+                              <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
+                              <td>
+                                <strong className="mono-data">{entry.dispatch.audit.jobId}</strong>
+                                <br />
+                                <small className="mono-data">
+                                  {entry.dispatch.templateVersion}
+                                </small>
+                              </td>
+                              <td>
+                                <span
+                                  className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
+                                >
+                                  {entry.dispatch.mode}
+                                </span>
+                              </td>
+                              <td>
+                                {entry.dispatch.audit.actor.displayName}
+                                <br />
+                                <small className="mono-data">
+                                  {entry.dispatch.audit.actor.userId}
+                                </small>
+                              </td>
+                              <td className={proofStatusClass(entry.proof?.status)}>
+                                {entry.proof ? (
                                   <>
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      disabled={proofReview.phase === "submitting"}
-                                      onClick={() => {
-                                        void submitProofReview(entry, "approve");
-                                      }}
-                                    >
-                                      Approve
-                                    </button>
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      disabled={proofReview.phase === "submitting"}
-                                      onClick={() => {
-                                        void submitProofReview(entry, "reject");
-                                      }}
-                                    >
-                                      Reject
-                                    </button>
+                                    <strong>{entry.proof.status}</strong>
+                                    <br />
+                                    <small className="mono-data">{entry.proof.proofJobId}</small>
                                   </>
-                                ) : null}
-                                {entry.proof?.status === "approved" ? (
-                                  <button
-                                    className="button-secondary"
-                                    type="button"
-                                    onClick={() => applyApprovedProofToForm(entry)}
-                                  >
-                                    Use for print
-                                  </button>
-                                ) : null}
-                              </div>
+                                ) : (
+                                  <span>not a proof record</span>
+                                )}
+                              </td>
+                              <td>
+                                <div className="audit-actions">
+                                  {entry.proof?.status === "pending" ? (
+                                    <>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        disabled={proofReview.phase === "submitting"}
+                                        onClick={() => {
+                                          void submitProofReview(entry, "approve");
+                                        }}
+                                      >
+                                        Approve
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        disabled={proofReview.phase === "submitting"}
+                                        onClick={() => {
+                                          void submitProofReview(entry, "reject");
+                                        }}
+                                      >
+                                        Reject
+                                      </button>
+                                    </>
+                                  ) : null}
+                                  {entry.proof?.status === "approved" ? (
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => applyApprovedProofToForm(entry)}
+                                    >
+                                      Use for print
+                                    </button>
+                                  ) : null}
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        ) : (
+                          <tr>
+                            <td colSpan={6} className="data-summary">
+                              No audit entries match the current filters.
                             </td>
                           </tr>
-                        ))}
+                        )}
                       </tbody>
                     </table>
+                    <div className="grid-pager">
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => setAuditPage((current) => Math.max(current - 1, 1))}
+                        disabled={auditVisiblePage <= 1}
+                      >
+                        Previous page
+                      </button>
+                      <span className="grid-pager-status">
+                        showing {auditRangeStart}-{auditRangeEnd} of {filteredAuditEntries.length}
+                      </span>
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() =>
+                          setAuditPage((current) =>
+                            Math.min(
+                              current + 1,
+                              pageCount(filteredAuditEntries.length, auditPageSize),
+                            ),
+                          )
+                        }
+                        disabled={auditVisiblePage >= auditPageTotal}
+                      >
+                        Next page
+                      </button>
+                    </div>
                   </div>
                 ) : (
                   <div className="empty-state">

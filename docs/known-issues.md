@@ -85,9 +85,8 @@
 - response: upgrade or replace the action before the next workflow break turns the warning into a release blocker
 
 ## K-028 desktop shell reset is in place, but queue/audit tables are still basic
-- status: open
-- impact: the app now has a desktop application shell, but queue/audit lanes still rely on simple HTML tables without sort/filter/virtualized navigation for larger operator workloads
-- response: harden the queue and audit grids under `T-046`
+- status: resolved
+- resolution: queue and audit lanes now support desktop-oriented sort, filter, and page-size navigation instead of remaining fixed basic tables
 
 ## K-029 template authoring is denser than desired even after the shell reset
 - status: open
@@ -95,9 +94,8 @@
 - response: split the template lane into clearer authoring sub-flows under `T-047`
 
 ## K-030 queue can be cleared while batch submit is still running
-- status: open
-- impact: operator-visible queue state can be emptied while background dispatch is still progressing, which makes later success/failure state difficult to trust
-- response: lock queue mutation during submit and add explicit submit-session guards under `T-046`
+- status: resolved
+- resolution: queue mutation actions are now locked while batch submit is active, including source reset, queue snapshot rebuild, and clear-batch actions
 
 ## K-031 staged review and live dispatch semantics are still ambiguous
 - status: open
