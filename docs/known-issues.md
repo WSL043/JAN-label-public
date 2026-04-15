@@ -64,5 +64,5 @@
 
 ## K-024 local template catalog is local-filesystem only
 - status: open
-- impact: packaged/local overlay works for a single operator machine, but there is no shared catalog, no restore UI, and no multi-writer coordination
+- impact: packaged/local overlay works for a single operator machine, but there is no shared catalog, no restore UI, and no multi-writer coordination. A malformed local manifest can also block catalog/dispatch resolution until the local files are repaired.
 - response: keep it scoped to local desktop operation for this release and harden governance under `T-041`
