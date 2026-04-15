@@ -2,8 +2,9 @@ use audit_log::{AuditActor, PrintAuditRecord, PrintJobId, PrintJobLineageId};
 use barcode::{BarcodeEngine, BarcodeRequest};
 use domain::{Jan, JanError};
 use printer_adapters::{PrintArtifact, PrinterAdapter, PrinterAdapterKind};
-use render::{render_pdf, render_svg, RenderLabelRequest};
+use render::{render_pdf_with_overlay, render_svg_with_overlay, RenderLabelRequest};
 use serde::{Deserialize, Serialize};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -158,6 +159,7 @@ where
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct PrintAgentPolicy {
     pub allow_print_without_proof: bool,
+    pub local_template_manifest_path: Option<PathBuf>,
 }
 
 impl<A, B> PrintAgent<A, B>
@@ -244,7 +246,7 @@ where
             template_version: template_version.clone(),
         };
 
-        let artifact = build_artifact(&execution, &adapter_kind, &render_request)?;
+        let artifact = build_artifact(&execution, &adapter_kind, &render_request, &self.policy)?;
         let artifact_report = PrintDispatchArtifactReport {
             media_type: artifact.media_type.clone(),
             byte_size: artifact.bytes.len(),
@@ -377,22 +379,26 @@ fn build_artifact(
     execution: &ExecutionIntent,
     adapter_kind: &PrinterAdapterKind,
     render_request: &RenderLabelRequest,
+    policy: &PrintAgentPolicy,
 ) -> Result<PrintArtifact, String> {
     let is_proof = matches!(execution, ExecutionIntent::Proof(_));
+    let local_manifest_path = policy.local_template_manifest_path.as_deref();
 
     match (is_proof, adapter_kind) {
         (true, PrinterAdapterKind::Pdf) => Ok(PrintArtifact {
             media_type: "application/pdf".to_string(),
-            bytes: render_pdf(render_request).map_err(|error| error.to_string())?,
+            bytes: render_pdf_with_overlay(render_request, local_manifest_path)
+                .map_err(|error| error.to_string())?,
         }),
         (true, _) => Err("proof execution currently requires PDF adapter".to_string()),
         (false, PrinterAdapterKind::Pdf) => Ok(PrintArtifact {
             media_type: "application/pdf".to_string(),
-            bytes: render_pdf(render_request).map_err(|error| error.to_string())?,
+            bytes: render_pdf_with_overlay(render_request, local_manifest_path)
+                .map_err(|error| error.to_string())?,
         }),
         (false, PrinterAdapterKind::WindowsSpooler) => Ok(PrintArtifact {
             media_type: "image/svg+xml".to_string(),
-            bytes: render_svg(render_request)
+            bytes: render_svg_with_overlay(render_request, local_manifest_path)
                 .map_err(|error| error.to_string())?
                 .into_bytes(),
         }),
@@ -471,7 +477,12 @@ mod tests {
         AdapterError, PrintArtifact, PrinterAdapter, PrinterAdapterKind, SubmissionReceipt,
     };
     use serde_json::{json, Value};
-    use std::sync::{Arc, Mutex};
+    use std::{
+        fs,
+        path::PathBuf,
+        sync::{Arc, Mutex},
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     #[test]
     fn dispatch_records_submitted_event_for_original_job() {
@@ -855,6 +866,7 @@ mod tests {
         let barcode_engine = FakeBarcodeEngine;
         let agent = PrintAgent::new(adapter, barcode_engine).with_policy(PrintAgentPolicy {
             allow_print_without_proof: true,
+            ..PrintAgentPolicy::default()
         });
         let request = DispatchRequest {
             execution: Some(ExecutionIntent::Print(PrintExecution {
@@ -975,6 +987,68 @@ mod tests {
         assert!(
             submission.bytes.starts_with(b"<svg"),
             "windows spooler adapters should keep receiving SVG artifacts"
+        );
+    }
+
+    #[test]
+    fn dispatch_uses_local_template_overlay_for_pdf_artifact() {
+        let overlay_root = setup_local_template_overlay_dir("print-agent-overlay");
+        let local_manifest = overlay_root.join("template-manifest.json");
+        let local_template = overlay_root.join("basic-50x30@v1.json");
+        write_local_template_file(
+            &local_template,
+            r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "basic-50x30@v1",
+              "label_name": "overlay-basic",
+              "page": { "width_mm": 50, "height_mm": 30, "background_fill": "#ffffff" },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "overlay:{sku}"
+                }
+              ]
+            }
+            "##,
+        );
+        fs::write(
+            &local_manifest,
+            r#"{
+  "schema_version": "template-manifest-v1",
+  "default_template_version": "basic-50x30@v1",
+  "templates": [
+    {
+      "version": "basic-50x30@v1",
+      "path": "basic-50x30@v1.json",
+      "label_name": "overlay-basic",
+      "enabled": true
+    }
+  ]
+}"#,
+        )
+        .expect("local overlay manifest should be written");
+
+        let adapter = FakeAdapter::new(PrinterAdapterKind::Pdf);
+        let barcode_engine = FakeBarcodeEngine;
+        let agent =
+            PrintAgent::new(adapter.clone(), barcode_engine).with_policy(PrintAgentPolicy {
+                local_template_manifest_path: Some(local_manifest),
+                ..PrintAgentPolicy::default()
+            });
+
+        agent
+            .dispatch(sample_request())
+            .expect("dispatch should render through local overlay manifest");
+
+        let submission = adapter.last_submission();
+        let pdf = String::from_utf8(submission.bytes).expect("pdf test artifact should be utf-8");
+        assert!(
+            pdf.contains("overlay:SKU-0001"),
+            "local overlay template should change rendered PDF text"
         );
     }
 
@@ -1161,5 +1235,20 @@ mod tests {
                 output_path: request.output_path.clone(),
             })
         }
+    }
+
+    fn setup_local_template_overlay_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{name}-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("local overlay directory should be created");
+        dir
+    }
+
+    fn write_local_template_file(path: &PathBuf, source: &str) {
+        fs::write(path, source).expect("template file should be written");
     }
 }

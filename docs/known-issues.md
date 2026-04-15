@@ -1,89 +1,68 @@
 # known-issues
 
-## K-001 branch protection 未設定
+## K-001 branch protection is not configured
 - status: open
-- 影響: `main` への直 push を review / CI なしで通してしまう
-- 対応: GitHub 側で branch protection / ruleset を設定する
+- impact: direct pushes to `main` are still possible without mandatory review and CI gates
+- response: configure GitHub branch protection / rulesets
 
-## K-004 実機プリンタ測定が未完了
+## K-004 physical printer measurement is still missing
 - status: open
-- 影響: baseline は PDF proof のみで、100% scale / scan / mm 測定がまだない
-- 対応: `docs/printer-matrix/` に実機測定 commit を追加する
+- impact: current baseline is PDF proof only; 100% scale, scan, and mm validation on real printers is not committed yet
+- response: commit physical printer measurements under `docs/printer-matrix/`
 
-## K-005 ローカル Windows で `cargo test --workspace` が稀に揺れる
+## K-005 local Windows can intermittently fail `cargo test --workspace` with `os error 5`
 - status: open
-- 影響: `print-agent` 実行時に `os error 5` が出ることがある
-- 対応: desktop-shell 側テストも含めて再実行し、再現率を監視する
+- impact: local test runs can fail once during binary execution even when code is healthy
+- response: re-run once and confirm `desktop-shell` tests also pass before escalating
 
-## K-008 GitHub Actions の `OPENAI_API_KEY` 未設定
+## K-008 GitHub Actions `OPENAI_API_KEY` is not set
 - status: open
-- 影響: cloud-side Codex automation の fallback が効かない
-- 対応: repository secret を設定する
+- impact: cloud-side Codex fallback automation cannot fully run
+- response: configure the repository secret
 
-## K-009 browser preview mode は submit 不可
+## K-009 browser preview mode is submit-disabled
 - status: open
-- 影響: browser 単体では preview-only。submit / bridge status / audit search は使えない
-- 対応: 実運用では desktop-shell から開く
+- impact: browser-only `admin-web` can preview, but cannot submit, read bridge status, or use audit actions
+- response: run through `desktop-shell` for operational use
 
-## K-010 bridge env fallback は設定漏れを隠しやすい
+## K-010 bridge env fallback still requires operator review
 - status: open
-- 影響: safe default に寄せるため、環境設定不足が見えづらい
-- 対応: `print_bridge_status` の `warningDetails` を監視し、運用 checklist に入れる
+- impact: safe defaults prevent unsafe execution, but operator intent can still drift if warnings are ignored
+- response: use `warningDetails[]` and the runbook checklist before production operation
 
-## K-011 XLSX import chunk は依然として大きい
+## K-011 XLSX import chunk is still large
 - status: watch
-- 影響: lazy-load 化したが import chunk 自体は大きい
-- 対応: worker 化や更なる分離を検討する
+- impact: lazy-load is in place, but the XLSX bundle remains heavy
+- response: consider worker/off-main-thread parsing if field use grows
 
-## K-012 proof / audit は local filesystem ledger 前提
+## K-012 audit ledger is local-filesystem only
 - status: open
-- 影響: multi-host / shared storage / retention 設計が未完
-- 対応: `T-028` と `T-029` で retention / export / backup を進める
+- impact: multi-host and shared-storage operation is not implemented
+- response: keep the current release scope local and document retention/backup handling
 
-## K-013 XLSX 数値セル JAN は Excel 側で text 保存が最善
+## K-013 Excel numeric JAN remains risky if source owners do not export text
 - status: watch
-- 影響: UI で block / warning はするが、入力時点での壊れは完全には防げない
-- 対応: 現場では JAN 列を text で保存する
+- impact: UI blocks/warns on risky numeric cells, but upstream spreadsheets can still cause avoidable cleanup work
+- response: require JAN columns to be stored/exported as text in operational guidance
 
-## K-014 local audit ledger の retention / backup 未整備
+## K-020 template editor write-back gap
 - status: resolved
-- 解消: scoped export、retention dry-run / apply、single JSON backup bundle を追加した
+- resolution: template JSON can now be saved to the desktop local catalog, and saved local templates are used by proof/print dispatch
 
-## K-015 legacy proof seed の gap
+## K-021 unknown template routes can reach queue/submit
 - status: resolved
-- 解消: `validate_legacy_proof_seed` / `seed_legacy_proofs` と admin-web seed UI を追加し、pending seed 後に通常 approve できる
+- resolution: unknown live `template_version` now blocks queue/manual/batch submit in `admin-web`
 
-## K-016 approved proof と print 対象の厳密一致
+## K-022 approved proof artifact checks were weak
 - status: resolved
-- 解消: `templateVersion + sku + brand + jan(normalized) + qty + lineage` の strict match を実装した
+- resolution: `desktop-shell` now validates path, directory scope, non-empty PDF content, and `%PDF-` header before print
 
-## K-017 一時 `target-*` ディレクトリが formatter を壊す
-- status: watch
-- 影響: workspace 直下の一時 target が Biome の対象に入り `pnpm format:check` が落ちる
-- 対応: 一時 target は検証前に削除する
-
-## K-018 approved proof lineage の drift 余地
-- status: resolved
-- 解消: `desktop-shell` が approved proof lineage を backend で補完し、explicit lineage / `reprintOfJobId` の不一致を reject するようにした
-
-## K-019 print 成功でも audit persistence failure を non-fatal にしている
-- status: resolved
-- 解消: dispatch 前の ledger writable preflight と、dispatch 後の audit persistence failure の fatal 化を入れた
-
-## K-020 template editor の write-back 未接続
+## K-023 audit backup list / restore UI is missing
 - status: open
-- 影響: structured editor と Rust preview は live JSON を見られるが、proof / print dispatch はまだ packaged manifest の `template_version` を使う
-- 対応: template catalog write-back と authored template proof route を `T-032a` / `T-033a` で実装する
+- impact: backup bundles are produced, but list/restore is still manual
+- response: implement `T-028f`
 
-## K-021 template catalog mismatch が queue / submit をすり抜ける
-- status: resolved
-- 解消: unknown live `template_version` がある draft は `admin-web` 側で queue / manual / batch submit を止めるようにした
-
-## K-022 approved proof artifact の品質チェックが弱い
-- status: resolved
-- 解消: `desktop-shell` が approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証するようにした
-
-## K-023 audit backup の一覧 / restore UI は未実装
+## K-024 local template catalog is local-filesystem only
 - status: open
-- 影響: backup bundle は生成されるが、復元は手動運用前提
-- 対応: `T-028f` で list / restore 方針と UI を詰める
+- impact: packaged/local overlay works for a single operator machine, but there is no shared catalog, no restore UI, and no multi-writer coordination
+- response: keep it scoped to local desktop operation for this release and harden governance under `T-041`

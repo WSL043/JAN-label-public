@@ -1,113 +1,126 @@
 # print-pipeline
 
-## 1. 現在の主フロー
+## 1. Main Flow
 
-1. `admin-web` で parent SKU / SKU / JAN / qty / brand / template / printer profile を入力する
-2. CSV / XLSX を読み込み、alias mapping で列を合わせる
-3. row を `ready / pending / error` に仕分ける
-4. ready row を snapshot して manual / batch submit に送る
-5. `desktop-shell` の `dispatch_print_job` を呼ぶ
-6. `desktop-shell` で packaged template catalog、proof gate、audit writable を確認する
-7. Rust 側で JAN 正規化、lineage 正規化、printer route、adapter、audit 記録を処理する
+1. `admin-web` assembles parent SKU, SKU, JAN, qty, brand, template route, and printer profile.
+2. CSV/XLSX can be imported and mapped through alias-based column matching.
+3. Rows are classified as `ready`, `pending`, or `error`.
+4. `admin-web` snapshots ready rows for manual or batch submit.
+5. `desktop-shell` receives `dispatch_print_job`.
+6. `desktop-shell` validates:
+   - bridge environment
+   - audit store readiness
+   - proof gate
+   - template route
+   - printer route
+7. Rust performs JAN normalization, lineage validation, render, adapter submission, and audit persistence.
 
-## 2. print gate
+## 2. Print Gate
 
-print 実行時の必須条件:
+Print requires all of the following unless the release-disabled bypass is intentionally reintroduced:
 
-- `sourceProofJobId` がある
-- approved proof ledger に対象 proof がある
-- proof dispatch ledger に対応する proof dispatch がある
-- packaged template catalog に対象 `template_version` がある
-- `templateVersion + sku + brand + jan(normalized) + qty + lineage` が approved proof と一致する
-- approved proof ledger の `artifactPath` が proof output dir 配下の non-empty PDF として実在し、PDF header を読める
-- audit ledger が writable である
+- `sourceProofJobId`
+- an approved proof in the proof ledger
+- a matching proof dispatch record
+- a valid template route
+- exact match on:
+  - `templateVersion`
+  - `sku`
+  - `brand`
+  - normalized `jan`
+  - `qty`
+  - `lineage`
+- a readable non-empty PDF proof artifact with a valid `%PDF-` header
+- a writable audit store
 
-lineage ルール:
+Lineage rules:
 
-- `jobLineageId` 未指定なら `desktop-shell` が approved proof lineage を補完する
-- explicit `jobLineageId` は approved proof lineage と一致しない限り reject する
-- explicit `reprintOfJobId` も approved proof lineage と一致しない限り reject する
+- If `jobLineageId` is omitted, `desktop-shell` derives lineage from the approved proof.
+- If `jobLineageId` is supplied, it must match the approved proof lineage.
+- If `reprintOfJobId` is supplied, it must also match the approved proof lineage chain.
 
-`allowWithoutProof` は bypass 用には使わない。
+## 3. Proof Flow
 
-## 3. proof フロー
+- Proof submit is forced through the PDF route.
+- `desktop-shell` records proof dispatch in `dispatch-ledger.json`.
+- A matching proof record is created in `proof-ledger.json` with `pending` status.
+- `admin-web` proof inbox drives `approve` / `reject`.
+- Approved proofs can be pinned back into print-ready operator flow.
 
-- proof submit は PDF route
-- `desktop-shell` は proof dispatch を `dispatch-ledger.json` に記録する
-- 同時に proof record を `proof-ledger.json` に `pending` で登録する
-- `admin-web` の proof inbox から `approve` / `reject` を行う
-- approved proof は UI から print form に pin できる
+## 4. Audit Export / Retention
 
-## 4. audit export / retention
+- `export_audit_ledger` returns `all`, `dispatch`, or `proof` snapshots.
+- `admin-web` can export those snapshots as JSON.
+- `trim_audit_ledger` supports:
+  - `maxAgeDays`
+  - `maxEntries`
+  - `dryRun`
+- Trim preserves proof/proof-dispatch dependency chains.
+- Applied trim writes a backup bundle under `audit/backups/`.
 
-- `export_audit_ledger` は `all / dispatch / proof` scope の snapshot を返す
-- `admin-web` はこれを JSON download にする
-- `trim_audit_ledger` は `maxAgeDays` / `maxEntries` / `dryRun` を受ける
-- trim は proof record と proof dispatch の依存を壊さないように keep set を補強する
-- actual trim 時は removed records を `audit/backups/` 配下の single JSON bundle として先に保存する
+## 5. Legacy Proof Seed Flow
 
-## 5. legacy proof seed フロー
+1. `admin-web` imports CSV/XLSX for legacy proof seed.
+2. `validate_legacy_proof_seed` performs row-level checks.
+3. `seed_legacy_proofs` writes matching pending proof and dispatch records.
+4. Seeded records still require normal approve/reject review.
 
-1. `admin-web` の legacy proof seed UI で CSV / XLSX を読み込む
-2. `validate_legacy_proof_seed` で row 単位の妥当性を確認する
-3. `seed_legacy_proofs` で pending proof と proof dispatch を同時に seed する
-4. seed 後は通常の proof inbox で approve する
+Safety:
 
-制約:
+- `artifactPath` must resolve to a PDF under the configured proof output expectations.
+- Existing `proofJobId` / `jobLineageId` collisions are rejected.
+- Seed does not create approved proofs directly.
 
-- `artifactPath` は configured proof output dir 配下の PDF のみ許可
-- 既存 `proofJobId` / `jobLineageId` と衝突する seed は拒否
-- seed で approved にはしない
+## 6. Bridge Status
 
-## 6. bridge status
-
-`print_bridge_status` は以下を返す:
+`print_bridge_status` reports:
 
 - available adapters
-- resolved zint path
-- proof / print / spool output dirs
-- audit log / audit backup dirs
+- resolved Zint path
+- proof / print / spool output directories
+- audit log / audit backup directories
 - active print adapter
-- windows printer name
+- Windows printer name
 - `warningDetails[]`
   - `code`
   - `severity`
   - `message`
-- 互換用の `warnings[]`
+- legacy `warnings[]`
 
-`admin-web` は `warningDetails` を正とし、`severity === "error"` の warning があれば submit を block する。
+`admin-web` treats `severity === "error"` warnings as submit blockers.
 
-## 7. template authoring / preview
+## 7. Template Authoring / Preview
 
-現在の authoring 導線:
+Current authoring flow:
 
-1. `admin-web` は desktop-shell から packaged template catalog を読み、選択可能な template を同期する
-2. `admin-web` の structured template editor で page / border / field を編集する
-3. local canvas preview で近似確認する
-4. 必要なら `preview_template_draft` を呼んで Rust renderer の SVG preview を確認する
-5. live JSON の `template_version` が packaged catalog に無い場合は mismatch を表示する
-6. 問題がなければ template asset / JSON を export して引き継ぐ
+1. `admin-web` reads the desktop template catalog from `desktop-shell`.
+2. Operators edit page, border, and fields in the structured template editor.
+3. Local canvas preview shows approximate layout only.
+4. `preview_template_draft` renders live JSON through Rust for authoritative SVG preview.
+5. The operator saves valid live JSON into the desktop local template catalog.
+6. Saved local templates become valid dispatch targets by `template_version`.
+7. Proof and print dispatch resolve the same packaged/local overlay manifest that catalog validation uses.
 
-重要:
+Important distinctions:
 
-- local canvas preview は近似表示
-- Rust preview は live template JSON を描画する
-- desktop template catalog が dispatch で使える `template_version` の正になる
-- unknown live `template_version` がある draft は queue / manual / batch submit を止める
-- ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
-- つまり authoring preview と本番 dispatch の write-back はまだ未接続
+- Local canvas preview is approximate.
+- Rust preview is authoritative for the current live JSON draft.
+- Proof/print dispatch is authoritative for saved catalog entries, not unsaved editor state.
+- Unknown live `template_version` blocks queue/manual/batch submit.
 
-## 8. Excel / CSV 取り込みの方針
+## 8. Excel / CSV Import Direction
 
-- CSV / XLSX は strict DB 連携なしで使えるようにする
-- header は alias mapping で吸収する
-- XLSX 数値セル JAN は release 安全側に倒す
-  - scientific / decimal / ambiguous 12-digit numeric JAN は error
-  - 13-digit numeric JAN は warning
-- JAN の最終正規化と検証は Rust 側で行う
+- CSV/XLSX should remain usable without a strict external database schema.
+- Alias-based header mapping is the primary contract.
+- XLSX numeric JAN handling for this release:
+  - scientific numeric cells: error
+  - decimal numeric cells: error
+  - ambiguous 12-digit numeric JAN: error
+  - 13-digit numeric JAN: warning
+- Final JAN normalization and validation remains in Rust.
 
-## 9. まだ未接続の部分
+## 9. Remaining Gaps
 
-- 実機プリンタの printer matrix
-- authored template の manifest write-back
-- authored template を proof / print dispatch に反映する経路
+- Physical printer matrix and scan validation
+- Audit backup list / restore UX
+- Local template catalog governance for backup/restore and multi-writer guidance

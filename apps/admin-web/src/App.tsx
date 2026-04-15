@@ -23,6 +23,7 @@ import {
   type LegacyProofSeedRequest,
   type LegacyProofSeedResult,
   type PrintBridgeStatus,
+  type SaveTemplateToLocalCatalogResult,
   type TemplateCatalogResult,
   type TemplateDraftPreviewRequest,
   type TemplateDraftPreviewResult,
@@ -34,6 +35,7 @@ import {
   isTauriConnected,
   previewTemplateDraft,
   rejectProof,
+  saveTemplateToLocalCatalog,
   searchAuditLog,
   seedLegacyProofs,
   trimAuditLedger,
@@ -58,13 +60,16 @@ const templateOptions: TemplateOption[] = [
     version: "v1",
     label: "Basic 50 x 30",
     size: "50mm x 30mm",
+    catalogSource: "packaged",
   },
 ];
+const packagedTemplateVersions = new Set(templateOptions.map((entry) => templateVersionOf(entry)));
 
 type TemplateOption = LabelTemplateRef & {
   label: string;
   size: string;
   description?: string | null;
+  catalogSource?: "packaged" | "local" | "unknown";
 };
 
 const printerProfiles: Array<PrinterProfile & { label: string }> = [
@@ -1007,6 +1012,32 @@ function buildTemplateCatalogBlockMessage(issue: string): string {
   return `${TEMPLATE_CATALOG_BLOCK_PREFIX} ${issue}`;
 }
 
+function catalogSourceFromVersion(
+  options: TemplateOption[],
+  templateVersion: string | null,
+): NonNullable<TemplateOption["catalogSource"]> {
+  if (!templateVersion) {
+    return "unknown";
+  }
+  const matched = options.find((option) => templateVersionOf(option) === templateVersion);
+  return matched?.catalogSource ?? "unknown";
+}
+
+function buildTemplateSourceSummary(options: TemplateOption[]): string {
+  const counts = options.reduce(
+    (acc, option) => {
+      const source = option.catalogSource ?? "unknown";
+      acc[source] = (acc[source] || 0) + 1;
+      return acc;
+    },
+    { packaged: 0, local: 0, unknown: 0 } as Record<"packaged" | "local" | "unknown", number>,
+  );
+  const packaged = `${counts.packaged} packaged`;
+  const local = `${counts.local} local`;
+  const unknown = counts.unknown > 0 ? `, ${counts.unknown} unknown` : "";
+  return `${packaged}, ${local}${unknown}`;
+}
+
 function isTemplateCatalogBlockedQueuedRow(row: QueuedRow): boolean {
   return Boolean(row.dispatchError?.startsWith(TEMPLATE_CATALOG_BLOCK_PREFIX));
 }
@@ -1078,10 +1109,17 @@ function toTemplateOptionsFromCatalog(catalog: TemplateCatalogResult): TemplateO
     if (!ref) {
       return options;
     }
+    const source = entry.source ?? "unknown";
     options.push({
       ...ref,
       label: entry.labelName,
       size: entry.version,
+      catalogSource:
+        source === "packaged" || source === "local" || source === "unknown"
+          ? source
+          : packagedTemplateVersions.has(entry.version)
+            ? "packaged"
+            : "local",
       description: entry.description ?? null,
     });
     return options;
@@ -2175,6 +2213,10 @@ export function App() {
     defaultTemplateVersion: templateVersionOf(templateOptions[0]),
     message: "Using bundled template catalog fallback.",
   });
+  const [templateCatalogWriteState, setTemplateCatalogWriteState] = useState<SubmitState>({
+    phase: "idle",
+    message: "",
+  });
   const [auditQuery, setAuditQuery] = useState("");
   const [auditSearch, setAuditSearch] = useState<AuditSearchState>({
     phase: "idle",
@@ -2270,6 +2312,12 @@ export function App() {
   const templateOptionLabel = resolvedTemplateRef
     ? `${resolvedTemplateRef.id} / ${resolvedTemplateRef.version}`
     : "Missing";
+  const templateReferenceVersion = templateReference ? templateVersionOf(templateReference) : null;
+  const templateReferenceCatalogSource = catalogSourceFromVersion(
+    availableTemplateOptions,
+    templateReferenceVersion,
+  );
+  const templateCatalogSummary = buildTemplateSourceSummary(availableTemplateOptions);
   const selectedTemplateOption =
     availableTemplateOptions.find(
       (option) =>
@@ -2536,6 +2584,7 @@ export function App() {
     setTemplateSource(value);
     setTemplateParseError(null);
     setTemplateImportError("");
+    setTemplateCatalogWriteState({ phase: "idle", message: "" });
   }
 
   function applyStructuredTemplateUpdate(
@@ -2745,6 +2794,59 @@ export function App() {
     downloadText("template-spec.json", templateSource);
   }
 
+  async function runTemplateCatalogSave() {
+    const parsed = parseTemplateSpec(templateSource);
+    if (parsed.error || !parsed.spec) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: parsed.error ?? "Template JSON must be valid before saving.",
+      });
+      return;
+    }
+    const templateRef = parseTemplateRef(parsed.spec);
+    if (!templateRef) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message:
+          "Template JSON must include a valid template_version (for example `template-id@version`) before saving.",
+      });
+      return;
+    }
+    const templateVersion = templateVersionOf(templateRef);
+    const validation = validateTemplateSource(templateSource);
+    if (validation.status === "invalid") {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: `Cannot save invalid template: ${validation.message}`,
+      });
+      return;
+    }
+
+    setTemplateCatalogWriteState({
+      phase: "submitting",
+      message: `Saving ${templateVersion} to desktop local catalog...`,
+    });
+
+    try {
+      const result: SaveTemplateToLocalCatalogResult = await saveTemplateToLocalCatalog({
+        templateSource,
+      });
+      const responseVersion = result.templateVersion ?? templateVersion;
+      const action = result.status === "updated" ? "updated" : "saved";
+      setTemplateCatalogWriteState({
+        phase: "success",
+        message:
+          result.message ?? `Template ${responseVersion} ${action} in desktop local catalog.`,
+      });
+      await refreshTemplateCatalog();
+    } catch (error) {
+      setTemplateCatalogWriteState({
+        phase: "error",
+        message: `Template catalog save failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  }
+
   function validateTemplateText() {
     const parsed = parseTemplateSpec(templateSource);
     if (parsed.error) {
@@ -2760,6 +2862,10 @@ export function App() {
     setTemplateSource(text);
     setTemplateParseError(null);
     setTemplateImportError("");
+    setTemplateCatalogWriteState({
+      phase: "idle",
+      message: "",
+    });
   }
 
   async function handleDataUpload(event: ChangeEvent<HTMLInputElement>) {
@@ -3076,7 +3182,7 @@ export function App() {
         phase: "ready",
         templates: options.length > 0 ? options : templateOptions,
         defaultTemplateVersion: catalog.defaultTemplateVersion,
-        message: `Loaded ${catalog.templates.length} packaged template entr${
+        message: `Loaded ${catalog.templates.length} desktop template entr${
           catalog.templates.length === 1 ? "y" : "ies"
         }.`,
       });
@@ -3891,7 +3997,7 @@ export function App() {
                 ) : null}
                 {availableTemplateOptions.map((option) => (
                   <option key={option.id} value={option.id}>
-                    {option.label}
+                    {option.label} ({option.catalogSource ?? "unknown"})
                   </option>
                 ))}
               </select>
@@ -3901,6 +4007,13 @@ export function App() {
               {templateCatalogState.phase !== "ready" ? (
                 <small className="hint-text">{templateCatalogState.message}</small>
               ) : null}
+              {templateReference ? (
+                <small className="hint-text">
+                  Template route {templateVersionOf(templateReference)} is sourced as{" "}
+                  {templateReferenceCatalogSource}.
+                </small>
+              ) : null}
+              <small className="hint-text">Desktop catalog: {templateCatalogSummary}.</small>
             </label>
 
             <label className="field">
@@ -4136,9 +4249,9 @@ export function App() {
         <div className="proof-note">
           <strong>Current release boundary</strong>
           <p>
-            Rust preview below renders the live JSON draft, but proof/print dispatch still uses the
-            packaged manifest template referenced by `template_version`. Treat this editor as
-            authoring and validation until template catalog write-back is implemented.
+            Rust preview below renders the live JSON draft, and template JSON can now be written to
+            the desktop local catalog via Tauri. Keep template_version explicit so catalog
+            resolution stays aligned with dispatch gates.
           </p>
         </div>
         <div className="template-workbench">
@@ -4476,6 +4589,14 @@ export function App() {
                     <p>{templateCatalogIssue}</p>
                   </div>
                 ) : null}
+                {templateReference ? (
+                  <div className="proof-note">
+                    <strong>Catalog source</strong>
+                    <p>
+                      {templateReferenceVersion} is tracked as {templateReferenceCatalogSource}.
+                    </p>
+                  </div>
+                ) : null}
                 {templateUsesPreviewOnlyPlaceholder ? (
                   <div className="proof-note">
                     <strong>Preview-only placeholder detected</strong>
@@ -4563,6 +4684,16 @@ export function App() {
           </aside>
         </div>
         <div className="toolbar">
+          <button
+            className="button-secondary"
+            type="button"
+            onClick={() => void runTemplateCatalogSave()}
+            disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
+          >
+            {templateCatalogWriteState.phase === "submitting"
+              ? "Saving..."
+              : "Save template to local catalog"}
+          </button>
           <label className="button-secondary fake-button">
             Import template JSON / asset
             <input type="file" accept=".json,application/json" onChange={handleTemplateImport} />
@@ -4580,6 +4711,19 @@ export function App() {
             Validate JSON
           </button>
         </div>
+        {templateCatalogWriteState.message ? (
+          <p
+            className={
+              templateCatalogWriteState.phase === "success"
+                ? "status-ok"
+                : templateCatalogWriteState.phase === "error"
+                  ? "status-fail"
+                  : "notice-text"
+            }
+          >
+            {templateCatalogWriteState.message}
+          </p>
+        ) : null}
       </section>
 
       <section className="panel">

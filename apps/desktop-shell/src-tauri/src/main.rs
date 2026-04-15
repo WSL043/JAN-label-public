@@ -19,8 +19,9 @@ use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
 use printer_adapters::{PdfFileAdapter, WindowsSpoolerAdapter};
 use render::{
-    parse_template_source, render_svg_with_template, resolve_template, template_catalog,
-    RenderLabelRequest,
+    parse_template_source, render_svg_with_template, resolve_template, resolve_template_with_overlay,
+    template_catalog, template_catalog_with_overlay, RenderLabelRequest, TemplateManifest,
+    TemplateManifestEntry,
 };
 use serde::Serialize;
 use tauri::command;
@@ -32,6 +33,7 @@ const ENV_PRINT_ADAPTER: &str = "JAN_LABEL_PRINT_ADAPTER";
 const ENV_WINDOWS_PRINTER_NAME: &str = "JAN_LABEL_WINDOWS_PRINTER_NAME";
 const ENV_ALLOW_PRINT_WITHOUT_PROOF: &str = "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF";
 const ENV_AUDIT_LOG_DIR: &str = "JAN_LABEL_AUDIT_LOG_DIR";
+const ENV_TEMPLATE_OVERLAY_DIR: &str = "JAN_LABEL_TEMPLATE_OVERLAY_DIR";
 
 const DEFAULT_ZINT_BINARY_PATH: &str = "zint";
 const DEFAULT_WINDOWS_PRINTER_NAME: &str = "Default Printer";
@@ -145,7 +147,10 @@ fn seed_legacy_proofs(request: LegacyProofSeedRequest) -> Result<LegacyProofSeed
 
 #[command]
 fn template_catalog_command() -> Result<TemplateCatalogResult, String> {
-    let catalog = template_catalog().map_err(|error| error.to_string())?;
+    let local_manifest_path = template_catalog_manifest_path_if_exists();
+    let local_versions = local_template_versions(local_manifest_path.as_deref())?;
+    let catalog = template_catalog_with_overlay(local_manifest_path.as_deref())
+        .map_err(|error| error.to_string())?;
     Ok(TemplateCatalogResult {
         default_template_version: catalog.default_template_version,
         templates: catalog
@@ -153,11 +158,127 @@ fn template_catalog_command() -> Result<TemplateCatalogResult, String> {
             .into_iter()
             .filter(|entry| entry.enabled)
             .map(|entry| TemplateCatalogEntryResult {
+                source: if local_versions.contains(&entry.version) {
+                    "local".to_string()
+                } else {
+                    "packaged".to_string()
+                },
                 version: entry.version,
                 label_name: entry.label_name,
                 description: entry.description,
             })
             .collect(),
+    })
+}
+
+#[command]
+fn save_template_to_local_catalog(
+    request: TemplateCatalogWritebackRequest,
+) -> Result<TemplateCatalogWritebackResult, String> {
+    let template_source = request.template_source.trim();
+    if template_source.is_empty() {
+        return Err("templateSource must not be empty".to_string());
+    }
+
+    let template =
+        parse_template_source(template_source, "<template-source>").map_err(|error| error.to_string())?;
+    if template.template_version.trim().is_empty() {
+        return Err("template_source.template_version is required".to_string());
+    }
+
+    let template_version = template.template_version.clone();
+    let overlay_dir = template_overlay_dir();
+    fs::create_dir_all(&overlay_dir).map_err(|error| {
+        format!(
+            "failed to create template overlay directory '{}': {error}",
+            overlay_dir.display()
+        )
+    })?;
+
+    let template_filename = format!("{}.json", sanitize_template_filename(&template_version));
+    let template_path = overlay_dir.join(&template_filename);
+    fs::write(&template_path, template_source).map_err(|error| {
+        format!(
+            "failed to write template source '{}': {error}",
+            template_path.display()
+        )
+    })?;
+
+    let mut manifest = load_or_initialize_template_manifest()?;
+    let action = if manifest
+        .templates
+        .iter()
+        .any(|entry| entry.version == template_version)
+    {
+        "updated"
+    } else {
+        "created"
+    };
+
+    manifest.templates.retain(|entry| entry.version != template_version);
+    manifest.templates.push(TemplateManifestEntry {
+        version: template_version.clone(),
+        path: template_filename,
+        label_name: request.label_name.or(template.label_name).unwrap_or_else(|| {
+            format!("local-{template_version}")
+        }),
+        enabled: request.enabled,
+        description: request.description.or(template.description),
+    });
+    if request.set_as_default {
+        manifest.default_template_version = template_version.clone();
+    }
+
+    let manifest_path = template_catalog_manifest_path();
+    let manifest_payload = serde_json::json!({
+        "schema_version": manifest.schema_version,
+        "default_template_version": manifest.default_template_version,
+        "templates": manifest
+            .templates
+            .iter()
+            .map(
+                |entry| serde_json::json!({
+                    "version": entry.version,
+                    "path": entry.path,
+                    "label_name": entry.label_name,
+                    "enabled": entry.enabled,
+                    "description": entry.description,
+                })
+            )
+            .collect::<Vec<_>>()
+    });
+    let manifest_text = serde_json::to_string_pretty(&manifest_payload).map_err(|error| {
+        format!(
+            "failed to serialize template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+    fs::write(&manifest_path, manifest_text).map_err(|error| {
+        format!(
+            "failed to write template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+
+    let catalog = template_catalog_with_overlay(Some(&manifest_path))
+        .map_err(|error| error.to_string())?;
+    let save_message = format!(
+        "Template {} {} in desktop local catalog.",
+        template_version,
+        if action == "created" {
+            "created"
+        } else {
+            "updated"
+        }
+    );
+    Ok(TemplateCatalogWritebackResult {
+        template_version,
+        status: action.to_string(),
+        message: save_message,
+        template_path: template_path.to_string_lossy().into_owned(),
+        manifest_path: manifest_path.to_string_lossy().into_owned(),
+        default_template_version: catalog.default_template_version,
+        action: action.to_string(),
     })
 }
 
@@ -350,10 +471,41 @@ struct TemplateCatalogResult {
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TemplateCatalogEntryResult {
+    source: String,
     version: String,
     label_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogWritebackRequest {
+    template_source: String,
+    #[serde(default = "template_entry_enabled_default")]
+    enabled: bool,
+    #[serde(default)]
+    set_as_default: bool,
+    #[serde(default)]
+    label_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+}
+
+fn template_entry_enabled_default() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogWritebackResult {
+    template_version: String,
+    status: String,
+    message: String,
+    template_path: String,
+    manifest_path: String,
+    default_template_version: String,
+    action: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -442,6 +594,7 @@ impl PrintBridgeConfig {
     fn agent_policy(&self) -> PrintAgentPolicy {
         PrintAgentPolicy {
             allow_print_without_proof: self.allow_print_without_proof,
+            local_template_manifest_path: template_catalog_manifest_path_if_exists(),
         }
     }
 
@@ -889,6 +1042,103 @@ fn resolve_output_dir_with_warning(
     }
 }
 
+fn template_overlay_dir() -> PathBuf {
+    resolve_output_dir(
+        ENV_TEMPLATE_OVERLAY_DIR,
+        env::temp_dir().join("jan-label").join("template-overlays"),
+    )
+}
+
+fn template_catalog_manifest_path() -> PathBuf {
+    template_overlay_dir().join("template-manifest.json")
+}
+
+fn template_catalog_manifest_path_if_exists() -> Option<PathBuf> {
+    let manifest_path = template_catalog_manifest_path();
+    if manifest_path.exists() {
+        Some(manifest_path)
+    } else {
+        None
+    }
+}
+
+fn sanitize_template_filename(raw: &str) -> String {
+    let sanitized = sanitize_template_version_token(raw);
+    if sanitized.is_empty() {
+        "template".to_string()
+    } else {
+        sanitized
+    }
+}
+
+fn sanitize_template_version_token(raw: &str) -> String {
+    raw.chars()
+        .map(|character| match character {
+            '/' | '\\' | '\0' => '_',
+            '<' | '>' | ':' | '"' | '|' | '?' | '*' => '_',
+            c if c.is_control() => '_',
+            c => c,
+        })
+        .collect::<String>()
+}
+
+fn load_or_initialize_template_manifest() -> Result<TemplateManifest, String> {
+    let packaged = template_catalog().map_err(|error| error.to_string())?;
+    let manifest_path = template_catalog_manifest_path();
+    if !manifest_path.exists() {
+        return Ok(TemplateManifest {
+            schema_version: packaged.schema_version,
+            default_template_version: packaged.default_template_version,
+            templates: Vec::new(),
+        });
+    }
+
+    let manifest_contents = fs::read_to_string(&manifest_path).map_err(|error| {
+        format!(
+            "failed to read template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+    let mut manifest = serde_json::from_str::<TemplateManifest>(&manifest_contents).map_err(|error| {
+        format!(
+            "failed to parse template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+    if manifest.schema_version.trim().is_empty() {
+        manifest.schema_version = packaged.schema_version;
+    }
+    if manifest.default_template_version.trim().is_empty() {
+        manifest.default_template_version = packaged.default_template_version;
+    }
+    Ok(manifest)
+}
+
+fn local_template_versions(manifest_path: Option<&Path>) -> Result<HashSet<String>, String> {
+    let Some(manifest_path) = manifest_path else {
+        return Ok(HashSet::new());
+    };
+
+    let manifest_contents = fs::read_to_string(manifest_path).map_err(|error| {
+        format!(
+            "failed to read template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+    let manifest = serde_json::from_str::<TemplateManifest>(&manifest_contents).map_err(|error| {
+        format!(
+            "failed to parse template manifest '{}': {error}",
+            manifest_path.display()
+        )
+    })?;
+    Ok(manifest
+        .templates
+        .into_iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.version)
+        .collect())
+}
+
 fn resolve_optional_env(key: &str) -> Option<String> {
     env::var(key).ok()
 }
@@ -1256,7 +1506,12 @@ fn validate_existing_proof_artifact_path(
 }
 
 fn ensure_template_version_available(template_version: &str) -> Result<(), String> {
-    resolve_template(template_version)
+    let local_manifest = template_catalog_manifest_path_if_exists();
+    if let Some(path) = local_manifest {
+        resolve_template_with_overlay(template_version, Some(path.as_path()))
+    } else {
+        resolve_template(template_version)
+    }
         .map(|_| ())
         .map_err(|error| error.to_string())
 }
@@ -1373,6 +1628,7 @@ fn main() {
             approve_proof,
             reject_proof,
             template_catalog_command,
+            save_template_to_local_catalog,
             preview_template_draft,
             validate_legacy_proof_seed,
             seed_legacy_proofs
@@ -1387,11 +1643,12 @@ mod tests {
         available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
+        save_template_to_local_catalog, TemplateCatalogWritebackRequest,
         BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
         TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
-        ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR, ENV_WINDOWS_PRINTER_NAME,
-        ENV_ZINT_BINARY_PATH,
+        ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR, ENV_TEMPLATE_OVERLAY_DIR,
+        ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
     };
     use crate::audit_store::{AuditStore, ProofReviewRequest};
     use audit_log::{
@@ -1485,6 +1742,159 @@ mod tests {
         assert_eq!(catalog.default_template_version, "basic-50x30@v1");
         assert_eq!(catalog.templates.len(), 1);
         assert_eq!(catalog.templates[0].version, "basic-50x30@v1");
+        assert_eq!(catalog.templates[0].source, "packaged");
+    }
+
+    #[test]
+    fn template_catalog_command_prefers_local_overlay_when_present() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_TEMPLATE_OVERLAY_DIR]);
+        let root = env::temp_dir().join("jan-label-template-overlay-present");
+        let _ = fs::remove_dir_all(&root);
+        let overlay_dir = root.join("catalog-overlays");
+        let manifest_path = overlay_dir.join("template-manifest.json");
+        env::set_var(ENV_TEMPLATE_OVERLAY_DIR, overlay_dir.clone());
+
+        let manifest = r##"
+            {
+              "schema_version": "template-manifest-v1",
+              "default_template_version": "overlay-basic@v1",
+              "templates": [
+                {
+                  "version": "overlay-basic@v1",
+                  "path": "overlay-basic@v1.json",
+                  "label_name": "overlay",
+                  "description": "local overlay entry",
+                  "enabled": true
+                }
+              ]
+            }
+            "##;
+        fs::create_dir_all(&overlay_dir).expect("create overlay dir for test");
+        fs::write(&manifest_path, manifest).expect("write local manifest for test");
+
+        let catalog = template_catalog_command().expect("catalog command should merge overlay");
+
+        assert_eq!(catalog.default_template_version, "overlay-basic@v1");
+        assert_eq!(catalog.templates.len(), 2);
+        assert!(catalog
+            .templates
+            .iter()
+            .any(|entry| entry.version == "basic-50x30@v1"));
+        assert!(catalog
+            .templates
+            .iter()
+            .any(|entry| entry.version == "overlay-basic@v1"));
+        assert_eq!(
+            catalog
+                .templates
+                .iter()
+                .find(|entry| entry.version == "overlay-basic@v1")
+                .map(|entry| entry.source.as_str()),
+            Some("local")
+        );
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn write_template_catalog_entry_persists_overlay_manifest_and_template() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_TEMPLATE_OVERLAY_DIR]);
+        let root = env::temp_dir().join("jan-label-template-writeback");
+        let _ = fs::remove_dir_all(&root);
+        let overlay_dir = root.join("catalog-overlays");
+        env::set_var(ENV_TEMPLATE_OVERLAY_DIR, &overlay_dir);
+
+        let created = save_template_to_local_catalog(TemplateCatalogWritebackRequest {
+            template_source: r##"
+                {
+                  "schema_version": "template-spec-v1",
+                  "template_version": "overlay-writeback@v1",
+                  "label_name": "overlay-writeback",
+                  "page": { "width_mm": 62, "height_mm": 29 },
+                  "fields": [
+                    {
+                      "name": "sku",
+                      "x_mm": 2,
+                      "y_mm": 5,
+                      "font_size_mm": 3,
+                      "template": "sku:{sku}"
+                    }
+                  ]
+                }
+                "##.to_string(),
+            enabled: true,
+            set_as_default: true,
+            label_name: Some("overlay-writeback".to_string()),
+            description: Some("created by test".to_string()),
+        })
+        .expect("create overlay template should succeed");
+
+        let catalog = template_catalog_command().expect("catalog should include created overlay template");
+        assert_eq!(created.action, "created");
+        assert_eq!(created.status, "created");
+        assert!(created.message.contains("overlay-writeback@v1"));
+        assert_eq!(created.default_template_version, "overlay-writeback@v1");
+        assert!(catalog.templates.iter().any(|entry| entry.version == "overlay-writeback@v1"));
+        assert_eq!(catalog.default_template_version, "overlay-writeback@v1");
+        assert_eq!(Path::new(&created.template_path).exists(), true);
+        assert_eq!(Path::new(&created.manifest_path).exists(), true);
+
+        let updated = save_template_to_local_catalog(TemplateCatalogWritebackRequest {
+            template_source: r##"
+                {
+                  "schema_version": "template-spec-v1",
+                  "template_version": "overlay-writeback@v1",
+                  "label_name": "overlay-writeback-renamed",
+                  "page": { "width_mm": 62, "height_mm": 29 },
+                  "fields": [
+                    {
+                      "name": "sku",
+                      "x_mm": 2,
+                      "y_mm": 5,
+                      "font_size_mm": 3,
+                      "template": "sku:{sku}"
+                    }
+                  ]
+                }
+                "##.to_string(),
+            enabled: false,
+            set_as_default: false,
+            label_name: None,
+            description: Some("updated by test".to_string()),
+        })
+        .expect("update overlay template should succeed");
+
+        assert_eq!(updated.action, "updated");
+        assert_eq!(updated.status, "updated");
+        assert_eq!(created.template_version, updated.template_version);
+
+        let catalog = template_catalog_command().expect("catalog should reflect updated template entry");
+        assert!(
+            catalog
+                .templates
+                .iter()
+                .all(|entry| entry.version != "overlay-writeback@v1")
+        );
+
+        let manifest_contents =
+            fs::read_to_string(&updated.manifest_path).expect("manifest should be readable");
+        let manifest_value: serde_json::Value = serde_json::from_str(&manifest_contents)
+            .expect("manifest should be valid JSON");
+        let writeback = manifest_value
+            .get("templates")
+            .and_then(|templates| templates.as_array())
+            .expect("manifest templates")
+            .iter()
+            .find(|entry| entry.get("version").and_then(|value| value.as_str()) == Some("overlay-writeback@v1"))
+            .expect("overlay writeback entry should remain in manifest");
+        assert_eq!(writeback.get("label_name").and_then(|value| value.as_str()), Some("overlay-writeback-renamed"));
+        assert_eq!(writeback.get("enabled").and_then(|value| value.as_bool()), Some(false));
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

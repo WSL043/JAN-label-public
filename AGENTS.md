@@ -1,8 +1,8 @@
 # AGENTS
 
-このリポジトリで作業する人間と Codex / クラウド Agent 向けの実務メモです。
+Working notes for humans, local Codex, and cloud agents in this repository.
 
-## 1. 最初に読む順番
+## 1. Read First
 
 1. `docs/handoff/current-state.md`
 2. `docs/todo/active.md`
@@ -13,25 +13,21 @@
 7. `docs/known-issues.md`
 8. `docs/adr/`
 
-## 2. 変えてはいけない前提
+## 2. Non-Negotiable Constraints
 
-- UI 先行ではなく印刷コア先行
-- JAN の正規化と検証は Rust 側を正とする
-- バーコード描画は自前主導にしない。Zint を前提にする
-- 最初の正規出力は `SVG/PDF`
-- printer 差異は `crates/printer-adapters` に閉じ込める
-- fixture / render / docs は同時更新を基本とする
-- `allowWithoutProof` は release 運用では使わない
-- legacy proof の移行は pending seed まで。自動 approve はしない
-- template editor のローカル canvas は近似表示。出力可否の判断は Rust preview / proof で行う
-- 現時点の proof / print dispatch は packaged manifest の `template_version` を使う。editor の生 JSON は preview 用であり、本番反映は別タスク
-- proof / print dispatch の最終 gate は `apps/desktop-shell` を正とする
-- packaged template catalog の存在確認は `apps/desktop-shell` を正とする
-- live template draft の `template_version` が desktop catalog に無い間は queue / proof / print submit に進めない
-- audit retention は proof / proof-dispatch 依存を壊さないことを優先する
-- audit trim の backup は単一 JSON bundle で残す
+- Print core first, not UI first.
+- JAN normalization and validation are authoritative in Rust.
+- Barcode rendering must use Zint, not a custom barcode renderer.
+- The first production output targets are `SVG` and `PDF`.
+- Printer-specific behavior must stay inside `crates/printer-adapters`.
+- Fixture, render, and docs updates should land together.
+- `allowWithoutProof` is not allowed for release use.
+- Legacy proofs may only be seeded as `pending`; approval must happen through review flow.
+- `apps/desktop-shell` owns the final proof/print gate.
+- `apps/desktop-shell` owns packaged and local template catalog resolution for dispatch.
+- Live authoring JSON is not authoritative until it is saved into the desktop local template catalog.
 
-## 3. 変更時の最低確認
+## 3. Minimum Validation
 
 ```powershell
 pnpm fixture:validate
@@ -45,52 +41,53 @@ cargo test --workspace
 cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
 ```
 
-補足:
+Notes:
 
-- 一時的な `target-*` ディレクトリを workspace 直下に残すと `pnpm format:check` が失敗することがある。不要なら削除してから実行する
-- ローカル Windows では `cargo test --workspace` が稀に `os error 5` で揺れる。再実行し、必要なら `desktop-shell` 側のテストも個別に確認する
+- `cargo test --workspace` may intermittently hit `os error 5` on local Windows. Re-run once and confirm `desktop-shell` tests also pass before treating it as a code failure.
+- If formatter checks start scanning a workspace-level `target-*` directory by mistake, remove that transient directory and re-run `pnpm format:check`.
 
-## 4. 作業ルール
+## 4. Change Rules
 
-- 新しい判断は `docs/adr/` に残す
-- 引き継ぎが必要な状態変更は `docs/handoff/current-state.md` を更新する
-- 次に着手すべき順番は `docs/todo/active.md` を更新する
-- 再発しそうな罠は `docs/known-issues.md` に残す
-- printer adapter に手を入れたら docs と fixtures を確認する
-- `apps/admin-web` の submit / import / proof inbox を触ったら `apps/desktop-shell` と `packages/job-schema` の契約差分を確認する
-- `apps/desktop-shell` の proof / audit / bridge warning を触ったら `docs/print-pipeline.md` と `docs/known-issues.md` を更新する
-- proof gate を変えたら `sourceProofJobId` と lineage 条件を docs に明記する
+- Record new design decisions in `docs/adr/`.
+- Update `docs/handoff/current-state.md` when the handoff state changes.
+- Update `docs/todo/active.md` when priorities or next steps change.
+- Record recurring traps in `docs/known-issues.md`.
+- If printer adapter behavior changes, review fixtures and print docs.
+- If `apps/admin-web`, `apps/desktop-shell`, or `packages/job-schema` contracts change, update both sides in the same pass.
+- If proof gate logic changes, update `docs/print-pipeline.md` and `docs/known-issues.md`.
 
-## 5. 今の主戦場
+## 5. Current Fronts
 
 - `apps/admin-web`
 - `apps/desktop-shell`
 - `crates/render`
+- `crates/print-agent`
 - `crates/printer-adapters`
 - `crates/audit-log`
 - `packages/templates`
 - `packages/job-schema`
 - `packages/fixtures`
 
-## 6. 主任 Codex と Sub-Agent の運用
+## 6. Lead / Sub-Agent Model
 
-- 主任はローカル Codex。タスク分解、優先度、統合、最終判断、docs 更新、GitHub 連携を持つ
-- Sub-Agent は部門別に並列で使う。探索、攻撃的レビュー、実装、検証を分担する
-- Sub-Agent の第一選択モデルは `gpt-5.3-codex-spark`
-- `gpt-5.3-codex-spark` が使えない場合のみ `gpt-5.3-codex` にフォールバックする
-- Sub-Agent が終わったら、主任が結果を統合し、次のタスクを即再配分する
+- Local Codex is the project lead for planning, integration, verification, docs sync, and GitHub sync.
+- Sub-agents are execution workers for bounded slices such as UI, render, bridge, verification, and red-team review.
+- Default sub-agent model is `gpt-5.3-codex-spark`.
+- If `gpt-5.3-codex-spark` is unavailable or rate-limited, fall back to `gpt-5.3-codex`.
+- Always bring sub-agent results back through the lead before merge, docs updates, or release decisions.
+- Keep at least one adversarial review pass running on release-sensitive changes when practical.
 
-## 7. GitHub 側 Codex との同期
+## 7. GitHub Coordination
 
-- ローカル Codex が主管
-- GitHub 側 Codex は PR review、inline comment、CI triage、autofix、maintenance を担当
-- 状態同期の基準は `docs/todo/active.md` と `docs/handoff/current-state.md`
-- PR / issue / review comment に対応したら、必要に応じて local docs も更新する
+- Local Codex remains the source of truth for the working tree.
+- GitHub-side Codex is used for PR review, CI triage, autofix, and maintenance follow-up.
+- Sync state through `docs/todo/active.md` and `docs/handoff/current-state.md`.
+- After landing a meaningful batch on the release branch, push it and post a PR sync note.
 
-## 8. 次リリースで必須の到達点
+## 8. Release Direction
 
-- PDF 出力を release 品質まで上げる
-- template authoring / preview / proof の基線を揃える
-- Excel / CSV をそのまま実務投入できる import 導線を維持する
-- proof review、legacy proof seed、audit search を運用できる状態にする
-- bridge warning は `code / severity / message` を正とする
+- Next release must keep PDF output stable.
+- Template authoring must support save-to-catalog, preview, and proof/print dispatch parity.
+- Excel / CSV import must remain usable without a strict external database schema.
+- Proof review, audit search, export, and retention are part of the operator baseline.
+- Physical printer measurement and scan validation remain external release blockers until recorded in `docs/printer-matrix/`.

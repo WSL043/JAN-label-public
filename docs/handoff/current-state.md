@@ -4,87 +4,66 @@
 - Branch: `codex/release-bridge-proof-hardening`
 - Release base: `v0.1.1` (`0b95f41`)
 - Active PR: `#25`
+- Branch relation to `origin/main` on 2026-04-15 before this batch: `0 behind / 11 ahead`
 
-## 1. いま動いているもの
+## Shipping Now
 
 - Rust core
-  - `domain` の JAN 正規化
-  - `barcode` の Zint CLI adapter
-  - `render` の SVG / PDF 出力
-  - `print-agent` の dispatch / proof gate / lineage
-  - `printer-adapters` の PDF と Windows spool staging
-  - `audit-log` の lineage / proof status / audit search
-- `admin-web`
-  - manual draft / batch queue / retry
-  - template asset export / import
-  - CSV / XLSX import と alias mapping
-  - proof inbox / audit search / approved proof pinning
-  - audit export と retention dry-run / apply
-  - legacy proof seed UI
-  - bridge status と structured warning 表示
-  - desktop template catalog sync と unknown `template_version` の事前表示
-  - catalog mismatch 時の queue / manual / batch submit block
-  - structured template editor
-  - local canvas preview
-  - Rust renderer preview button
-- `desktop-shell`
+  - `domain`: JAN normalization and validation
+  - `barcode`: Zint CLI adapter
+  - `render`: deterministic SVG/PDF output with packaged and local template catalog overlay support
+  - `print-agent`: dispatch, proof gate, lineage, and overlay-aware render routing
+  - `printer-adapters`: PDF output and Windows spool staging
+  - `audit-log`: lineage, proof status, audit export/search/retention data model
+- `apps/admin-web`
+  - manual draft, batch queue, retry, and bridge-status-aware submit blocking
+  - CSV/XLSX import with alias mapping and numeric JAN hardening
+  - proof inbox, audit search, audit export, and audit retention controls
+  - structured template editor, local canvas preview, and Rust renderer preview
+  - desktop template catalog sync, source display, and save-to-local-catalog action
+- `apps/desktop-shell`
   - `dispatch_print_job`
   - `print_bridge_status`
   - `search_audit_log`
-  - `export_audit_ledger` / `trim_audit_ledger`
+  - `export_audit_ledger`
+  - `trim_audit_ledger`
   - `approve_proof` / `reject_proof`
   - `template_catalog_command`
-  - `validate_legacy_proof_seed` / `seed_legacy_proofs`
+  - `save_template_to_local_catalog`
   - `preview_template_draft`
+  - `validate_legacy_proof_seed` / `seed_legacy_proofs`
 
-## 2. 今回追加したもの
+## Landed In This Batch
 
-- `render`
-  - inline template source を parse して preview できる
-  - `border.visible` を SVG / PDF に反映
-  - background color / border color / field color を SVG / PDF に反映
-  - golden SVG / PDF を再生成
-- `desktop-shell`
-  - `preview_template_draft` で live template JSON を Rust renderer に通せる
-  - packaged template catalog を `template_catalog_command` で `admin-web` に配布する
-  - print / proof dispatch 前に audit ledger writable を preflight する
-  - dispatch 後の audit persistence failure を fatal として扱う
-  - approved proof 由来の lineage を backend で補完し、explicit lineage / reprint parent の不一致を拒否する
-  - approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証する
-  - audit export を scoped snapshot として返す
-  - audit retention は proof dependency chain を保ったまま trim し、removed records を single JSON backup bundle で残す
-- `admin-web`
-  - structured template editor の CSS と workbench レイアウトを実装
-  - local canvas と Rust preview を並べて確認できる
-  - `parent_sku` は preview-only と明示
-  - template editor は packaged manifest にはまだ書き戻らないことを明示
-  - batch retry が `submitted` 行を再送してしまう不具合を修正
-  - template validation に duplicate / out-of-bounds / unsupported placeholder / preview-only placeholder を追加
-  - desktop template catalog を読み、unknown `template_version` を proof / print 前に可視化する
-  - catalog mismatch がある draft は queue / manual / batch submit まで block する
-  - audit scope / max age / max entries / dry-run を UI から操作できる
+- Local template catalog write-back is live through `desktop-shell`.
+- Catalog responses now report `packaged` vs `local` source to `admin-web`.
+- The save-to-catalog Tauri contract was aligned end to end:
+  - command name
+  - response shape
+  - UI success/error messaging
+- Proof/print dispatch now uses the same local overlay manifest that validation uses.
+- Added regression coverage for:
+  - overlay catalog merge behavior in `render`
+  - local overlay render path in `print-agent`
+  - catalog source reporting and local save flow in `desktop-shell`
 
-## 3. 現在の release 境界
+## Release Boundary
 
-- strict proof-to-print gate は `templateVersion + sku + brand + jan(normalized) + qty + lineage`
-- print 時の proof artifact 確認は approved proof ledger の `artifactPath` を使う
-- `jobLineageId` 未指定の print request は approved proof lineage で backend 補完する
-- explicit `jobLineageId` / `reprintOfJobId` は approved proof lineage と一致しない限り reject する
-- packaged `template_version` の存在確認は `desktop-shell` が行い、`admin-web` はその catalog を先読みして mismatch を表示する
-- unknown live `template_version` がある間は `admin-web` 側でも queue / manual / batch submit を止める
-- proof / print dispatch は audit ledger が writable でない限り開始しない
-- dispatch 後の audit persistence failure は success 扱いにしない
-- approved proof artifact は proof output dir 配下の non-empty PDF で、PDF header を読める必要がある
-- audit export は desktop ledger snapshot を JSON として出力する
-- audit retention は `maxAgeDays` / `maxEntries` を受け、proof / proof-dispatch 依存を保ちながら trim する
-- audit trim の backup は `audit/backups/` 配下の single JSON bundle に残す
-- `warningDetails[]` の `code / severity / message` を UI が正として扱う
-- Rust preview は live template JSON を描画する
-- ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
+- Proof-to-print gate is strict on:
+  - `templateVersion`
+  - `sku`
+  - `brand`
+  - normalized `jan`
+  - `qty`
+  - `lineage`
+- Approved proof artifacts must be readable non-empty PDFs with a valid `%PDF-` header.
+- Unknown `template_version` blocks queue/manual/batch submit in `admin-web`.
+- Saved local templates are now authoritative for proof/print dispatch when their `template_version` is selected.
+- Audit export, retention dry-run/apply, and JSON backup bundles are working locally.
 
-## 4. 検証状況
+## Validation
 
-通過:
+Passed on this batch:
 
 - `pnpm fixture:validate`
 - `pnpm format:check`
@@ -96,18 +75,24 @@
 - `cargo test --workspace`
 - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
 
-補足:
+Operational note:
 
-- `cargo test --workspace` はローカル Windows で `os error 5` が稀に揺れる既知事象がある
+- Local Windows may intermittently return `os error 5` during `cargo test --workspace`. Re-run once and confirm `desktop-shell` tests pass before treating it as a regression.
 
-## 5. 次の主タスク
+## Release Estimate
 
-1. `T-032`: template authoring core の write-back / catalog 連携
-2. `T-033`: preview / proof parity を上げる
-3. `T-029`: 運用 runbook / 停止・再開・エスカレーション整備
-4. `T-012`: self-hosted runner / webhook 運用
+- Earliest code-side release candidate: `2026-04-17` to `2026-04-18`
+- Realistic target: around `2026-04-20`
+- Main external blocker: `T-031` physical printer measurement and scan confirmation
 
-## 6. 明確な blocker
+## Next Main Tasks
+
+1. `T-029`: operator runbook, stop/restart rules, and escalation guidance
+2. `T-028f`: audit backup listing and restore flow
+3. Release packaging / notes hardening
+4. `T-012`: self-hosted runner / webhook operations
+
+## External Blockers
 
 - `T-030`: GitHub repository secret `OPENAI_API_KEY`
-- `T-031`: 実機プリンタ測定と `docs/printer-matrix/` 更新
+- `T-031`: physical printer matrix and measurement commit in `docs/printer-matrix/`

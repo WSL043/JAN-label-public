@@ -1,6 +1,7 @@
 use serde::Deserialize;
 use std::fmt;
-use std::path::Path;
+use std::fs;
+use std::path::{Component, Path};
 
 use include_dir::{include_dir, Dir};
 
@@ -118,7 +119,14 @@ pub struct LabelTemplateField {
 }
 
 pub fn render_svg(request: &RenderLabelRequest) -> Result<String, TemplateResolutionError> {
-    let template = resolve_template(&request.template_version)?;
+    render_svg_with_overlay(request, None)
+}
+
+pub fn render_svg_with_overlay(
+    request: &RenderLabelRequest,
+    local_manifest_path: Option<&Path>,
+) -> Result<String, TemplateResolutionError> {
+    let template = resolve_template_with_overlay(&request.template_version, local_manifest_path)?;
     Ok(render_svg_with_template(request, &template))
 }
 
@@ -166,7 +174,14 @@ pub fn render_svg_with_template(request: &RenderLabelRequest, template: &LabelTe
 }
 
 pub fn render_pdf(request: &RenderLabelRequest) -> Result<Vec<u8>, TemplateResolutionError> {
-    let template = resolve_template(&request.template_version)?;
+    render_pdf_with_overlay(request, None)
+}
+
+pub fn render_pdf_with_overlay(
+    request: &RenderLabelRequest,
+    local_manifest_path: Option<&Path>,
+) -> Result<Vec<u8>, TemplateResolutionError> {
+    let template = resolve_template_with_overlay(&request.template_version, local_manifest_path)?;
     Ok(render_pdf_with_template(request, &template))
 }
 
@@ -239,6 +254,28 @@ pub fn template_catalog() -> Result<TemplateManifest, TemplateResolutionError> {
     parse_template_catalog_from_str(&manifest_contents, manifest_source)
 }
 
+pub fn template_catalog_with_overlay(
+    local_manifest_path: Option<&Path>,
+) -> Result<TemplateManifest, TemplateResolutionError> {
+    let packaged_manifest = template_catalog()?;
+    let Some(local_manifest_path) = local_manifest_path else {
+        return Ok(packaged_manifest);
+    };
+
+    let manifest_source = local_manifest_path.display().to_string();
+    let local_manifest_contents = fs::read_to_string(local_manifest_path).map_err(|error| {
+        TemplateResolutionError::MalformedTemplateSpec {
+            template_version: String::from("<manifest>"),
+            source: manifest_source.clone(),
+            message: format!("failed to read local template catalog: {error}"),
+        }
+    })?;
+    let local_manifest =
+        parse_template_catalog_from_str(&local_manifest_contents, &manifest_source)?;
+
+    Ok(merge_template_manifests(packaged_manifest, local_manifest))
+}
+
 fn parse_template_catalog_from_str(
     source: &str,
     manifest_source: &str,
@@ -251,16 +288,32 @@ fn parse_template_catalog_from_str(
 }
 
 pub fn resolve_template(template_version: &str) -> Result<LabelTemplate, TemplateResolutionError> {
-    let manifest = template_catalog()?;
-    let entry = find_template_entry(template_version, &manifest)?;
+    resolve_template_with_overlay(template_version, None)
+}
+
+pub fn resolve_template_with_overlay(
+    template_version: &str,
+    local_manifest_path: Option<&Path>,
+) -> Result<LabelTemplate, TemplateResolutionError> {
+    let manifest = template_catalog_with_overlay(local_manifest_path)?;
+    resolve_template_from_manifest(template_version, &manifest, local_manifest_path)
+}
+
+fn resolve_template_from_manifest(
+    template_version: &str,
+    manifest: &TemplateManifest,
+    local_manifest_path: Option<&Path>,
+) -> Result<LabelTemplate, TemplateResolutionError> {
+    let entry = find_template_entry(template_version, manifest)?;
     let source = entry.path.clone();
-    let template = template_file_contents(&source).map_err(|error| {
-        TemplateResolutionError::MalformedTemplateSpec {
-            template_version: template_version.to_string(),
-            source: source.clone(),
-            message: error,
-        }
-    })?;
+    let template =
+        template_file_contents_with_overlay(&source, local_manifest_path).map_err(|error| {
+            TemplateResolutionError::MalformedTemplateSpec {
+                template_version: template_version.to_string(),
+                source: source.clone(),
+                message: error,
+            }
+        })?;
 
     serde_json::from_str(&template).map_err(|error| {
         TemplateResolutionError::MalformedTemplateSpec {
@@ -282,6 +335,80 @@ fn template_file_contents(path: &str) -> Result<String, String> {
         .and_then(|file| file.contents_utf8())
         .map(ToString::to_string)
         .ok_or_else(|| format!("template file was not found in embedded templates: {path}"))
+}
+
+fn template_file_contents_with_overlay(
+    path: &str,
+    local_manifest_path: Option<&Path>,
+) -> Result<String, String> {
+    let normalized_path = path.replace('\\', "/");
+    if Path::new(&normalized_path).is_absolute() {
+        return Err("template path must be a relative path".to_string());
+    }
+
+    if let Some(manifest_parent) = local_manifest_path.and_then(|value| value.parent()) {
+        if contains_parent_traversal(&normalized_path) {
+            return Err(format!(
+                "template path contains parent traversal and is rejected: {path}"
+            ));
+        }
+
+        let local_template_path = manifest_parent.join(&normalized_path);
+        if local_template_path.exists() {
+            return fs::read_to_string(&local_template_path).map_err(|error| {
+                format!(
+                    "failed to read local template file '{}': {error}",
+                    local_template_path.display()
+                )
+            });
+        }
+    }
+
+    template_file_contents(&normalized_path)
+}
+
+fn merge_template_manifests(
+    packaged: TemplateManifest,
+    local: TemplateManifest,
+) -> TemplateManifest {
+    let mut merged_templates = Vec::new();
+    let mut overlayed_versions = std::collections::HashSet::new();
+    let mut local_templates_by_version = std::collections::HashMap::new();
+
+    for local_entry in local.templates.iter() {
+        local_templates_by_version.insert(local_entry.version.clone(), local_entry.clone());
+    }
+
+    for packaged_entry in packaged.templates.into_iter() {
+        let merged_entry = local_templates_by_version
+            .remove(&packaged_entry.version)
+            .unwrap_or(packaged_entry);
+        let merged_version = merged_entry.version.clone();
+        merged_templates.push(merged_entry);
+        overlayed_versions.insert(merged_version);
+    }
+
+    for local_entry in local.templates.into_iter() {
+        if !overlayed_versions.contains(&local_entry.version) {
+            merged_templates.push(local_entry);
+        }
+    }
+
+    TemplateManifest {
+        schema_version: packaged.schema_version,
+        default_template_version: if local.default_template_version.trim().is_empty() {
+            packaged.default_template_version
+        } else {
+            local.default_template_version
+        },
+        templates: merged_templates,
+    }
+}
+
+fn contains_parent_traversal(path: &str) -> bool {
+    Path::new(path)
+        .components()
+        .any(|value| matches!(value, Component::ParentDir))
 }
 
 fn find_template_entry(
@@ -534,8 +661,13 @@ mod tests {
         escape_pdf_text, escape_xml_attribute, format_pdf_number, is_hex_color, mm_to_points,
         parse_template_catalog_from_str, parse_template_source, pdf_fill_color, pdf_stroke_color,
         render_pdf, render_pdf_with_template, render_svg, render_svg_with_template,
-        resolve_template, sanitize_svg_color, template_catalog, RenderLabelRequest,
-        TemplateResolutionError,
+        resolve_template, resolve_template_with_overlay, sanitize_svg_color, template_catalog,
+        template_catalog_with_overlay, RenderLabelRequest, TemplateResolutionError,
+    };
+    use std::{
+        fs,
+        path::PathBuf,
+        time::{SystemTime, UNIX_EPOCH},
     };
 
     #[test]
@@ -928,6 +1060,152 @@ mod tests {
     }
 
     #[test]
+    fn template_catalog_with_overlay_merges_packaged_and_local_entries() {
+        let catalog_root = setup_local_template_overlay_dir("template-overlay-merge");
+        let local_manifest = catalog_root.join("template-manifest.json");
+        let local_overlay_template = catalog_root.join("local-overlay.json");
+        let local_only_template = catalog_root.join("local-only.json");
+
+        write_local_template_file(
+            &local_overlay_template,
+            r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "basic-50x30@v1",
+              "label_name": "overlay-basic",
+              "page": { "width_mm": 50, "height_mm": 30, "background_fill": "#00ff00" },
+              "border": { "visible": false },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "sku:{sku}"
+                }
+              ]
+            }
+            "##,
+        );
+        write_local_template_file(
+            &local_only_template,
+            r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "local-only@v1",
+              "label_name": "local-only",
+              "page": { "width_mm": 30, "height_mm": 20, "background_fill": "#0000ff" },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "sku:{sku}"
+                }
+              ]
+            }
+            "##,
+        );
+        fs::write(
+            &local_manifest,
+            r#"{
+  "schema_version": "template-manifest-v1",
+  "default_template_version": "local-only@v1",
+  "templates": [
+    {
+      "version": "basic-50x30@v1",
+      "path": "local-overlay.json",
+      "label_name": "overlay-basic",
+      "enabled": true
+    },
+    {
+      "version": "local-only@v1",
+      "path": "local-only.json",
+      "label_name": "local-only",
+      "enabled": true
+    }
+  ]
+}"#,
+        )
+        .expect("should write local manifest");
+
+        let catalog = template_catalog_with_overlay(Some(&local_manifest))
+            .expect("overlay catalog should resolve");
+        assert_eq!(catalog.default_template_version, "local-only@v1");
+        assert_eq!(catalog.templates.len(), 2);
+        assert_eq!(catalog.templates[0].version, "basic-50x30@v1");
+        assert_eq!(catalog.templates[1].version, "local-only@v1");
+
+        let overridden = resolve_template_with_overlay("basic-50x30@v1", Some(&local_manifest))
+            .expect("overlay version should resolve from local template");
+        assert_eq!(
+            overridden.page.background_fill.as_deref(),
+            Some("#00ff00"),
+            "local catalog entry should override packaged path for same version"
+        );
+
+        let local_only = resolve_template_with_overlay("local-only@v1", Some(&local_manifest))
+            .expect("local-only version should resolve");
+        assert_eq!(
+            local_only.page.background_fill.as_deref(),
+            Some("#0000ff"),
+            "local-only version should be available from overlay"
+        );
+    }
+
+    #[test]
+    fn template_catalog_with_overlay_respects_local_disable() {
+        let catalog_root = setup_local_template_overlay_dir("template-overlay-disable");
+        let local_manifest = catalog_root.join("template-manifest.json");
+        let local_template = catalog_root.join("basic-50x30@v1.json");
+
+        write_local_template_file(
+            &local_template,
+            r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "basic-50x30@v1",
+              "label_name": "disabled-overlay",
+              "page": { "width_mm": 50, "height_mm": 30, "background_fill": "#ff0000" },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "sku:{sku}"
+                }
+              ]
+            }
+            "##,
+        );
+        fs::write(
+            &local_manifest,
+            r#"{
+  "schema_version": "template-manifest-v1",
+  "default_template_version": "basic-50x30@v1",
+  "templates": [
+    {
+      "version": "basic-50x30@v1",
+      "path": "basic-50x30@v1.json",
+      "label_name": "disabled-overlay",
+      "enabled": false
+    }
+  ]
+}"#,
+        )
+        .expect("should write local manifest");
+
+        let error = resolve_template_with_overlay("basic-50x30@v1", Some(&local_manifest))
+            .expect_err("disabled local overlay should hide template");
+        assert!(matches!(
+            error,
+            TemplateResolutionError::UnknownTemplateVersion { requested, .. } if requested == "basic-50x30@v1"
+        ));
+    }
+
+    #[test]
     fn render_svg_unknown_template_returns_error() {
         let request = RenderLabelRequest {
             template_version: "missing-template@v9".to_string(),
@@ -1014,6 +1292,21 @@ mod tests {
                 }
             })
             .collect()
+    }
+
+    fn setup_local_template_overlay_dir(name: &str) -> PathBuf {
+        let nanos = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be available")
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("{name}-{nanos}"));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).expect("local overlay directory should be created");
+        dir
+    }
+
+    fn write_local_template_file(path: &PathBuf, source: &str) {
+        fs::write(path, source).expect("template file should be written");
     }
 
     fn approx_eq(a: f64, b: f64, epsilon: f64) -> bool {

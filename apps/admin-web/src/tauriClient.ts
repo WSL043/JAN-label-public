@@ -10,6 +10,7 @@ const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
 const TEMPLATE_CATALOG_COMMAND = "template_catalog_command";
+const SAVE_TEMPLATE_TO_LOCAL_CATALOG_COMMAND = "save_template_to_local_catalog";
 const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
 const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
 
@@ -215,6 +216,18 @@ export type TemplateCatalogEntry = {
   version: string;
   labelName: string;
   description?: string;
+  source?: TemplateCatalogSource;
+};
+export type TemplateCatalogSource = "packaged" | "local" | "unknown";
+
+export type SaveTemplateToLocalCatalogRequest = {
+  templateSource: string;
+};
+
+export type SaveTemplateToLocalCatalogResult = {
+  templateVersion?: string;
+  status?: "created" | "updated" | "unchanged";
+  message?: string;
 };
 
 export type TemplateCatalogResult = {
@@ -311,6 +324,19 @@ export async function fetchTemplateCatalog(): Promise<TemplateCatalogResult> {
     );
   }
   return invoke<TemplateCatalogResult>(TEMPLATE_CATALOG_COMMAND, {});
+}
+
+export async function saveTemplateToLocalCatalog(
+  request: SaveTemplateToLocalCatalogRequest,
+): Promise<SaveTemplateToLocalCatalogResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to save template drafts.",
+    );
+  }
+  return invoke<SaveTemplateToLocalCatalogResult>(SAVE_TEMPLATE_TO_LOCAL_CATALOG_COMMAND, {
+    request,
+  });
 }
 
 export async function validateLegacyProofSeed(
