@@ -1,10 +1,10 @@
 # current-state
 
-- Updated: 2026-04-15
-- Branch: `codex/release-bridge-proof-hardening`
+- Updated: 2026-04-16
+- Branch: `codex/t047-template-authoring-hardening`
 - Release base: `v0.1.3` (`0e22216`)
-- Active PR: `#25`
-- Branch relation to `origin/main` on 2026-04-15 after `v0.1.3`: `0 behind / 19 ahead`
+- Active PR: `pending`
+- Branch relation to `origin/main` on 2026-04-16: pending branch publication
 
 ## Shipping Now
 
@@ -52,11 +52,22 @@
 - Compose actions were tightened:
   - submit now uses the current live draft
   - preview shows the live payload instead of a stale staged payload
+- Compose review now makes live payload, staged snapshot, and catalog-backed dispatch authority explicit.
 - Queue clear is now explicit through a dedicated command instead of inline ad-hoc state mutation.
 - Queue and audit lanes now support:
   - client-side sort and filter controls
   - page-size and page navigation for larger result sets
   - explicit queue mutation lock while batch submit is active
+- Template authoring is now split into:
+  - structure
+  - fields
+  - review
+  - catalog
+- Template lane now separates:
+  - local autosaved live draft
+  - approximate local canvas preview
+  - authoritative Rust preview
+  - saved desktop catalog state
 
 ## Release Boundary
 
@@ -107,10 +118,9 @@ Operational note:
 
 ## Next Main Tasks
 
-1. `T-047`: template authoring interaction hardening and staged/live review clarity
-2. `T-028f-restore`: audit backup restore flow
-3. `T-016`: release notes / packaging hardening
-4. `T-043`: release checklist automation
+1. `T-028f-restore`: audit backup restore flow
+2. `T-016`: release notes / packaging hardening
+3. `T-043`: release checklist automation
 
 ## External Deferrals
 

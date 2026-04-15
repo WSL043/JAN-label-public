@@ -205,6 +205,7 @@ type TemplateRenderPreviewState = {
   result: TemplateDraftPreviewResult | null;
 };
 type WorkspaceMode = "compose" | "templates" | "queue" | "audit";
+type TemplateWorkspaceMode = "structure" | "fields" | "review" | "catalog";
 type ActivityTone = "neutral" | "ok" | "warning" | "error";
 type ActivityItem = {
   id: string;
@@ -2414,6 +2415,8 @@ export function App() {
     message: "Run Rust preview to compare the live editor against the renderer path.",
     result: null,
   });
+  const [templateWorkspaceMode, setTemplateWorkspaceMode] =
+    useState<TemplateWorkspaceMode>("structure");
 
   const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
   const [templateParseError, setTemplateParseError] = useState<string | null>(null);
@@ -2697,6 +2700,187 @@ export function App() {
           : "1px",
       }
     : undefined;
+  const templateValidationTone =
+    templateValidation.status === "ok"
+      ? "ok"
+      : templateValidation.status === "stale"
+        ? "warning"
+        : "error";
+  const templateRenderTone =
+    templateRenderPreview.phase === "ready"
+      ? "ok"
+      : templateRenderPreview.phase === "rendering"
+        ? "warning"
+        : templateRenderPreview.phase === "error" || templateRenderPreview.phase === "unavailable"
+          ? "error"
+          : "neutral";
+  const templateCatalogTone = templateCatalogIssue
+    ? "error"
+    : templateCatalogWriteState.phase === "success"
+      ? "ok"
+      : templateCatalogWriteState.phase === "submitting"
+        ? "warning"
+        : "neutral";
+  const draftSnapshotTone = draftIsStale ? "warning" : draftSnapshot ? "ok" : "neutral";
+  const templateCatalogHeadline = templateCatalogIssue
+    ? "Catalog route blocked"
+    : templateCatalogWriteState.phase === "success"
+      ? "Draft saved to desktop catalog"
+      : templateReference && templateReferenceIsKnown
+        ? "Catalog route known"
+        : "Draft not saved to desktop catalog";
+  const templateCatalogDetail = templateCatalogIssue
+    ? templateCatalogIssue
+    : templateCatalogWriteState.phase === "success"
+      ? templateCatalogWriteState.message ||
+        "Desktop local catalog now contains the saved template."
+      : templateReference && templateReferenceIsKnown
+        ? `${templateReferenceVersion} resolves through the ${templateReferenceCatalogSource} catalog, but live editor changes still need an explicit save before dispatch uses them.`
+        : "Live JSON edits stay local until you save them into the desktop template catalog.";
+  const templateWorkspaceItems: Array<{
+    id: TemplateWorkspaceMode;
+    label: string;
+    description: string;
+    badge: string;
+  }> = [
+    {
+      id: "structure",
+      label: "Structure",
+      description: "Template id, page, and border controls",
+      badge: templateValidation.status,
+    },
+    {
+      id: "fields",
+      label: "Fields",
+      description: "Text bindings and field order",
+      badge: `${templateEditorModel?.fields.length ?? 0} fields`,
+    },
+    {
+      id: "review",
+      label: "Review",
+      description: "Local canvas vs Rust renderer",
+      badge:
+        templateRenderPreview.phase === "ready"
+          ? "rust-ready"
+          : templateRenderPreview.phase === "rendering"
+            ? "rendering"
+            : templateRenderPreview.phase,
+    },
+    {
+      id: "catalog",
+      label: "Catalog",
+      description: "JSON, import/export, and save",
+      badge:
+        templateCatalogWriteState.phase === "success"
+          ? "saved"
+          : templateCatalogIssue
+            ? "blocked"
+            : "draft-only",
+    },
+  ];
+  const templateStateCards: Array<{
+    id: string;
+    label: string;
+    title: string;
+    detail: string;
+    note: string;
+    tone: "neutral" | "ok" | "warning" | "error";
+  }> = [
+    {
+      id: "live-draft",
+      label: "Live draft",
+      title:
+        templateValidation.status === "ok"
+          ? "Structured + JSON draft are aligned"
+          : templateValidation.status === "stale"
+            ? "Draft parses but still needs cleanup"
+            : "Draft is invalid",
+      detail:
+        templatePersistedState.savedAt !== null
+          ? `Local autosave: ${formatSavedAt(templatePersistedState.savedAt)}.`
+          : "No restored autosave yet for this template draft.",
+      note:
+        templateValidation.message ??
+        "Structured controls, local canvas preview, and Rust preview all read from this live JSON draft.",
+      tone: templateValidationTone,
+    },
+    {
+      id: "local-preview",
+      label: "Local canvas",
+      title: templateEditorModel ? "Approximate layout ready" : "Needs valid template JSON",
+      detail: templateEditorModel
+        ? "Canvas preview uses current form bindings and local-only placeholder support."
+        : "Fix JSON parsing before the local preview canvas can render.",
+      note: "This view is for authoring feedback only. It does not replace Rust output or proof/PDF review.",
+      tone: templateEditorModel ? "ok" : "warning",
+    },
+    {
+      id: "rust-preview",
+      label: "Rust preview",
+      title:
+        templateRenderPreview.phase === "ready"
+          ? "Renderer preview is current"
+          : templateRenderPreview.phase === "rendering"
+            ? "Rendering current live draft"
+            : templateRenderPreview.phase === "error"
+              ? "Renderer preview failed"
+              : "Renderer preview not refreshed",
+      detail: templateRenderPreview.message,
+      note: "Rust preview is authoritative for the current live JSON draft, not for saved catalog history.",
+      tone: templateRenderTone,
+    },
+    {
+      id: "catalog-state",
+      label: "Dispatch authority",
+      title: templateCatalogHeadline,
+      detail: templateCatalogDetail,
+      note: "Proof and print dispatch resolve saved catalog entries by template_version. Unsaved editor changes do not dispatch.",
+      tone: templateCatalogTone,
+    },
+  ];
+  const composeReviewCards: Array<{
+    id: string;
+    label: string;
+    title: string;
+    detail: string;
+    tone: "neutral" | "ok" | "warning" | "error";
+  }> = [
+    {
+      id: "compose-live",
+      label: "Live payload",
+      title: draft ? "Submit uses the current form state" : "No live payload yet",
+      detail: draft
+        ? `Current route: ${templateOptionLabel} / ${executionMeta}.`
+        : "Fill the required fields before a live payload can be built.",
+      tone: draft ? "ok" : "warning",
+    },
+    {
+      id: "compose-stage",
+      label: "Staged snapshot",
+      title: draftSnapshot
+        ? draftIsStale
+          ? "Snapshot is older than the live form"
+          : "Snapshot matches the live payload"
+        : "No staged snapshot",
+      detail: draftSnapshot
+        ? "Stage is for pinned review/export only. It does not override Submit current draft."
+        : "Create a staged snapshot only when you need a frozen comparison or export copy.",
+      tone: draftSnapshotTone,
+    },
+    {
+      id: "compose-dispatch",
+      label: "Dispatch boundary",
+      title: templateCatalogIssue
+        ? "Template route is blocked"
+        : form.executionMode === "print"
+          ? "Print remains proof-gated"
+          : "Proof dispatch uses the live payload",
+      detail: templateCatalogIssue
+        ? templateCatalogIssue
+        : "Unsaved template editor changes stay local until the template is saved into the desktop catalog.",
+      tone: templateCatalogIssue ? "error" : form.executionMode === "print" ? "warning" : "ok",
+    },
+  ];
   const pendingProofCount = auditSearch.entries.filter(
     (entry) => entry.proof?.status === "pending",
   ).length;
@@ -4760,6 +4944,15 @@ export function App() {
                         <small>{executionModeLabel}</small>
                       </div>
                     </div>
+                    <div className="state-card-grid">
+                      {composeReviewCards.map((item) => (
+                        <article className={`state-card ${item.tone}`} key={item.id}>
+                          <span>{item.label}</span>
+                          <strong>{item.title}</strong>
+                          <p>{item.detail}</p>
+                        </article>
+                      ))}
+                    </div>
 
                     {previewJson ? (
                       <>
@@ -4811,295 +5004,348 @@ export function App() {
                     so catalog resolution stays aligned with dispatch gates.
                   </p>
                 </div>
-                <div className="template-workbench">
+                <div className="lane-tab-list">
+                  {templateWorkspaceItems.map((item) => (
+                    <button
+                      className={`lane-tab ${templateWorkspaceMode === item.id ? "active" : ""}`}
+                      key={item.id}
+                      type="button"
+                      onClick={() => setTemplateWorkspaceMode(item.id)}
+                    >
+                      <span>{item.label}</span>
+                      <strong>{item.badge}</strong>
+                      <small>{item.description}</small>
+                    </button>
+                  ))}
+                </div>
+                <div className="state-card-grid">
+                  {templateStateCards.map((item) => (
+                    <article className={`state-card ${item.tone}`} key={item.id}>
+                      <span>{item.label}</span>
+                      <strong>{item.title}</strong>
+                      <p>{item.detail}</p>
+                      <small>{item.note}</small>
+                    </article>
+                  ))}
+                </div>
+                <div
+                  className={`template-workbench ${
+                    templateWorkspaceMode === "review" ? "review-mode" : ""
+                  }`}
+                >
                   <div className="template-editor-column">
                     {templateEditorModel ? (
                       <>
-                        <div className="template-control-grid">
-                          <label className="field">
-                            <span>Label name</span>
-                            <input
-                              value={templateEditorModel.labelName}
-                              onChange={(event) =>
-                                updateTemplateMetaField("label_name", event.target.value)
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Template version</span>
-                            <input
-                              value={templateEditorModel.templateVersion}
-                              onChange={(event) =>
-                                updateTemplateMetaField("template_version", event.target.value)
-                              }
-                            />
-                          </label>
-                          <label className="field field-wide">
-                            <span>Description</span>
-                            <input
-                              value={templateEditorModel.description}
-                              onChange={(event) =>
-                                updateTemplateMetaField("description", event.target.value)
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Width (mm)</span>
-                            <input
-                              type="number"
-                              min="1"
-                              step="0.1"
-                              value={templateEditorModel.page.widthMm}
-                              onChange={(event) =>
-                                updateTemplatePageField(
-                                  "width_mm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Height (mm)</span>
-                            <input
-                              type="number"
-                              min="1"
-                              step="0.1"
-                              value={templateEditorModel.page.heightMm}
-                              onChange={(event) =>
-                                updateTemplatePageField(
-                                  "height_mm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Background</span>
-                            <div className="color-row">
-                              <input
-                                type="color"
-                                value={templateEditorModel.page.backgroundFill}
-                                onChange={(event) =>
-                                  updateTemplatePageField("background_fill", event.target.value)
-                                }
-                              />
-                              <input
-                                value={templateEditorModel.page.backgroundFill}
-                                onChange={(event) =>
-                                  updateTemplatePageField("background_fill", event.target.value)
-                                }
-                              />
+                        {templateWorkspaceMode === "structure" ? (
+                          <div className="template-section-stack">
+                            <div className="section-heading">
+                              <h3>Template structure</h3>
+                              <p>Adjust template identity, page geometry, and border styling.</p>
                             </div>
-                          </label>
-                          <div className="field checkbox-field">
-                            <span>Border</span>
-                            <label className="checkbox-row">
-                              <input
-                                type="checkbox"
-                                checked={templateEditorModel.border.visible}
-                                onChange={(event) =>
-                                  updateTemplateBorderField("visible", event.target.checked)
-                                }
-                              />
-                              <span>Show border in render and preview</span>
-                            </label>
+                            <div className="template-control-grid">
+                              <label className="field">
+                                <span>Label name</span>
+                                <input
+                                  value={templateEditorModel.labelName}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("label_name", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Template version</span>
+                                <input
+                                  value={templateEditorModel.templateVersion}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("template_version", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field field-wide">
+                                <span>Description</span>
+                                <input
+                                  value={templateEditorModel.description}
+                                  onChange={(event) =>
+                                    updateTemplateMetaField("description", event.target.value)
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Width (mm)</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="0.1"
+                                  value={templateEditorModel.page.widthMm}
+                                  onChange={(event) =>
+                                    updateTemplatePageField(
+                                      "width_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Height (mm)</span>
+                                <input
+                                  type="number"
+                                  min="1"
+                                  step="0.1"
+                                  value={templateEditorModel.page.heightMm}
+                                  onChange={(event) =>
+                                    updateTemplatePageField(
+                                      "height_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label className="field">
+                                <span>Background</span>
+                                <div className="color-row">
+                                  <input
+                                    type="color"
+                                    value={templateEditorModel.page.backgroundFill}
+                                    onChange={(event) =>
+                                      updateTemplatePageField("background_fill", event.target.value)
+                                    }
+                                  />
+                                  <input
+                                    value={templateEditorModel.page.backgroundFill}
+                                    onChange={(event) =>
+                                      updateTemplatePageField("background_fill", event.target.value)
+                                    }
+                                  />
+                                </div>
+                              </label>
+                              <div className="field checkbox-field">
+                                <span>Border</span>
+                                <label className="checkbox-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={templateEditorModel.border.visible}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("visible", event.target.checked)
+                                    }
+                                  />
+                                  <span>Show border in render and preview</span>
+                                </label>
+                              </div>
+                              <label className="field">
+                                <span>Border color</span>
+                                <div className="color-row">
+                                  <input
+                                    type="color"
+                                    value={templateEditorModel.border.color}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("color", event.target.value)
+                                    }
+                                  />
+                                  <input
+                                    value={templateEditorModel.border.color}
+                                    onChange={(event) =>
+                                      updateTemplateBorderField("color", event.target.value)
+                                    }
+                                  />
+                                </div>
+                              </label>
+                              <label className="field">
+                                <span>Border width (mm)</span>
+                                <input
+                                  type="number"
+                                  min="0"
+                                  step="0.1"
+                                  value={templateEditorModel.border.widthMm}
+                                  onChange={(event) =>
+                                    updateTemplateBorderField(
+                                      "width_mm",
+                                      Number.parseFloat(event.target.value || "0"),
+                                    )
+                                  }
+                                />
+                              </label>
+                            </div>
                           </div>
-                          <label className="field">
-                            <span>Border color</span>
-                            <div className="color-row">
-                              <input
-                                type="color"
-                                value={templateEditorModel.border.color}
-                                onChange={(event) =>
-                                  updateTemplateBorderField("color", event.target.value)
-                                }
-                              />
-                              <input
-                                value={templateEditorModel.border.color}
-                                onChange={(event) =>
-                                  updateTemplateBorderField("color", event.target.value)
-                                }
-                              />
-                            </div>
-                          </label>
-                          <label className="field">
-                            <span>Border width (mm)</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={templateEditorModel.border.widthMm}
-                              onChange={(event) =>
-                                updateTemplateBorderField(
-                                  "width_mm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                        </div>
+                        ) : null}
 
-                        <div className="template-fields-panel">
-                          <div className="data-grid-header">
-                            <strong>Template fields</strong>
-                            <span>{templateEditorModel.fields.length} fields</span>
-                          </div>
-                          <div className="template-field-list">
-                            {templateEditorModel.fields.map((field, index) => (
-                              <article
-                                className="template-field-card"
-                                key={`${field.name}-${index}`}
-                              >
-                                <div className="template-field-header">
-                                  <div>
-                                    <strong>{field.name || `field_${index + 1}`}</strong>
-                                    <small>
-                                      {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
-                                      {field.fontSizeMm.toFixed(1)}mm
-                                    </small>
-                                  </div>
-                                  <div className="template-field-actions">
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      onClick={() => moveTemplateField(index, -1)}
-                                      disabled={index === 0}
-                                    >
-                                      Up
-                                    </button>
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      onClick={() => moveTemplateField(index, 1)}
-                                      disabled={index === templateEditorModel.fields.length - 1}
-                                    >
-                                      Down
-                                    </button>
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      onClick={() => duplicateTemplateField(index)}
-                                    >
-                                      Duplicate
-                                    </button>
-                                    <button
-                                      className="button-secondary"
-                                      type="button"
-                                      onClick={() => removeTemplateField(index)}
-                                      disabled={templateEditorModel.fields.length <= 1}
-                                    >
-                                      Delete
-                                    </button>
-                                  </div>
-                                </div>
-                                <div className="template-control-grid">
-                                  <label className="field">
-                                    <span>Name</span>
-                                    <input
-                                      value={field.name}
-                                      onChange={(event) =>
-                                        updateTemplateFieldRow(index, "name", event.target.value)
-                                      }
-                                    />
-                                  </label>
-                                  <label className="field field-wide">
-                                    <span>Text template</span>
-                                    <input
-                                      value={field.template}
-                                      onChange={(event) =>
-                                        updateTemplateFieldRow(
-                                          index,
-                                          "template",
-                                          event.target.value,
-                                        )
-                                      }
-                                    />
-                                    <small className="hint-text">
-                                      Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
-                                      preview-only:{" "}
-                                      {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
-                                    </small>
-                                  </label>
-                                  <label className="field">
-                                    <span>X (mm)</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.1"
-                                      value={field.xMm}
-                                      onChange={(event) =>
-                                        updateTemplateFieldRow(
-                                          index,
-                                          "xMm",
-                                          Number.parseFloat(event.target.value || "0"),
-                                        )
-                                      }
-                                    />
-                                  </label>
-                                  <label className="field">
-                                    <span>Y (mm)</span>
-                                    <input
-                                      type="number"
-                                      min="0"
-                                      step="0.1"
-                                      value={field.yMm}
-                                      onChange={(event) =>
-                                        updateTemplateFieldRow(
-                                          index,
-                                          "yMm",
-                                          Number.parseFloat(event.target.value || "0"),
-                                        )
-                                      }
-                                    />
-                                  </label>
-                                  <label className="field">
-                                    <span>Font size (mm)</span>
-                                    <input
-                                      type="number"
-                                      min="0.1"
-                                      step="0.1"
-                                      value={field.fontSizeMm}
-                                      onChange={(event) =>
-                                        updateTemplateFieldRow(
-                                          index,
-                                          "fontSizeMm",
-                                          Number.parseFloat(event.target.value || "0"),
-                                        )
-                                      }
-                                    />
-                                  </label>
-                                  <label className="field">
-                                    <span>Color</span>
-                                    <div className="color-row">
-                                      <input
-                                        type="color"
-                                        value={field.color}
-                                        onChange={(event) =>
-                                          updateTemplateFieldRow(index, "color", event.target.value)
-                                        }
-                                      />
-                                      <input
-                                        value={field.color}
-                                        onChange={(event) =>
-                                          updateTemplateFieldRow(index, "color", event.target.value)
-                                        }
-                                      />
+                        {templateWorkspaceMode === "fields" ? (
+                          <div className="template-fields-panel">
+                            <div className="section-heading">
+                              <h3>Field bindings</h3>
+                              <p>
+                                Edit text templates, placement, font sizing, color, and field order
+                                without mixing page controls into the same surface.
+                              </p>
+                            </div>
+                            <div className="data-grid-header">
+                              <strong>Template fields</strong>
+                              <span>{templateEditorModel.fields.length} fields</span>
+                            </div>
+                            <div className="template-field-list">
+                              {templateEditorModel.fields.map((field, index) => (
+                                <article
+                                  className="template-field-card"
+                                  key={`${field.name}-${index}`}
+                                >
+                                  <div className="template-field-header">
+                                    <div>
+                                      <strong>{field.name || `field_${index + 1}`}</strong>
+                                      <small>
+                                        {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
+                                        {field.fontSizeMm.toFixed(1)}mm
+                                      </small>
                                     </div>
-                                  </label>
-                                </div>
-                              </article>
-                            ))}
+                                    <div className="template-field-actions">
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => moveTemplateField(index, -1)}
+                                        disabled={index === 0}
+                                      >
+                                        Up
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => moveTemplateField(index, 1)}
+                                        disabled={index === templateEditorModel.fields.length - 1}
+                                      >
+                                        Down
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => duplicateTemplateField(index)}
+                                      >
+                                        Duplicate
+                                      </button>
+                                      <button
+                                        className="button-secondary"
+                                        type="button"
+                                        onClick={() => removeTemplateField(index)}
+                                        disabled={templateEditorModel.fields.length <= 1}
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                  <div className="template-control-grid">
+                                    <label className="field">
+                                      <span>Name</span>
+                                      <input
+                                        value={field.name}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(index, "name", event.target.value)
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field field-wide">
+                                      <span>Text template</span>
+                                      <input
+                                        value={field.template}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "template",
+                                            event.target.value,
+                                          )
+                                        }
+                                      />
+                                      <small className="hint-text">
+                                        Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
+                                        preview-only:{" "}
+                                        {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
+                                      </small>
+                                    </label>
+                                    <label className="field">
+                                      <span>X (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={field.xMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "xMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Y (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0"
+                                        step="0.1"
+                                        value={field.yMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "yMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Font size (mm)</span>
+                                      <input
+                                        type="number"
+                                        min="0.1"
+                                        step="0.1"
+                                        value={field.fontSizeMm}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(
+                                            index,
+                                            "fontSizeMm",
+                                            Number.parseFloat(event.target.value || "0"),
+                                          )
+                                        }
+                                      />
+                                    </label>
+                                    <label className="field">
+                                      <span>Color</span>
+                                      <div className="color-row">
+                                        <input
+                                          type="color"
+                                          value={field.color}
+                                          onChange={(event) =>
+                                            updateTemplateFieldRow(
+                                              index,
+                                              "color",
+                                              event.target.value,
+                                            )
+                                          }
+                                        />
+                                        <input
+                                          value={field.color}
+                                          onChange={(event) =>
+                                            updateTemplateFieldRow(
+                                              index,
+                                              "color",
+                                              event.target.value,
+                                            )
+                                          }
+                                        />
+                                      </div>
+                                    </label>
+                                  </div>
+                                </article>
+                              ))}
+                            </div>
+                            <div className="toolbar">
+                              <button
+                                className="button-primary"
+                                type="button"
+                                onClick={addTemplateField}
+                              >
+                                Add text field
+                              </button>
+                            </div>
                           </div>
-                          <div className="toolbar">
-                            <button
-                              className="button-primary"
-                              type="button"
-                              onClick={addTemplateField}
-                            >
-                              Add text field
-                            </button>
-                          </div>
-                        </div>
+                        ) : null}
                       </>
                     ) : (
                       <div className="empty-state">
@@ -5111,72 +5357,71 @@ export function App() {
                       </div>
                     )}
 
-                    <label className="field field-wide">
-                      <span>Template spec JSON</span>
-                      <textarea
-                        className="batch-text"
-                        value={templateSource}
-                        onChange={(event) => updateTemplateSource(event.target.value)}
-                        onBlur={validateTemplateText}
-                      />
-                      {templateParseError ? (
-                        <small className="error-text">{templateParseError}</small>
-                      ) : null}
-                      {templateImportError ? (
-                        <small className="error-text">{templateImportError}</small>
-                      ) : null}
-                      {templateMetaInfo ? (
-                        <small className="hint-text">
-                          schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
-                          {templateMetaInfo.templateVersion} / label_name:{" "}
-                          {templateMetaInfo.labelName}
-                        </small>
-                      ) : null}
-                    </label>
+                    {templateWorkspaceMode === "catalog" ? (
+                      <label className="field field-wide">
+                        <span>Template spec JSON</span>
+                        <textarea
+                          className="batch-text"
+                          value={templateSource}
+                          onChange={(event) => updateTemplateSource(event.target.value)}
+                          onBlur={validateTemplateText}
+                        />
+                        {templateParseError ? (
+                          <small className="error-text">{templateParseError}</small>
+                        ) : null}
+                        {templateImportError ? (
+                          <small className="error-text">{templateImportError}</small>
+                        ) : null}
+                        {templateMetaInfo ? (
+                          <small className="hint-text">
+                            schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
+                            {templateMetaInfo.templateVersion} / label_name:{" "}
+                            {templateMetaInfo.labelName}
+                          </small>
+                        ) : null}
+                      </label>
+                    ) : null}
                   </div>
 
                   <aside className="template-preview-column">
-                    <div className="section-heading">
-                      <h3>Visual template preview</h3>
-                      <p>
-                        Approximate label layout preview from the current template spec and live
-                        form values.
-                      </p>
-                    </div>
-                    {templateEditorModel ? (
+                    {templateWorkspaceMode === "structure" ? (
                       <>
-                        <div className="preview-summary">
-                          <div>
-                            <span>Label size</span>
-                            <strong>
-                              {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
-                              {templateEditorModel.page.heightMm.toFixed(1)} mm
-                            </strong>
-                            <small>{templateEditorModel.fields.length} fields</small>
-                          </div>
-                          <div>
-                            <span>Template state</span>
-                            <strong>{templateValidation.status}</strong>
-                            <small>
-                              {templateValidation.message ?? "Schema route looks aligned."}
-                            </small>
-                          </div>
+                        <div className="proof-note">
+                          <strong>What changes here</strong>
+                          <p>
+                            These controls update the live JSON draft immediately. They do not save
+                            a new dispatchable catalog entry until you switch to Catalog and save.
+                          </p>
                         </div>
-                        {templateCatalogIssue ? (
-                          <div className="proof-note">
-                            <strong>Catalog mismatch</strong>
-                            <p>{templateCatalogIssue}</p>
-                          </div>
-                        ) : null}
                         {templateReference ? (
                           <div className="proof-note">
-                            <strong>Catalog source</strong>
+                            <strong>Current catalog route</strong>
                             <p>
                               {templateReferenceVersion} is tracked as{" "}
                               {templateReferenceCatalogSource}.
                             </p>
                           </div>
                         ) : null}
+                        <div className="proof-note">
+                          <strong>Next step</strong>
+                          <p>
+                            Move to Fields to adjust text bindings, then use Review to compare the
+                            approximate canvas against the Rust renderer path.
+                          </p>
+                        </div>
+                      </>
+                    ) : null}
+
+                    {templateWorkspaceMode === "fields" ? (
+                      <>
+                        <div className="proof-note">
+                          <strong>Placeholder scope</strong>
+                          <p>
+                            Rust render uses {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local-only
+                            preview placeholders stay inside the authoring canvas and do not flow
+                            into proof or PDF output.
+                          </p>
+                        </div>
                         {templateUsesPreviewOnlyPlaceholder ? (
                           <div className="proof-note">
                             <strong>Preview-only placeholder detected</strong>
@@ -5186,140 +5431,225 @@ export function App() {
                             </p>
                           </div>
                         ) : null}
-                        <div className="template-canvas-shell">
-                          <div className="template-canvas" style={templateCanvasStyle}>
-                            {templateEditorModel.border.visible ? (
-                              <div className="template-canvas-border" />
-                            ) : null}
-                            {templateEditorModel.fields.map((field, index) => (
-                              <div
-                                className="template-canvas-field"
-                                key={`${field.name}-${index}-preview`}
-                                style={{
-                                  left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
-                                  top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
-                                  fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
-                                  color: field.color,
-                                }}
-                              >
-                                {renderTemplatePreviewText(field.template, templatePreviewBindings)}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
                         <div className="proof-note">
-                          <strong>Local binding sample</strong>
+                          <strong>Next step</strong>
                           <p>
-                            job_id: {templatePreviewBindings.job_id} / sku:{" "}
-                            {templatePreviewBindings.sku} / jan: {templatePreviewBindings.jan}
+                            Switch to Review after changing bindings so local canvas placement and
+                            Rust renderer output can be compared directly.
                           </p>
                         </div>
-                        <div className="template-render-preview">
-                          <div className="data-grid-header">
-                            <strong>Rust renderer preview</strong>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              onClick={() => void refreshTemplateRenderPreview()}
-                              disabled={templateRenderPreview.phase === "rendering"}
-                            >
-                              {templateRenderPreview.phase === "rendering"
-                                ? "Rendering..."
-                                : "Refresh Rust preview"}
-                            </button>
-                          </div>
-                          <p className="hint-text">{templateRenderPreview.message}</p>
-                          {templateRenderPreview.phase === "ready" &&
-                          templateRenderPreview.result &&
-                          templateRenderPreviewSvgDataUrl ? (
-                            <>
-                              <div className="preview-summary">
-                                <div>
-                                  <span>Renderer output</span>
-                                  <strong>{templateRenderPreview.result.labelName}</strong>
-                                  <small>
-                                    {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
-                                    {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm / JAN{" "}
-                                    {templateRenderPreview.result.normalizedJan}
-                                  </small>
-                                </div>
-                              </div>
-                              <div className="template-render-preview-frame">
-                                <img
-                                  className="template-render-preview-image"
-                                  src={templateRenderPreviewSvgDataUrl}
-                                  alt="Rust renderer SVG preview"
-                                />
-                              </div>
-                            </>
-                          ) : null}
-                        </div>
                       </>
-                    ) : (
-                      <div className="empty-state">
-                        <strong>No visual preview</strong>
-                        <p>
-                          Template JSON must be valid before the preview canvas can be rendered.
-                        </p>
-                      </div>
-                    )}
+                    ) : null}
+
+                    {templateWorkspaceMode === "review" ? (
+                      templateEditorModel ? (
+                        <>
+                          <div className="section-heading">
+                            <h3>Review live authoring output</h3>
+                            <p>
+                              Compare the approximate local canvas with the authoritative Rust
+                              renderer for the current live JSON draft.
+                            </p>
+                          </div>
+                          <div className="proof-note">
+                            <strong>Authority split</strong>
+                            <p>
+                              Local canvas is for editing feedback only. Rust preview verifies the
+                              live JSON draft. Proof/print dispatch still uses saved catalog
+                              entries.
+                            </p>
+                          </div>
+                          <div className="preview-summary">
+                            <div>
+                              <span>Label size</span>
+                              <strong>
+                                {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
+                                {templateEditorModel.page.heightMm.toFixed(1)} mm
+                              </strong>
+                              <small>{templateEditorModel.fields.length} fields</small>
+                            </div>
+                            <div>
+                              <span>Template state</span>
+                              <strong>{templateValidation.status}</strong>
+                              <small>
+                                {templateValidation.message ?? "Schema route looks aligned."}
+                              </small>
+                            </div>
+                          </div>
+                          <div className="template-canvas-shell">
+                            <div className="template-canvas" style={templateCanvasStyle}>
+                              {templateEditorModel.border.visible ? (
+                                <div className="template-canvas-border" />
+                              ) : null}
+                              {templateEditorModel.fields.map((field, index) => (
+                                <div
+                                  className="template-canvas-field"
+                                  key={`${field.name}-${index}-preview`}
+                                  style={{
+                                    left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
+                                    top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
+                                    fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
+                                    color: field.color,
+                                  }}
+                                >
+                                  {renderTemplatePreviewText(
+                                    field.template,
+                                    templatePreviewBindings,
+                                  )}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                          <div className="proof-note">
+                            <strong>Local binding sample</strong>
+                            <p>
+                              job_id: {templatePreviewBindings.job_id} / sku:{" "}
+                              {templatePreviewBindings.sku} / jan: {templatePreviewBindings.jan}
+                            </p>
+                          </div>
+                          {templateCatalogIssue ? (
+                            <div className="proof-note">
+                              <strong>Catalog mismatch</strong>
+                              <p>{templateCatalogIssue}</p>
+                            </div>
+                          ) : null}
+                          <div className="template-render-preview">
+                            <div className="data-grid-header">
+                              <strong>Rust renderer preview</strong>
+                              <button
+                                className="button-secondary"
+                                type="button"
+                                onClick={() => void refreshTemplateRenderPreview()}
+                                disabled={templateRenderPreview.phase === "rendering"}
+                              >
+                                {templateRenderPreview.phase === "rendering"
+                                  ? "Rendering..."
+                                  : "Refresh Rust preview"}
+                              </button>
+                            </div>
+                            <p className="hint-text">{templateRenderPreview.message}</p>
+                            {templateRenderPreview.phase === "ready" &&
+                            templateRenderPreview.result &&
+                            templateRenderPreviewSvgDataUrl ? (
+                              <>
+                                <div className="preview-summary">
+                                  <div>
+                                    <span>Renderer output</span>
+                                    <strong>{templateRenderPreview.result.labelName}</strong>
+                                    <small>
+                                      {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
+                                      {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm /
+                                      JAN {templateRenderPreview.result.normalizedJan}
+                                    </small>
+                                  </div>
+                                </div>
+                                <div className="template-render-preview-frame">
+                                  <img
+                                    className="template-render-preview-image"
+                                    src={templateRenderPreviewSvgDataUrl}
+                                    alt="Rust renderer SVG preview"
+                                  />
+                                </div>
+                              </>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty-state">
+                          <strong>No visual preview</strong>
+                          <p>
+                            Template JSON must be valid before the preview canvas can be rendered.
+                          </p>
+                        </div>
+                      )
+                    ) : null}
+
+                    {templateWorkspaceMode === "catalog" ? (
+                      <>
+                        <div className="proof-note">
+                          <strong>Live draft vs saved catalog</strong>
+                          <p>
+                            Browser autosave keeps your working JSON locally. Only Save template to
+                            local catalog makes the current draft dispatchable by template_version.
+                          </p>
+                        </div>
+                        {templateReference ? (
+                          <div className="proof-note">
+                            <strong>Catalog source</strong>
+                            <p>
+                              {templateReferenceVersion} is tracked as{" "}
+                              {templateReferenceCatalogSource}.
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="toolbar template-action-toolbar">
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={() => void runTemplateCatalogSave()}
+                            disabled={
+                              !isTauriConnected() ||
+                              templateCatalogWriteState.phase === "submitting"
+                            }
+                          >
+                            {templateCatalogWriteState.phase === "submitting"
+                              ? "Saving..."
+                              : "Save template to local catalog"}
+                          </button>
+                          <label className="button-secondary fake-button">
+                            Import template JSON / asset
+                            <input
+                              type="file"
+                              accept=".json,application/json"
+                              onChange={handleTemplateImport}
+                            />
+                          </label>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={handleTemplateExport}
+                          >
+                            Export template JSON
+                          </button>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={handleTemplateAssetExport}
+                          >
+                            Export template asset
+                          </button>
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={resetTemplateToDefaults}
+                          >
+                            Reset template
+                          </button>
+                          <button
+                            className="button-primary"
+                            type="button"
+                            onClick={validateTemplateText}
+                          >
+                            Validate JSON
+                          </button>
+                        </div>
+                        {templateCatalogWriteState.message ? (
+                          <p
+                            className={
+                              templateCatalogWriteState.phase === "success"
+                                ? "status-ok"
+                                : templateCatalogWriteState.phase === "error"
+                                  ? "status-fail"
+                                  : "notice-text"
+                            }
+                          >
+                            {templateCatalogWriteState.message}
+                          </p>
+                        ) : null}
+                      </>
+                    ) : null}
                   </aside>
                 </div>
-                <div className="toolbar">
-                  <button
-                    className="button-secondary"
-                    type="button"
-                    onClick={() => void runTemplateCatalogSave()}
-                    disabled={
-                      !isTauriConnected() || templateCatalogWriteState.phase === "submitting"
-                    }
-                  >
-                    {templateCatalogWriteState.phase === "submitting"
-                      ? "Saving..."
-                      : "Save template to local catalog"}
-                  </button>
-                  <label className="button-secondary fake-button">
-                    Import template JSON / asset
-                    <input
-                      type="file"
-                      accept=".json,application/json"
-                      onChange={handleTemplateImport}
-                    />
-                  </label>
-                  <button className="button-secondary" type="button" onClick={handleTemplateExport}>
-                    Export template JSON
-                  </button>
-                  <button
-                    className="button-secondary"
-                    type="button"
-                    onClick={handleTemplateAssetExport}
-                  >
-                    Export template asset
-                  </button>
-                  <button
-                    className="button-secondary"
-                    type="button"
-                    onClick={resetTemplateToDefaults}
-                  >
-                    Reset template
-                  </button>
-                  <button className="button-primary" type="button" onClick={validateTemplateText}>
-                    Validate JSON
-                  </button>
-                </div>
-                {templateCatalogWriteState.message ? (
-                  <p
-                    className={
-                      templateCatalogWriteState.phase === "success"
-                        ? "status-ok"
-                        : templateCatalogWriteState.phase === "error"
-                          ? "status-fail"
-                          : "notice-text"
-                    }
-                  >
-                    {templateCatalogWriteState.message}
-                  </p>
-                ) : null}
               </section>
             ) : null}
 

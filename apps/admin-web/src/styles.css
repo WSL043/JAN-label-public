@@ -570,6 +570,67 @@ button:disabled {
   gap: 10px;
 }
 
+.lane-tab-list,
+.state-card-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
+.lane-tab {
+  display: grid;
+  gap: 4px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: var(--bg-panel-muted);
+  color: var(--ink);
+  text-align: left;
+}
+
+.lane-tab.active {
+  border-color: var(--accent);
+  background: #eef4fb;
+  box-shadow: inset 0 0 0 1px rgba(47, 111, 173, 0.12);
+}
+
+.lane-tab strong {
+  font-size: 14px;
+}
+
+.lane-tab small,
+.state-card small {
+  color: var(--ink-soft);
+  line-height: 1.4;
+}
+
+.state-card {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.state-card.ok {
+  border-color: rgba(21, 128, 61, 0.24);
+  background: #f2fbf5;
+}
+
+.state-card.warning {
+  border-color: rgba(180, 83, 9, 0.24);
+  background: #fff8ef;
+}
+
+.state-card.error {
+  border-color: rgba(220, 38, 38, 0.24);
+  background: #fff2f2;
+}
+
+.state-card p {
+  margin: 0;
+  line-height: 1.5;
+}
+
 .status-pill {
   display: inline-flex;
   align-items: center;
@@ -688,11 +749,24 @@ button:disabled {
 
 .template-editor-column,
 .template-preview-column,
+.template-section-stack,
 .template-fields-panel,
 .template-field-list,
 .template-render-preview {
   display: grid;
   gap: 14px;
+}
+
+.template-workbench.review-mode {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.template-workbench.review-mode > .template-editor-column {
+  display: none;
+}
+
+.template-action-toolbar {
+  align-items: start;
 }
 
 .checkbox-field {

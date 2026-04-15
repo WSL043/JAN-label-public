@@ -89,15 +89,13 @@
 - resolution: queue and audit lanes now support desktop-oriented sort, filter, and page-size navigation instead of remaining fixed basic tables
 
 ## K-029 template authoring is denser than desired even after the shell reset
-- status: open
-- impact: the shell is desktop-oriented now, but the template lane still mixes structured properties, JSON editing, and preview into a dense workbench that needs clearer sub-modes
-- response: split the template lane into clearer authoring sub-flows under `T-047`
+- status: resolved
+- resolution: the template lane now separates structure, fields, review, and catalog sub-flows with explicit live-draft, Rust preview, and saved-catalog authority states
 
 ## K-030 queue can be cleared while batch submit is still running
 - status: resolved
 - resolution: queue mutation actions are now locked while batch submit is active, including source reset, queue snapshot rebuild, and clear-batch actions
 
 ## K-031 staged review and live dispatch semantics are still ambiguous
-- status: open
-- impact: the desktop shell now shows the live payload by default, but the difference between a staged snapshot and the payload that will actually dispatch is not yet explicit enough for high-trust operator review
-- response: make staged-vs-live review intent explicit in the compose and template flows under `T-047`
+- status: resolved
+- resolution: compose preview and template authoring now call out the live payload, staged snapshot, and saved catalog dispatch boundary separately so submit authority is explicit

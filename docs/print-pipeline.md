@@ -94,19 +94,26 @@ Safety:
 Current authoring flow:
 
 1. `admin-web` reads the desktop template catalog from `desktop-shell`.
-2. Operators edit page, border, and fields in the structured template editor.
-3. Local canvas preview shows approximate layout only.
-4. `preview_template_draft` renders live JSON through Rust for authoritative SVG preview.
-5. The operator saves valid live JSON into the desktop local template catalog.
-6. Saved local templates become valid dispatch targets by `template_version`.
-7. Proof and print dispatch resolve the same packaged/local overlay manifest that catalog validation uses.
+2. The template lane is split into four operator sub-flows:
+   - `Structure`: template identity, page, and border controls
+   - `Fields`: text bindings, ordering, and placement
+   - `Review`: local canvas vs Rust renderer comparison
+   - `Catalog`: JSON editing, import/export, and save-to-local-catalog actions
+3. Structured controls update the live JSON draft immediately.
+4. Local canvas preview shows approximate layout only.
+5. `preview_template_draft` renders live JSON through Rust for authoritative SVG preview.
+6. The operator saves valid live JSON into the desktop local template catalog.
+7. Saved local templates become valid dispatch targets by `template_version`.
+8. Proof and print dispatch resolve the same packaged/local overlay manifest that catalog validation uses.
 
 Important distinctions:
 
+- Browser autosave preserves the live draft locally, but it is not catalog approval.
 - Local canvas preview is approximate.
 - Rust preview is authoritative for the current live JSON draft.
 - Proof/print dispatch is authoritative for saved catalog entries, not unsaved editor state.
 - Unknown live `template_version` blocks queue/manual/batch submit.
+- Compose review treats staged snapshots as pinned review/export copies only; submit still uses the live payload.
 
 ## 8. Excel / CSV Import Direction
 
