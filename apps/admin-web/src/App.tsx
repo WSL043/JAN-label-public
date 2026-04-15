@@ -11,19 +11,22 @@
   PrinterProfile,
   ProofExecutionContext,
 } from "@label/job-schema";
-import { toDispatchRequest } from "@label/job-schema";
+import { templateVersionOf, toDispatchRequest } from "@label/job-schema";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
-import type { ChangeEvent, FormEvent } from "react";
+import type { CSSProperties, ChangeEvent, FormEvent } from "react";
 import {
   type AuditSearchEntry,
   type BridgeWarning,
   type LegacyProofSeedRequest,
   type LegacyProofSeedResult,
   type PrintBridgeStatus,
+  type TemplateDraftPreviewRequest,
+  type TemplateDraftPreviewResult,
   approveProof,
   dispatchPrintJob,
   fetchPrintBridgeStatus,
   isTauriConnected,
+  previewTemplateDraft,
   rejectProof,
   searchAuditLog,
   seedLegacyProofs,
@@ -101,6 +104,20 @@ const NON_BLOCKING_WARNING_PATTERNS: ReadonlyArray<RegExp> = [
   /is not set; defaulting/i,
   /will be created/i,
 ];
+const DEFAULT_TEMPLATE_FIELD_COLOR = "#14120f";
+const RUST_RENDER_PLACEHOLDERS = [
+  "job_id",
+  "sku",
+  "brand",
+  "jan",
+  "qty",
+  "template_version",
+] as const;
+const LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS = ["parent_sku"] as const;
+const TEMPLATE_PREVIEW_PLACEHOLDERS = [
+  ...RUST_RENDER_PLACEHOLDERS,
+  ...LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS,
+] as const;
 
 type PersistedItem<T> = {
   data: T;
@@ -139,6 +156,7 @@ type BridgeStatusState = {
   message: string;
 };
 type LegacyProofSeedPhase = "idle" | "validating" | "seeding" | "success" | "error";
+type TemplateRenderPreviewPhase = "idle" | "rendering" | "ready" | "error" | "unavailable";
 type AuditSearchPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
 type AuditSearchState = {
   phase: AuditSearchPhase;
@@ -155,6 +173,11 @@ type LegacyProofSeedState = {
   phase: LegacyProofSeedPhase;
   message: string;
   result: LegacyProofSeedResult | null;
+};
+type TemplateRenderPreviewState = {
+  phase: TemplateRenderPreviewPhase;
+  message: string;
+  result: TemplateDraftPreviewResult | null;
 };
 
 type FormState = {
@@ -212,6 +235,32 @@ type FormErrorKey =
 type FormErrors = Partial<Record<FormErrorKey, string>>;
 type FieldKey = "parentSku" | "sku" | "jan" | "qty" | "brand";
 type TemplateSpec = Record<string, unknown>;
+type TemplatePageEditor = {
+  widthMm: number;
+  heightMm: number;
+  backgroundFill: string;
+};
+type TemplateBorderEditor = {
+  visible: boolean;
+  color: string;
+  widthMm: number;
+};
+type TemplateFieldEditor = {
+  name: string;
+  xMm: number;
+  yMm: number;
+  fontSizeMm: number;
+  template: string;
+  color: string;
+};
+type TemplateEditorModel = {
+  labelName: string;
+  description: string;
+  templateVersion: string;
+  page: TemplatePageEditor;
+  border: TemplateBorderEditor;
+  fields: TemplateFieldEditor[];
+};
 type XlsxCellMeta = {
   isNumeric: boolean;
   scientific: boolean;
@@ -409,6 +458,185 @@ function sanitizeTemplateString(raw: string): string {
 function readString(spec: TemplateSpec, key: string): string {
   const value = spec[key];
   return typeof value === "string" ? value : "";
+}
+
+function readNumber(spec: TemplateSpec, key: string): number | null {
+  const value = spec[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+
+function readBoolean(spec: TemplateSpec, key: string): boolean | null {
+  const value = spec[key];
+  return typeof value === "boolean" ? value : null;
+}
+
+function normalizeTemplateColor(raw: string, fallback = DEFAULT_TEMPLATE_FIELD_COLOR): string {
+  const value = raw.trim();
+  return /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(value) ? value : fallback;
+}
+
+function parseTemplateEditorModel(spec: TemplateSpec | null): TemplateEditorModel | null {
+  if (!spec) {
+    return null;
+  }
+
+  const pageSpec = isPlainObject(spec.page) ? (spec.page as TemplateSpec) : {};
+  const borderSpec = isPlainObject(spec.border) ? (spec.border as TemplateSpec) : {};
+  const fields = Array.isArray(spec.fields) ? spec.fields : [];
+
+  return {
+    labelName: readString(spec, "label_name"),
+    description: readString(spec, "description"),
+    templateVersion: readString(spec, "template_version"),
+    page: {
+      widthMm: readNumber(pageSpec, "width_mm") ?? 50,
+      heightMm: readNumber(pageSpec, "height_mm") ?? 30,
+      backgroundFill: normalizeTemplateColor(readString(pageSpec, "background_fill"), "#ffffff"),
+    },
+    border: {
+      visible: readBoolean(borderSpec, "visible") ?? false,
+      color: normalizeTemplateColor(readString(borderSpec, "color"), "#000000"),
+      widthMm: readNumber(borderSpec, "width_mm") ?? 0.2,
+    },
+    fields: fields.map((field, index) => {
+      const candidate = isPlainObject(field) ? (field as TemplateSpec) : {};
+      return {
+        name: readString(candidate, "name") || `field_${index + 1}`,
+        xMm: readNumber(candidate, "x_mm") ?? 0,
+        yMm: readNumber(candidate, "y_mm") ?? 0,
+        fontSizeMm: readNumber(candidate, "font_size_mm") ?? 3,
+        template: readString(candidate, "template") || "{sku}",
+        color: normalizeTemplateColor(readString(candidate, "color")),
+      };
+    }),
+  };
+}
+
+function createTemplateField(partial: Partial<TemplateFieldEditor> = {}): TemplateFieldEditor {
+  return {
+    name: partial.name ?? "text",
+    xMm: partial.xMm ?? 2,
+    yMm: partial.yMm ?? 2,
+    fontSizeMm: partial.fontSizeMm ?? 3,
+    template: partial.template ?? "text:{sku}",
+    color: partial.color ?? DEFAULT_TEMPLATE_FIELD_COLOR,
+  };
+}
+
+function updateTemplateSpecSource(
+  raw: string,
+  mutate: (spec: TemplateSpec) => void,
+): { next: string | null; error: string | null } {
+  const parsed = parseTemplateSpec(raw);
+  if (parsed.error || !parsed.spec) {
+    return {
+      next: null,
+      error: parsed.error ?? "Template JSON must be valid before using the structured editor.",
+    };
+  }
+  const nextSpec = structuredClone(parsed.spec);
+  mutate(nextSpec);
+  return {
+    next: sanitizeTemplateString(JSON.stringify(nextSpec)),
+    error: null,
+  };
+}
+
+function buildTemplatePreviewBindings(input: {
+  draft: PrintJobDraft | null;
+  form: FormState;
+  session: DraftSession;
+  resolvedTemplateRef: LabelTemplateRef | null;
+}): Record<(typeof TEMPLATE_PREVIEW_PLACEHOLDERS)[number], string> {
+  const normalizedJan = input.draft?.jan.normalized || input.form.jan.trim();
+  return {
+    job_id: input.draft?.jobId || input.session.jobId,
+    parent_sku: input.draft?.parentSku || input.form.parentSku.trim() || "PARENT-SKU",
+    sku: input.draft?.sku || input.form.sku.trim() || "SKU-0001",
+    jan: normalizedJan || "4901234567894",
+    qty: input.draft ? String(input.draft.qty) : input.form.qty.trim() || "1",
+    brand: input.draft?.brand || input.form.brand.trim() || "Brand",
+    template_version:
+      (input.draft?.template ? templateVersionOf(input.draft.template) : null) ||
+      (input.resolvedTemplateRef ? templateVersionOf(input.resolvedTemplateRef) : null) ||
+      "basic-50x30@v1",
+  };
+}
+
+function buildTemplateDraftPreviewRequest(input: {
+  templateSource: string;
+  draft: PrintJobDraft | null;
+  form: FormState;
+  session: DraftSession;
+}): TemplateDraftPreviewRequest {
+  const qtyValue = input.draft?.qty ?? Number.parseInt(input.form.qty.trim(), 10);
+  return {
+    templateSource: input.templateSource,
+    sample: {
+      jobId: input.draft?.jobId || input.session.jobId,
+      sku: input.draft?.sku || input.form.sku.trim() || "SKU-0001",
+      brand: input.draft?.brand || input.form.brand.trim() || "Brand",
+      jan: input.draft?.jan.normalized || input.form.jan.trim() || "4901234567894",
+      qty: Number.isFinite(qtyValue) && qtyValue > 0 ? qtyValue : 1,
+    },
+  };
+}
+
+function renderTemplatePreviewText(template: string, bindings: Record<string, string>): string {
+  const rendered = template.replace(/\{([^}]+)\}/g, (_, key: string) => {
+    const value = bindings[key];
+    return value && value.trim().length > 0 ? value : `{${key}}`;
+  });
+  return rendered.trim() || template;
+}
+
+function extractTemplatePlaceholders(template: string): string[] {
+  const placeholders = new Set<string>();
+  for (const match of template.matchAll(/\{([^}]+)\}/g)) {
+    const token = match[1]?.trim();
+    if (token) {
+      placeholders.add(token);
+    }
+  }
+  return Array.from(placeholders);
+}
+
+function validateStructuredTemplateSemantics(spec: TemplateSpec): string[] {
+  const model = parseTemplateEditorModel(spec);
+  if (!model) {
+    return ["template JSON could not be mapped into the structured editor model."];
+  }
+
+  const issues: string[] = [];
+  const names = new Set<string>();
+
+  for (const field of model.fields) {
+    if (names.has(field.name)) {
+      issues.push(`field '${field.name}' is duplicated.`);
+    }
+    names.add(field.name);
+
+    if (field.xMm > model.page.widthMm || field.yMm > model.page.heightMm) {
+      issues.push(
+        `field '${field.name}' is outside the page bounds (${field.xMm}mm, ${field.yMm}mm on ${model.page.widthMm}mm x ${model.page.heightMm}mm).`,
+      );
+    }
+
+    for (const token of extractTemplatePlaceholders(field.template)) {
+      if ((RUST_RENDER_PLACEHOLDERS as readonly string[]).includes(token)) {
+        continue;
+      }
+      if ((LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS as readonly string[]).includes(token)) {
+        issues.push(
+          `field '${field.name}' uses preview-only placeholder '{${token}}'; Rust proof/PDF output will not substitute it.`,
+        );
+        continue;
+      }
+      issues.push(`field '${field.name}' uses unsupported placeholder '{${token}}'.`);
+    }
+  }
+
+  return issues;
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -1055,6 +1283,13 @@ function validateTemplateSource(raw: string): {
     return templateRef
       ? { status: "stale", message: detail.join(" ") }
       : { status: "invalid", message: detail.join(" ") };
+  }
+  const semanticIssues = validateStructuredTemplateSemantics(spec);
+  if (semanticIssues.length > 0) {
+    return {
+      status: "invalid",
+      message: semanticIssues.join(" "),
+    };
   }
   return { status: "ok", message: null };
 }
@@ -1848,6 +2083,11 @@ export function App() {
     message: "",
     result: null,
   });
+  const [templateRenderPreview, setTemplateRenderPreview] = useState<TemplateRenderPreviewState>({
+    phase: "idle",
+    message: "Run Rust preview to compare the live editor against the renderer path.",
+    result: null,
+  });
 
   const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
   const [templateParseError, setTemplateParseError] = useState<string | null>(null);
@@ -1870,6 +2110,10 @@ export function App() {
   const parsedTemplate = useMemo(() => parseTemplateSpec(templateSource), [templateSource]);
   const templateReference = parsedTemplate.spec ? parseTemplateRef(parsedTemplate.spec) : null;
   const templateMetaInfo = useMemo(() => templateMeta(parsedTemplate.spec), [parsedTemplate.spec]);
+  const templateEditorModel = useMemo(
+    () => parseTemplateEditorModel(parsedTemplate.spec),
+    [parsedTemplate.spec],
+  );
   const resolvedTemplateRef = useMemo(
     () => pickTemplateRef(form.templateId, templateReference),
     [form.templateId, templateReference],
@@ -1908,6 +2152,26 @@ export function App() {
   );
   const visibleErrors = showErrors ? errors : {};
   const template = templateOptions.find((option) => option.id === resolvedTemplateRef?.id);
+  const templatePreviewBindings = useMemo(
+    () =>
+      buildTemplatePreviewBindings({
+        draft,
+        form,
+        session,
+        resolvedTemplateRef,
+      }),
+    [draft, form, resolvedTemplateRef, session],
+  );
+  const templateDraftPreviewRequest = useMemo(
+    () =>
+      buildTemplateDraftPreviewRequest({
+        templateSource,
+        draft,
+        form,
+        session,
+      }),
+    [draft, form, session, templateSource],
+  );
   const liveDraftJson = draft ? JSON.stringify(draft, null, 2) : null;
   const snapshotJson = draftSnapshot ? JSON.stringify(draftSnapshot, null, 2) : null;
   const draftIsStale =
@@ -2029,6 +2293,25 @@ export function App() {
   }, [approvedProofEntries]);
 
   const templateValidation = validateTemplateSource(templateSource);
+  const templateRenderPreviewSvgDataUrl = templateRenderPreview.result
+    ? `data:image/svg+xml;charset=utf-8,${encodeURIComponent(templateRenderPreview.result.svg)}`
+    : null;
+  const templateUsesPreviewOnlyPlaceholder = templateSource.includes("{parent_sku}");
+  const templateCanvasStyle: CSSProperties | undefined = templateEditorModel
+    ? {
+        aspectRatio: `${Math.max(templateEditorModel.page.widthMm, 1)} / ${Math.max(
+          templateEditorModel.page.heightMm,
+          1,
+        )}`,
+        backgroundColor: templateEditorModel.page.backgroundFill,
+        borderColor: templateEditorModel.border.visible
+          ? templateEditorModel.border.color
+          : "transparent",
+        borderWidth: templateEditorModel.border.visible
+          ? `${Math.max(templateEditorModel.border.widthMm * 2, 1)}px`
+          : "1px",
+      }
+    : undefined;
 
   useEffect(() => {
     if (!allowWithoutProofEnabled && form.executionAllowWithoutProof) {
@@ -2044,6 +2327,143 @@ export function App() {
     setTemplateSource(value);
     setTemplateParseError(null);
     setTemplateImportError("");
+  }
+
+  function applyStructuredTemplateUpdate(
+    mutate: (spec: TemplateSpec) => void,
+    invalidMessage = "Fix template JSON before using the structured editor.",
+  ) {
+    const updated = updateTemplateSpecSource(templateSource, mutate);
+    if (!updated.next) {
+      setTemplateParseError(updated.error ?? invalidMessage);
+      return;
+    }
+    setTemplateSource(updated.next);
+    setTemplateParseError(null);
+    setTemplateImportError("");
+  }
+
+  function updateTemplateMetaField(
+    key: "label_name" | "description" | "template_version",
+    value: string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      spec[key] = value;
+    });
+  }
+
+  function updateTemplatePageField(
+    key: "width_mm" | "height_mm" | "background_fill",
+    value: number | string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const page = isPlainObject(spec.page) ? { ...spec.page } : {};
+      page[key] =
+        typeof value === "number"
+          ? Math.max(0.1, Number(value) || 0.1)
+          : normalizeTemplateColor(value, "#ffffff");
+      spec.page = page;
+    });
+  }
+
+  function updateTemplateBorderField(
+    key: "visible" | "color" | "width_mm",
+    value: boolean | number | string,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const border = isPlainObject(spec.border) ? { ...spec.border } : {};
+      if (key === "visible") {
+        border[key] = Boolean(value);
+      } else if (key === "width_mm") {
+        border[key] = Math.max(0, Number(value) || 0);
+      } else {
+        border[key] = normalizeTemplateColor(String(value), "#000000");
+      }
+      spec.border = border;
+    });
+  }
+
+  function updateTemplateFieldRow(
+    index: number,
+    key: keyof TemplateFieldEditor,
+    value: string | number,
+  ) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const current = isPlainObject(fields[index]) ? { ...fields[index] } : {};
+      if (key === "color") {
+        current.color = normalizeTemplateColor(String(value));
+      } else if (key === "xMm") {
+        current.x_mm = Math.max(0, Number(value) || 0);
+      } else if (key === "yMm") {
+        current.y_mm = Math.max(0, Number(value) || 0);
+      } else if (key === "fontSizeMm") {
+        current.font_size_mm = Math.max(0.1, Number(value) || 0.1);
+      } else if (key === "name") {
+        current.name = String(value);
+      } else if (key === "template") {
+        current.template = String(value);
+      }
+      fields[index] = current;
+      spec.fields = fields;
+    });
+  }
+
+  function moveTemplateField(index: number, direction: -1 | 1) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || index >= fields.length || nextIndex >= fields.length) {
+        return;
+      }
+      const [field] = fields.splice(index, 1);
+      fields.splice(nextIndex, 0, field);
+      spec.fields = fields;
+    });
+  }
+
+  function addTemplateField() {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      fields.push({
+        name: `field_${fields.length + 1}`,
+        x_mm: 2,
+        y_mm: Math.min(26, 4 + fields.length * 4),
+        font_size_mm: 3,
+        template: "text:{sku}",
+        color: DEFAULT_TEMPLATE_FIELD_COLOR,
+      });
+      spec.fields = fields;
+    });
+  }
+
+  function duplicateTemplateField(index: number) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      const field = fields[index];
+      if (!isPlainObject(field)) {
+        return;
+      }
+      const clone = { ...field };
+      clone.name =
+        typeof clone.name === "string" && clone.name.trim().length > 0
+          ? `${clone.name}_copy`
+          : `field_${fields.length + 1}`;
+      clone.y_mm = Math.max(0, Number(clone.y_mm ?? 0) + 3);
+      fields.splice(index + 1, 0, clone);
+      spec.fields = fields;
+    });
+  }
+
+  function removeTemplateField(index: number) {
+    applyStructuredTemplateUpdate((spec) => {
+      const fields = Array.isArray(spec.fields) ? [...spec.fields] : [];
+      if (fields.length <= 1) {
+        return;
+      }
+      fields.splice(index, 1);
+      spec.fields = fields;
+    });
   }
 
   function updateFieldMapping(field: FieldKey, value: string) {
@@ -2312,6 +2732,39 @@ export function App() {
     }
   });
 
+  const refreshTemplateRenderPreview = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setTemplateRenderPreview({
+        phase: "unavailable",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell to render Rust previews.",
+        result: null,
+      });
+      return;
+    }
+
+    setTemplateRenderPreview({
+      phase: "rendering",
+      message: "Rendering SVG preview through desktop-shell and Rust renderer...",
+      result: null,
+    });
+
+    try {
+      const result = await previewTemplateDraft(templateDraftPreviewRequest);
+      setTemplateRenderPreview({
+        phase: "ready",
+        message: `Rust preview ready for ${result.templateVersion} (${result.fieldCount} fields).`,
+        result,
+      });
+    } catch (error) {
+      setTemplateRenderPreview({
+        phase: "error",
+        message: `Rust preview failed: ${formatErrorMessage(error)}`,
+        result: null,
+      });
+    }
+  });
+
   function formatErrorMessage(error: unknown): string {
     if (error instanceof Error) {
       return error.message;
@@ -2499,7 +2952,9 @@ export function App() {
     const rows = queuedRows
       .map((entry, queueIndex) => ({ entry, queueIndex }))
       .filter(
-        (item): item is { entry: QueuedRow; queueIndex: number } => item.entry.draft !== null,
+        (item): item is { entry: QueuedRow; queueIndex: number } =>
+          item.entry.draft !== null &&
+          (item.entry.submissionStatus === "ready" || item.entry.submissionStatus === "failed"),
       );
 
     if (isBridgeSubmitBlocked || bridgeSubmitBlockMessage) {
@@ -2776,6 +3231,20 @@ export function App() {
   useEffect(() => {
     void refreshBridgeStatus();
   }, [refreshBridgeStatus]);
+
+  useEffect(() => {
+    const previewJobId = templateDraftPreviewRequest.sample.jobId;
+    setTemplateRenderPreview((current) => {
+      if (current.phase === "idle" && current.result === null) {
+        return current;
+      }
+      return {
+        phase: "idle",
+        message: `Template or sample data changed for ${previewJobId}. Refresh Rust preview to compare the renderer path.`,
+        result: null,
+      };
+    });
+  }, [templateDraftPreviewRequest]);
 
   function resetForm() {
     setSession(createSession());
@@ -3280,32 +3749,437 @@ export function App() {
       <section className="panel">
         <div className="section-heading">
           <h2>Template editor</h2>
-          <p>Edit the repository template-spec JSON used by label production.</p>
+          <p>
+            Edit page settings and text fields in a structured authoring view, while keeping the
+            underlying template-spec JSON available for low-level changes.
+          </p>
         </div>
-        <label className="field field-wide">
-          <span>Template spec JSON</span>
-          <textarea
-            className="batch-text"
-            value={templateSource}
-            onChange={(event) => updateTemplateSource(event.target.value)}
-            onBlur={validateTemplateText}
-          />
-          {templateParseError ? <small className="error-text">{templateParseError}</small> : null}
-          {templateImportError ? <small className="error-text">{templateImportError}</small> : null}
-          {templateMetaInfo ? (
-            <small className="hint-text">
-              schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
-              {templateMetaInfo.templateVersion}/ label_name: {templateMetaInfo.labelName}
-            </small>
-          ) : null}
-        </label>
+        <div className="proof-note">
+          <strong>Current release boundary</strong>
+          <p>
+            Rust preview below renders the live JSON draft, but proof/print dispatch still uses the
+            packaged manifest template referenced by `template_version`. Treat this editor as
+            authoring and validation until template catalog write-back is implemented.
+          </p>
+        </div>
+        <div className="template-workbench">
+          <div className="template-editor-column">
+            {templateEditorModel ? (
+              <>
+                <div className="template-control-grid">
+                  <label className="field">
+                    <span>Label name</span>
+                    <input
+                      value={templateEditorModel.labelName}
+                      onChange={(event) =>
+                        updateTemplateMetaField("label_name", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Template version</span>
+                    <input
+                      value={templateEditorModel.templateVersion}
+                      onChange={(event) =>
+                        updateTemplateMetaField("template_version", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="field field-wide">
+                    <span>Description</span>
+                    <input
+                      value={templateEditorModel.description}
+                      onChange={(event) =>
+                        updateTemplateMetaField("description", event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Width (mm)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="0.1"
+                      value={templateEditorModel.page.widthMm}
+                      onChange={(event) =>
+                        updateTemplatePageField(
+                          "width_mm",
+                          Number.parseFloat(event.target.value || "0"),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Height (mm)</span>
+                    <input
+                      type="number"
+                      min="1"
+                      step="0.1"
+                      value={templateEditorModel.page.heightMm}
+                      onChange={(event) =>
+                        updateTemplatePageField(
+                          "height_mm",
+                          Number.parseFloat(event.target.value || "0"),
+                        )
+                      }
+                    />
+                  </label>
+                  <label className="field">
+                    <span>Background</span>
+                    <div className="color-row">
+                      <input
+                        type="color"
+                        value={templateEditorModel.page.backgroundFill}
+                        onChange={(event) =>
+                          updateTemplatePageField("background_fill", event.target.value)
+                        }
+                      />
+                      <input
+                        value={templateEditorModel.page.backgroundFill}
+                        onChange={(event) =>
+                          updateTemplatePageField("background_fill", event.target.value)
+                        }
+                      />
+                    </div>
+                  </label>
+                  <div className="field checkbox-field">
+                    <span>Border</span>
+                    <label className="checkbox-row">
+                      <input
+                        type="checkbox"
+                        checked={templateEditorModel.border.visible}
+                        onChange={(event) =>
+                          updateTemplateBorderField("visible", event.target.checked)
+                        }
+                      />
+                      <span>Show border in render and preview</span>
+                    </label>
+                  </div>
+                  <label className="field">
+                    <span>Border color</span>
+                    <div className="color-row">
+                      <input
+                        type="color"
+                        value={templateEditorModel.border.color}
+                        onChange={(event) => updateTemplateBorderField("color", event.target.value)}
+                      />
+                      <input
+                        value={templateEditorModel.border.color}
+                        onChange={(event) => updateTemplateBorderField("color", event.target.value)}
+                      />
+                    </div>
+                  </label>
+                  <label className="field">
+                    <span>Border width (mm)</span>
+                    <input
+                      type="number"
+                      min="0"
+                      step="0.1"
+                      value={templateEditorModel.border.widthMm}
+                      onChange={(event) =>
+                        updateTemplateBorderField(
+                          "width_mm",
+                          Number.parseFloat(event.target.value || "0"),
+                        )
+                      }
+                    />
+                  </label>
+                </div>
+
+                <div className="template-fields-panel">
+                  <div className="data-grid-header">
+                    <strong>Template fields</strong>
+                    <span>{templateEditorModel.fields.length} fields</span>
+                  </div>
+                  <div className="template-field-list">
+                    {templateEditorModel.fields.map((field, index) => (
+                      <article className="template-field-card" key={`${field.name}-${index}`}>
+                        <div className="template-field-header">
+                          <div>
+                            <strong>{field.name || `field_${index + 1}`}</strong>
+                            <small>
+                              {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
+                              {field.fontSizeMm.toFixed(1)}mm
+                            </small>
+                          </div>
+                          <div className="template-field-actions">
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              onClick={() => moveTemplateField(index, -1)}
+                              disabled={index === 0}
+                            >
+                              Up
+                            </button>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              onClick={() => moveTemplateField(index, 1)}
+                              disabled={index === templateEditorModel.fields.length - 1}
+                            >
+                              Down
+                            </button>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              onClick={() => duplicateTemplateField(index)}
+                            >
+                              Duplicate
+                            </button>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              onClick={() => removeTemplateField(index)}
+                              disabled={templateEditorModel.fields.length <= 1}
+                            >
+                              Delete
+                            </button>
+                          </div>
+                        </div>
+                        <div className="template-control-grid">
+                          <label className="field">
+                            <span>Name</span>
+                            <input
+                              value={field.name}
+                              onChange={(event) =>
+                                updateTemplateFieldRow(index, "name", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Text template</span>
+                            <input
+                              value={field.template}
+                              onChange={(event) =>
+                                updateTemplateFieldRow(index, "template", event.target.value)
+                              }
+                            />
+                            <small className="hint-text">
+                              Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
+                              preview-only: {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
+                            </small>
+                          </label>
+                          <label className="field">
+                            <span>X (mm)</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={field.xMm}
+                              onChange={(event) =>
+                                updateTemplateFieldRow(
+                                  index,
+                                  "xMm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Y (mm)</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={field.yMm}
+                              onChange={(event) =>
+                                updateTemplateFieldRow(
+                                  index,
+                                  "yMm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Font size (mm)</span>
+                            <input
+                              type="number"
+                              min="0.1"
+                              step="0.1"
+                              value={field.fontSizeMm}
+                              onChange={(event) =>
+                                updateTemplateFieldRow(
+                                  index,
+                                  "fontSizeMm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Color</span>
+                            <div className="color-row">
+                              <input
+                                type="color"
+                                value={field.color}
+                                onChange={(event) =>
+                                  updateTemplateFieldRow(index, "color", event.target.value)
+                                }
+                              />
+                              <input
+                                value={field.color}
+                                onChange={(event) =>
+                                  updateTemplateFieldRow(index, "color", event.target.value)
+                                }
+                              />
+                            </div>
+                          </label>
+                        </div>
+                      </article>
+                    ))}
+                  </div>
+                  <div className="toolbar">
+                    <button className="button-primary" type="button" onClick={addTemplateField}>
+                      Add text field
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="empty-state">
+                <strong>Structured editor unavailable</strong>
+                <p>Fix template JSON first. The form-based editor only works against valid JSON.</p>
+              </div>
+            )}
+
+            <label className="field field-wide">
+              <span>Template spec JSON</span>
+              <textarea
+                className="batch-text"
+                value={templateSource}
+                onChange={(event) => updateTemplateSource(event.target.value)}
+                onBlur={validateTemplateText}
+              />
+              {templateParseError ? (
+                <small className="error-text">{templateParseError}</small>
+              ) : null}
+              {templateImportError ? (
+                <small className="error-text">{templateImportError}</small>
+              ) : null}
+              {templateMetaInfo ? (
+                <small className="hint-text">
+                  schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
+                  {templateMetaInfo.templateVersion} / label_name: {templateMetaInfo.labelName}
+                </small>
+              ) : null}
+            </label>
+          </div>
+
+          <aside className="template-preview-column">
+            <div className="section-heading">
+              <h3>Visual template preview</h3>
+              <p>
+                Approximate label layout preview from the current template spec and live form
+                values.
+              </p>
+            </div>
+            {templateEditorModel ? (
+              <>
+                <div className="preview-summary">
+                  <div>
+                    <span>Label size</span>
+                    <strong>
+                      {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
+                      {templateEditorModel.page.heightMm.toFixed(1)} mm
+                    </strong>
+                    <small>{templateEditorModel.fields.length} fields</small>
+                  </div>
+                  <div>
+                    <span>Template state</span>
+                    <strong>{templateValidation.status}</strong>
+                    <small>{templateValidation.message ?? "Schema route looks aligned."}</small>
+                  </div>
+                </div>
+                {templateUsesPreviewOnlyPlaceholder ? (
+                  <div className="proof-note">
+                    <strong>Preview-only placeholder detected</strong>
+                    <p>
+                      <code>{LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS[0]}</code> renders in the
+                      local canvas only. Rust proof/PDF output does not substitute it.
+                    </p>
+                  </div>
+                ) : null}
+                <div className="template-canvas-shell">
+                  <div className="template-canvas" style={templateCanvasStyle}>
+                    {templateEditorModel.border.visible ? (
+                      <div className="template-canvas-border" />
+                    ) : null}
+                    {templateEditorModel.fields.map((field, index) => (
+                      <div
+                        className="template-canvas-field"
+                        key={`${field.name}-${index}-preview`}
+                        style={{
+                          left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
+                          top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
+                          fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
+                          color: field.color,
+                        }}
+                      >
+                        {renderTemplatePreviewText(field.template, templatePreviewBindings)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="proof-note">
+                  <strong>Local binding sample</strong>
+                  <p>
+                    job_id: {templatePreviewBindings.job_id} / sku: {templatePreviewBindings.sku} /
+                    jan: {templatePreviewBindings.jan}
+                  </p>
+                </div>
+                <div className="template-render-preview">
+                  <div className="data-grid-header">
+                    <strong>Rust renderer preview</strong>
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => void refreshTemplateRenderPreview()}
+                      disabled={templateRenderPreview.phase === "rendering"}
+                    >
+                      {templateRenderPreview.phase === "rendering"
+                        ? "Rendering..."
+                        : "Refresh Rust preview"}
+                    </button>
+                  </div>
+                  <p className="hint-text">{templateRenderPreview.message}</p>
+                  {templateRenderPreview.phase === "ready" &&
+                  templateRenderPreview.result &&
+                  templateRenderPreviewSvgDataUrl ? (
+                    <>
+                      <div className="preview-summary">
+                        <div>
+                          <span>Renderer output</span>
+                          <strong>{templateRenderPreview.result.labelName}</strong>
+                          <small>
+                            {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
+                            {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm / JAN{" "}
+                            {templateRenderPreview.result.normalizedJan}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="template-render-preview-frame">
+                        <img
+                          className="template-render-preview-image"
+                          src={templateRenderPreviewSvgDataUrl}
+                          alt="Rust renderer SVG preview"
+                        />
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+              </>
+            ) : (
+              <div className="empty-state">
+                <strong>No visual preview</strong>
+                <p>Template JSON must be valid before the preview canvas can be rendered.</p>
+              </div>
+            )}
+          </aside>
+        </div>
         <div className="toolbar">
           <label className="button-secondary fake-button">
-            Import template JSON
-            <input type="file" accept=".json,application/json" onChange={handleTemplateImport} />
-          </label>
-          <label className="button-secondary fake-button">
-            Import template asset (with state)
+            Import template JSON / asset
             <input type="file" accept=".json,application/json" onChange={handleTemplateImport} />
           </label>
           <button className="button-secondary" type="button" onClick={handleTemplateExport}>

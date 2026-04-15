@@ -6,6 +6,7 @@ const PRINT_BRIDGE_STATUS_COMMAND = "print_bridge_status";
 const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
+const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
 const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
 const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
 
@@ -140,6 +141,29 @@ export type LegacyProofSeedResult = {
   rows: LegacyProofSeedRowResult[];
 };
 
+export type TemplateDraftPreviewSample = {
+  jobId: string;
+  sku: string;
+  brand: string;
+  jan: string;
+  qty: number;
+};
+
+export type TemplateDraftPreviewRequest = {
+  templateSource: string;
+  sample: TemplateDraftPreviewSample;
+};
+
+export type TemplateDraftPreviewResult = {
+  svg: string;
+  normalizedJan: string;
+  templateVersion: string;
+  labelName: string;
+  pageWidthMm: number;
+  pageHeightMm: number;
+  fieldCount: number;
+};
+
 export function isTauriConnected(): boolean {
   return isTauri();
 }
@@ -187,6 +211,17 @@ export async function rejectProof(request: ProofReviewRequest): Promise<ProofRec
     );
   }
   return invoke<ProofRecord>(REJECT_PROOF_COMMAND, { request });
+}
+
+export async function previewTemplateDraft(
+  request: TemplateDraftPreviewRequest,
+): Promise<TemplateDraftPreviewResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to render template previews.",
+    );
+  }
+  return invoke<TemplateDraftPreviewResult>(PREVIEW_TEMPLATE_DRAFT_COMMAND, { request });
 }
 
 export async function validateLegacyProofSeed(

@@ -9,38 +9,44 @@ endobj
 << /Type /Page /Parent 2 0 R /MediaBox [0 0 141.732 85.039] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>
 endobj
 4 0 obj
-<< /Length 413 >>
+<< /Length 563 >>
 stream
-1 1 1 rg
+1.000 1.000 1.000 rg
 0 0 141.732 85.039 re f
-0 0 0 RG
+0.000 0.000 0.000 RG
 0.567 w
 0 0 141.732 85.039 re S
+0.000 0.000 0.000 rg
 BT
 /F1 8.504 Tf
 5.669 70.866 Td
 (job:JOB-20260414-0001) Tj
 ET
+0.000 0.000 0.000 rg
 BT
 /F1 11.339 Tf
 5.669 56.693 Td
 (brand:Acme) Tj
 ET
+0.000 0.000 0.000 rg
 BT
 /F1 11.339 Tf
 5.669 42.520 Td
 (sku:SKU-0001) Tj
 ET
+0.000 0.000 0.000 rg
 BT
 /F1 11.339 Tf
 5.669 28.346 Td
 (jan:4006381333931) Tj
 ET
+0.000 0.000 0.000 rg
 BT
 /F1 11.339 Tf
 5.669 14.173 Td
 (qty:24) Tj
 ET
+0.000 0.000 0.000 rg
 BT
 /F1 5.669 Tf
 85.039 5.669 Td
@@ -58,9 +64,9 @@ xref
 0000000058 00000 n 
 0000000115 00000 n 
 0000000248 00000 n 
-0000000711 00000 n 
+0000000861 00000 n 
 trailer
 << /Size 6 /Root 1 0 R >>
 startxref
-781
+931
 %%EOF

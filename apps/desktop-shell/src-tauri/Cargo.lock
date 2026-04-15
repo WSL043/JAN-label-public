@@ -569,6 +569,7 @@ dependencies = [
  "domain",
  "print-agent",
  "printer-adapters",
+ "render",
  "serde",
  "serde_json",
  "tauri",

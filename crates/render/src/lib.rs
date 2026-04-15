@@ -119,22 +119,17 @@ pub struct LabelTemplateField {
 
 pub fn render_svg(request: &RenderLabelRequest) -> Result<String, TemplateResolutionError> {
     let template = resolve_template(&request.template_version)?;
+    Ok(render_svg_with_template(request, &template))
+}
+
+pub fn render_svg_with_template(request: &RenderLabelRequest, template: &LabelTemplate) -> String {
     let width = template.page.width_mm;
     let height = template.page.height_mm;
-    let border_color = sanitize_svg_color(
-        template
-            .border
-            .as_ref()
-            .and_then(|value| value.color.as_deref()),
-        "#000000",
-    );
+    let border = template.border.as_ref().filter(|value| value.visible);
+    let border_color =
+        sanitize_svg_color(border.and_then(|value| value.color.as_deref()), "#000000");
     let background_fill = sanitize_svg_color(template.page.background_fill.as_deref(), "#ffffff");
-    let border_width = template
-        .border
-        .as_ref()
-        .map(|value| value.width_mm)
-        .unwrap_or(0.2);
-
+    let border_width = border.map(|value| value.width_mm).unwrap_or(0.2);
     let mut svg = String::new();
     svg.push_str(&format!(
         "<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"{width}mm\" height=\"{height}mm\" viewBox=\"0 0 {width} {height}\">\n",
@@ -146,29 +141,39 @@ pub fn render_svg(request: &RenderLabelRequest) -> Result<String, TemplateResolu
         width = trim_mm(width),
         height = trim_mm(height),
         fill = escape_xml_attribute(&background_fill),
-        stroke = escape_xml_attribute(&border_color),
+        stroke = escape_xml_attribute(if border.is_some() {
+            border_color.as_str()
+        } else {
+            "none"
+        }),
         stroke_width = trim_mm(border_width)
     ));
 
     for field in template.fields.iter() {
+        let field_color = sanitize_svg_color(field.color.as_deref(), "#000000");
         svg.push_str(&format!(
-            "  <text x=\"{}\" y=\"{}\" font-size=\"{}\">{}</text>\n",
+            "  <text x=\"{}\" y=\"{}\" font-size=\"{}\" fill=\"{}\">{}</text>\n",
             trim_mm(field.x_mm),
             trim_mm(field.y_mm),
             trim_mm(field.font_size_mm),
+            escape_xml_attribute(&field_color),
             escape_xml_text(&render_field_text(&field.template, request))
         ));
     }
 
     svg.push_str("</svg>\n");
-    Ok(svg)
+    svg
 }
 
 pub fn render_pdf(request: &RenderLabelRequest) -> Result<Vec<u8>, TemplateResolutionError> {
     let template = resolve_template(&request.template_version)?;
+    Ok(render_pdf_with_template(request, &template))
+}
+
+pub fn render_pdf_with_template(request: &RenderLabelRequest, template: &LabelTemplate) -> Vec<u8> {
     let width_pt = mm_to_points(template.page.width_mm);
     let height_pt = mm_to_points(template.page.height_mm);
-    let content_stream = render_pdf_content(request, &template, height_pt);
+    let content_stream = render_pdf_content(request, template, height_pt);
     let objects = [
         "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
         "<< /Type /Pages /Count 1 /Kids [3 0 R] >>".to_string(),
@@ -208,7 +213,18 @@ pub fn render_pdf(request: &RenderLabelRequest) -> Result<Vec<u8>, TemplateResol
         xref_start
     ));
 
-    Ok(pdf.into_bytes())
+    pdf.into_bytes()
+}
+
+pub fn parse_template_source(
+    source: &str,
+    source_name: &str,
+) -> Result<LabelTemplate, TemplateResolutionError> {
+    serde_json::from_str(source).map_err(|error| TemplateResolutionError::MalformedTemplateSpec {
+        template_version: template_version_hint_from_source(source),
+        source: source_name.to_string(),
+        message: error.to_string(),
+    })
 }
 
 pub fn template_catalog() -> Result<TemplateManifest, TemplateResolutionError> {
@@ -298,31 +314,32 @@ fn render_pdf_content(
     height_pt: f64,
 ) -> String {
     let mut lines = Vec::with_capacity(template.fields.len() + 6);
-    let border_width = template
-        .border
-        .as_ref()
-        .filter(|value| value.visible)
-        .map(|value| value.width_mm)
-        .unwrap_or(0.2);
+    let background_fill = sanitize_svg_color(template.page.background_fill.as_deref(), "#ffffff");
+    let border = template.border.as_ref().filter(|value| value.visible);
+    let border_width = border.map(|value| value.width_mm).unwrap_or(0.2);
+    let border_color =
+        sanitize_svg_color(border.and_then(|value| value.color.as_deref()), "#000000");
     let page_width = mm_to_points(template.page.width_mm);
     let page_height = height_pt;
 
-    lines.push("1 1 1 rg".to_string());
+    lines.push(pdf_fill_color(&background_fill));
     lines.push(format!(
         "0 0 {} {} re f",
         format_pdf_number(page_width),
         format_pdf_number(page_height)
     ));
-    lines.push("0 0 0 RG".to_string());
-    lines.push(format!(
-        "{} w",
-        format_pdf_number(mm_to_points(border_width))
-    ));
-    lines.push(format!(
-        "0 0 {} {} re S",
-        format_pdf_number(page_width),
-        format_pdf_number(page_height)
-    ));
+    if border.is_some() {
+        lines.push(pdf_stroke_color(&border_color));
+        lines.push(format!(
+            "{} w",
+            format_pdf_number(mm_to_points(border_width))
+        ));
+        lines.push(format!(
+            "0 0 {} {} re S",
+            format_pdf_number(page_width),
+            format_pdf_number(page_height)
+        ));
+    }
 
     for field in template.fields.iter() {
         lines.push(pdf_text(
@@ -331,6 +348,7 @@ fn render_pdf_content(
             field.font_size_mm,
             &render_field_text(&field.template, request),
             page_height,
+            &sanitize_svg_color(field.color.as_deref(), "#000000"),
         ));
     }
 
@@ -346,9 +364,17 @@ fn render_field_text(field_template: &str, request: &RenderLabelRequest) -> Stri
     rendered.replace("{template_version}", &request.template_version)
 }
 
-fn pdf_text(x_mm: f64, y_mm: f64, font_size_mm: f64, text: &str, height_pt: f64) -> String {
+fn pdf_text(
+    x_mm: f64,
+    y_mm: f64,
+    font_size_mm: f64,
+    text: &str,
+    height_pt: f64,
+    color: &str,
+) -> String {
     format!(
-        "BT\n/F1 {} Tf\n{} {} Td\n({}) Tj\nET",
+        "{}\nBT\n/F1 {} Tf\n{} {} Td\n({}) Tj\nET",
+        pdf_fill_color(color),
         format_pdf_number(mm_to_points(font_size_mm)),
         format_pdf_number(mm_to_points(x_mm)),
         format_pdf_number(height_pt - mm_to_points(y_mm)),
@@ -404,6 +430,18 @@ fn sanitize_svg_color(value: Option<&str>, fallback: &str) -> String {
     }
 }
 
+fn template_version_hint_from_source(source: &str) -> String {
+    serde_json::from_str::<serde_json::Value>(source)
+        .ok()
+        .and_then(|value| {
+            value
+                .get("template_version")
+                .and_then(|value| value.as_str())
+                .map(str::to_string)
+        })
+        .unwrap_or_else(|| "<draft>".to_string())
+}
+
 fn is_hex_color(value: &str) -> bool {
     let bytes = value.as_bytes();
     if !matches!(bytes.len(), 4 | 7) || bytes.first() != Some(&b'#') {
@@ -415,6 +453,54 @@ fn is_hex_color(value: &str) -> bool {
 
 fn mm_to_points(value_mm: f64) -> f64 {
     value_mm * 72.0 / 25.4
+}
+
+fn pdf_fill_color(value: &str) -> String {
+    let (r, g, b) = hex_color_to_rgb(value);
+    format!(
+        "{} {} {} rg",
+        format_pdf_number(r),
+        format_pdf_number(g),
+        format_pdf_number(b)
+    )
+}
+
+fn pdf_stroke_color(value: &str) -> String {
+    let (r, g, b) = hex_color_to_rgb(value);
+    format!(
+        "{} {} {} RG",
+        format_pdf_number(r),
+        format_pdf_number(g),
+        format_pdf_number(b)
+    )
+}
+
+fn hex_color_to_rgb(value: &str) -> (f64, f64, f64) {
+    let normalized = sanitize_svg_color(Some(value), "#000000");
+    let expanded = if normalized.len() == 4 {
+        let bytes = normalized.as_bytes();
+        format!(
+            "#{}{}{}{}{}{}",
+            bytes[1] as char,
+            bytes[1] as char,
+            bytes[2] as char,
+            bytes[2] as char,
+            bytes[3] as char,
+            bytes[3] as char
+        )
+    } else {
+        normalized
+    };
+
+    let red = u8::from_str_radix(&expanded[1..3], 16).unwrap_or(0);
+    let green = u8::from_str_radix(&expanded[3..5], 16).unwrap_or(0);
+    let blue = u8::from_str_radix(&expanded[5..7], 16).unwrap_or(0);
+
+    (
+        f64::from(red) / 255.0,
+        f64::from(green) / 255.0,
+        f64::from(blue) / 255.0,
+    )
 }
 
 fn format_pdf_number(value: f64) -> String {
@@ -446,8 +532,10 @@ fn default_manifest_entry_enabled() -> bool {
 mod tests {
     use super::{
         escape_pdf_text, escape_xml_attribute, format_pdf_number, is_hex_color, mm_to_points,
-        parse_template_catalog_from_str, render_pdf, render_svg, resolve_template,
-        sanitize_svg_color, template_catalog, RenderLabelRequest, TemplateResolutionError,
+        parse_template_catalog_from_str, parse_template_source, pdf_fill_color, pdf_stroke_color,
+        render_pdf, render_pdf_with_template, render_svg, render_svg_with_template,
+        resolve_template, sanitize_svg_color, template_catalog, RenderLabelRequest,
+        TemplateResolutionError,
     };
 
     #[test]
@@ -503,6 +591,66 @@ mod tests {
     fn svg_attribute_escape_escapes_quotes_and_angles() {
         let escaped = escape_xml_attribute("\"bad<attr>&");
         assert_eq!(escaped, "&quot;bad&lt;attr&gt;&amp;");
+    }
+
+    #[test]
+    fn inline_template_preview_respects_border_visibility_and_field_color() {
+        let template = parse_template_source(
+            r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "inline-preview@v1",
+              "label_name": "inline-preview",
+              "page": { "width_mm": 40, "height_mm": 20, "background_fill": "#ffeecc" },
+              "border": { "visible": false, "color": "#112233", "width_mm": 0.4 },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "sku:{sku}",
+                  "color": "#123abc"
+                }
+              ]
+            }
+            "##,
+            "inline-preview.json",
+        )
+        .expect("inline template should parse");
+        let request = RenderLabelRequest {
+            template_version: template.template_version.clone(),
+            ..sample_request()
+        };
+
+        let svg = render_svg_with_template(&request, &template);
+        assert!(svg.contains("fill=\"#ffeecc\""));
+        assert!(svg.contains("stroke=\"none\""));
+        assert!(svg.contains("fill=\"#123abc\""));
+
+        let pdf = String::from_utf8(render_pdf_with_template(&request, &template))
+            .expect("pdf bytes should stay ascii");
+        assert!(pdf.contains("1.000 0.933 0.800 rg"));
+        assert!(pdf.contains("0.071 0.227 0.737 rg"));
+        assert!(!pdf.contains("0 0 113.386 56.693 re S"));
+    }
+
+    #[test]
+    fn parse_template_source_reports_source_name_for_invalid_json() {
+        let error = parse_template_source("{", "broken-preview.json")
+            .expect_err("invalid json should fail");
+
+        match error {
+            TemplateResolutionError::MalformedTemplateSpec {
+                template_version,
+                source,
+                ..
+            } => {
+                assert_eq!(template_version, "<draft>");
+                assert_eq!(source, "broken-preview.json");
+            }
+            _ => panic!("expected malformed template error"),
+        }
     }
 
     #[test]
@@ -615,7 +763,19 @@ mod tests {
         let height = format_pdf_number(mm_to_points(template.page.height_mm));
         let border_width = template.border.as_ref().map(|b| b.width_mm).unwrap_or(0.2);
         assert!(content.contains(&format!("0 0 {} {} re f", width, height)));
-        assert!(content.contains("0 0 0 RG"));
+        let border_color = template
+            .border
+            .as_ref()
+            .and_then(|value| value.color.as_deref())
+            .unwrap_or("#000000");
+        assert!(content.contains(&pdf_fill_color(
+            template
+                .page
+                .background_fill
+                .as_deref()
+                .unwrap_or("#ffffff")
+        )));
+        assert!(content.contains(&pdf_stroke_color(border_color)));
         assert!(content.contains(&format!(
             "{} w",
             format_pdf_number(mm_to_points(border_width))

@@ -16,6 +16,7 @@ use barcode::ZintCli;
 use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
 use printer_adapters::{PdfFileAdapter, WindowsSpoolerAdapter};
+use render::{parse_template_source, render_svg_with_template, RenderLabelRequest};
 use serde::Serialize;
 use tauri::command;
 
@@ -127,6 +128,45 @@ fn seed_legacy_proofs(request: LegacyProofSeedRequest) -> Result<LegacyProofSeed
     config.process_legacy_proof_seed(request, true)
 }
 
+#[command]
+fn preview_template_draft(
+    request: TemplateDraftPreviewRequest,
+) -> Result<TemplateDraftPreviewResult, String> {
+    let template_source = request.template_source.trim();
+    if template_source.is_empty() {
+        return Err("templateSource must not be empty".to_string());
+    }
+    let template =
+        parse_template_source(template_source, "<template-draft>").map_err(|error| error.to_string())?;
+    let job_id = require_non_empty_preview_field("sample.jobId", &request.sample.job_id)?;
+    let sku = require_non_empty_preview_field("sample.sku", &request.sample.sku)?;
+    let brand = require_non_empty_preview_field("sample.brand", &request.sample.brand)?;
+    let jan = Jan::parse(&request.sample.jan).map_err(jan_error_message)?;
+    if request.sample.qty == 0 {
+        return Err("sample.qty must be greater than or equal to 1".to_string());
+    }
+
+    let render_request = RenderLabelRequest {
+        job_id,
+        sku,
+        brand,
+        jan: jan.as_str().to_string(),
+        qty: request.sample.qty,
+        template_version: template.template_version.clone(),
+    };
+    let svg = render_svg_with_template(&render_request, &template);
+
+    Ok(TemplateDraftPreviewResult {
+        svg,
+        normalized_jan: jan.as_str().to_string(),
+        template_version: template.template_version,
+        label_name: template.label_name.unwrap_or_else(|| "unnamed-template".to_string()),
+        page_width_mm: template.page.width_mm,
+        page_height_mm: template.page.height_mm,
+        field_count: template.fields.len(),
+    })
+}
+
 #[derive(Debug, Clone)]
 struct PrintBridgeConfig {
     print_output_dir: PathBuf,
@@ -234,6 +274,35 @@ enum LegacyProofSeedRowStatus {
 struct ValidatedLegacyProofSeedRow {
     record: Option<LegacyProofSeedRecord>,
     result: LegacyProofSeedRowResult,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateDraftPreviewRequest {
+    template_source: String,
+    sample: TemplateDraftPreviewSample,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateDraftPreviewSample {
+    job_id: String,
+    sku: String,
+    brand: String,
+    jan: String,
+    qty: u32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateDraftPreviewResult {
+    svg: String,
+    normalized_jan: String,
+    template_version: String,
+    label_name: String,
+    page_width_mm: f64,
+    page_height_mm: f64,
+    field_count: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1143,6 +1212,15 @@ fn sanitize_path_component(raw: &str) -> String {
         .collect::<String>()
 }
 
+fn require_non_empty_preview_field(field: &str, value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(format!("{field} must not be empty"))
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
 fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
@@ -1151,6 +1229,7 @@ fn main() {
             search_audit_log,
             approve_proof,
             reject_proof,
+            preview_template_draft,
             validate_legacy_proof_seed,
             seed_legacy_proofs
         ])
@@ -1161,11 +1240,12 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        available_adapters_for_host, resolve_optional_env, resolve_output_dir,
+        available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus,
-        ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER, ENV_PRINT_OUTPUT_DIR,
-        ENV_SPOOL_OUTPUT_DIR, ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
+        TemplateDraftPreviewRequest, TemplateDraftPreviewSample, ENV_ALLOW_PRINT_WITHOUT_PROOF,
+        ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER, ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR,
+        ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
     };
     use crate::audit_store::ProofReviewRequest;
     use audit_log::{AuditQuery, ProofRecord, PrintJobId, PrintJobLineageId};
@@ -1178,6 +1258,74 @@ mod tests {
     fn sanitize_path_component_replaces_path_controls() {
         let sanitized = sanitize_path_component("A/B\\C\0D");
         assert_eq!(sanitized, "A_B_C_D");
+    }
+
+    #[test]
+    fn preview_template_draft_renders_inline_svg() {
+        let result = preview_template_draft(TemplateDraftPreviewRequest {
+            template_source: r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "inline-preview@v1",
+              "label_name": "inline-preview",
+              "page": { "width_mm": 40, "height_mm": 20, "background_fill": "#ffeecc" },
+              "border": { "visible": false, "color": "#112233", "width_mm": 0.4 },
+              "fields": [
+                {
+                  "name": "sku",
+                  "x_mm": 2,
+                  "y_mm": 5,
+                  "font_size_mm": 3,
+                  "template": "sku:{sku}",
+                  "color": "#123abc"
+                }
+              ]
+            }
+            "##
+            .to_string(),
+            sample: TemplateDraftPreviewSample {
+                job_id: "JOB-20260415-PREVIEW".to_string(),
+                sku: "SKU-0001".to_string(),
+                brand: "Acme".to_string(),
+                jan: "4901234567894".to_string(),
+                qty: 1,
+            },
+        })
+        .expect("inline preview should render");
+
+        assert_eq!(result.template_version, "inline-preview@v1");
+        assert_eq!(result.normalized_jan, "4901234567894");
+        assert!(result.svg.contains("sku:SKU-0001"));
+        assert!(result.svg.contains("stroke=\"none\""));
+        assert!(result.svg.contains("fill=\"#123abc\""));
+    }
+
+    #[test]
+    fn preview_template_draft_rejects_invalid_jan() {
+        let error = preview_template_draft(TemplateDraftPreviewRequest {
+            template_source: r##"
+            {
+              "schema_version": "template-spec-v1",
+              "template_version": "inline-preview@v1",
+              "label_name": "inline-preview",
+              "page": { "width_mm": 40, "height_mm": 20 },
+              "fields": [
+                { "name": "sku", "x_mm": 2, "y_mm": 5, "font_size_mm": 3, "template": "sku:{sku}" }
+              ]
+            }
+            "##
+            .to_string(),
+            sample: TemplateDraftPreviewSample {
+                job_id: "JOB-20260415-PREVIEW".to_string(),
+                sku: "SKU-0001".to_string(),
+                brand: "Acme".to_string(),
+                jan: "123".to_string(),
+                qty: 1,
+            },
+        })
+        .expect_err("invalid jan should be rejected");
+
+        assert!(error.contains("jan"));
     }
 
     #[test]

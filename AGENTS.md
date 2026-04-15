@@ -21,8 +21,10 @@
 - 最初の正規出力は `SVG/PDF`
 - printer 差異は `crates/printer-adapters` に閉じ込める
 - fixture / render / docs は同時更新を基本とする
-- proof を bypass するために `allowWithoutProof` を使わない
-- legacy proof の移行は pending seed まで。直接 approved で投入しない
+- `allowWithoutProof` は release 運用では使わない
+- legacy proof の移行は pending seed まで。自動 approve はしない
+- template editor のローカル canvas は近似表示。出力可否の判断は Rust preview / proof で行う
+- 現時点の proof / print dispatch は packaged manifest の `template_version` を使う。editor の生 JSON は preview 用であり、本番反映は別タスク
 
 ## 3. 変更時の最低確認
 
@@ -39,8 +41,9 @@ cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
 ```
 
 補足:
-- `cargo test --workspace` はローカル Windows で `print-agent` 実行時に `os error 5` が出ることがある。既知事項は `docs/known-issues.md` を参照。
-- 一時的に `target-*` ディレクトリを作った場合、`pnpm format:check` 前に削除する。Biome が生成物まで走査する。
+
+- 一時的な `target-*` ディレクトリを workspace 直下に残すと `pnpm format:check` が失敗することがある。不要なら削除してから実行する
+- ローカル Windows では `cargo test --workspace` が稀に `os error 5` で揺れる。再実行し、必要なら `desktop-shell` 側のテストも個別に確認する
 
 ## 4. 作業ルール
 
@@ -50,8 +53,8 @@ cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
 - 再発しそうな罠は `docs/known-issues.md` に残す
 - printer adapter に手を入れたら docs と fixtures を確認する
 - `apps/admin-web` の submit / import / proof inbox を触ったら `apps/desktop-shell` と `packages/job-schema` の契約差分を確認する
-- `apps/desktop-shell` の proof / audit / bridge warning を触ったら `docs/print-pipeline.md` と `docs/known-issues.md` を同期する
-- proof gate を変えた場合は `sourceProofJobId` の検証条件を docs に明記する
+- `apps/desktop-shell` の proof / audit / bridge warning を触ったら `docs/print-pipeline.md` と `docs/known-issues.md` を更新する
+- proof gate を変えたら `sourceProofJobId` と lineage 条件を docs に明記する
 
 ## 5. 今の主戦場
 
@@ -66,25 +69,23 @@ cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
 
 ## 6. 主任 Codex と Sub-Agent の運用
 
-- 主任はローカル Codex。タスク分解、優先順位、最終統合、検証、docs 更新、GitHub 同期を担当する
-- Sub-Agent は部門別に並列で使う。役割は探索、攻撃的レビュー、限定実装、テスト観点整理に分ける
-- Sub-Agent の第一候補モデルは `gpt-5.3-codex-spark`
-- `gpt-5.3-codex-spark` が上限または利用不可なら `gpt-5.3-codex` にフォールバックする
-- Sub-Agent の成果は必ず主任がレビューし、そのまま鵜呑みにしない
-- Sub-Agent が終わったら待たずに次タスクを再配分する
+- 主任はローカル Codex。タスク分解、優先度、統合、最終判断、docs 更新、GitHub 連携を持つ
+- Sub-Agent は部門別に並列で使う。探索、攻撃的レビュー、実装、検証を分担する
+- Sub-Agent の第一選択モデルは `gpt-5.3-codex-spark`
+- `gpt-5.3-codex-spark` が使えない場合のみ `gpt-5.3-codex` にフォールバックする
+- Sub-Agent が終わったら、主任が結果を統合し、次のタスクを即再配分する
 
-## 7. GitHub 側 Codex との連携
+## 7. GitHub 側 Codex との同期
 
-- ローカル Codex は実装主体
+- ローカル Codex が主管
 - GitHub 側 Codex は PR review、inline comment、CI triage、autofix、maintenance を担当
 - 状態同期の基準は `docs/todo/active.md` と `docs/handoff/current-state.md`
-- PR / issue / review comment に対応したら、ローカル側 docs も同期する
+- PR / issue / review comment に対応したら、必要に応じて local docs も更新する
 
-## 8. 今回の release で重視すること
+## 8. 次リリースで必須の到達点
 
 - PDF 出力を release 品質まで上げる
-- template 編集 / 保存 / proof 導線を現場運用レベルまで仕上げる
-- Excel / CSV 取り込みは DB 前処理なしでも使えるようにする
-- proof 承認、legacy proof seed、audit search を一体運用できるようにする
-- Bridge warning は `code / severity / message` を持つ構造化 warning を正とする
-
+- template authoring / preview / proof の基線を揃える
+- Excel / CSV をそのまま実務投入できる import 導線を維持する
+- proof review、legacy proof seed、audit search を運用できる状態にする
+- bridge warning は `code / severity / message` を正とする
