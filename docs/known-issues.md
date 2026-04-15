@@ -46,9 +46,8 @@
 - 対応: 現場では JAN 列を text で保存する
 
 ## K-014 local audit ledger の retention / backup 未整備
-- status: open
-- 影響: `dispatch-ledger.json` / `proof-ledger.json` が増え続ける
-- 対応: rotation / export / archive を `T-028` で実装する
+- status: resolved
+- 解消: scoped export、retention dry-run / apply、single JSON backup bundle を追加した
 
 ## K-015 legacy proof seed の gap
 - status: resolved
@@ -83,3 +82,8 @@
 ## K-022 approved proof artifact の品質チェックが弱い
 - status: resolved
 - 解消: `desktop-shell` が approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証するようにした
+
+## K-023 audit backup の一覧 / restore UI は未実装
+- status: open
+- 影響: backup bundle は生成されるが、復元は手動運用前提
+- 対応: `T-028f` で list / restore 方針と UI を詰める

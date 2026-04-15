@@ -9,10 +9,11 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use audit_log::{
-    AuditActor, AuditQuery, AuditSearchResult, DispatchMatchSubject, PersistedDispatchRecord,
-    ProofRecord, PrintJobId, PrintJobLineageId,
+    AuditActor, AuditExportRequest, AuditExportResult, AuditLedgerSnapshot, AuditQuery,
+    AuditRetentionRequest, AuditRetentionResult, AuditSearchResult, DispatchMatchSubject,
+    PersistedDispatchRecord, ProofRecord, PrintJobId, PrintJobLineageId,
 };
-use audit_store::{AuditLedgerSnapshot, AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
+use audit_store::{AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
 use barcode::ZintCli;
 use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
@@ -102,6 +103,18 @@ fn print_bridge_status() -> PrintBridgeStatus {
 fn search_audit_log(query: Option<AuditQuery>) -> Result<AuditSearchResult, String> {
     let config = PrintBridgeConfig::load();
     config.audit_store().search(query.unwrap_or_default())
+}
+
+#[command]
+fn export_audit_ledger(request: Option<AuditExportRequest>) -> Result<AuditExportResult, String> {
+    let config = PrintBridgeConfig::load();
+    config.audit_store().export(request.unwrap_or_default())
+}
+
+#[command]
+fn trim_audit_ledger(request: AuditRetentionRequest) -> Result<AuditRetentionResult, String> {
+    let config = PrintBridgeConfig::load();
+    config.audit_store().trim(request)
 }
 
 #[command]
@@ -206,6 +219,8 @@ struct PrintBridgeStatus {
     proof_output_dir: String,
     print_output_dir: String,
     spool_output_dir: String,
+    audit_log_dir: String,
+    audit_backup_dir: String,
     print_adapter_kind: String,
     windows_printer_name: String,
     allow_without_proof_enabled: bool,
@@ -703,6 +718,21 @@ impl PrintBridgeStatus {
             warning_details.push(warning);
         }
 
+        let (audit_log_dir, audit_log_fallback_warning) = resolve_output_dir_with_warning(
+            ENV_AUDIT_LOG_DIR,
+            env::temp_dir().join("jan-label").join("audit"),
+        );
+        report_output_dir_warning(
+            ENV_AUDIT_LOG_DIR,
+            &audit_log_dir,
+            audit_log_fallback_warning.is_some(),
+            &mut warning_details,
+        );
+        if let Some(warning) = audit_log_fallback_warning {
+            warning_details.push(warning);
+        }
+        let audit_backup_dir = AuditStore::new(audit_log_dir.clone()).backup_dir();
+
         let (zint_binary_path, zint_warning) =
             resolve_zint_binary_path_with_warning(ENV_ZINT_BINARY_PATH, DEFAULT_ZINT_BINARY_PATH);
         report_zint_warning(&zint_binary_path, &mut warning_details);
@@ -753,6 +783,8 @@ impl PrintBridgeStatus {
             proof_output_dir: print_output_dir.to_string_lossy().into_owned(),
             print_output_dir: print_output_dir.to_string_lossy().into_owned(),
             spool_output_dir: spool_output_dir.to_string_lossy().into_owned(),
+            audit_log_dir: audit_log_dir.to_string_lossy().into_owned(),
+            audit_backup_dir: audit_backup_dir.to_string_lossy().into_owned(),
             print_adapter_kind: print_adapter.kind().to_string(),
             windows_printer_name,
             allow_without_proof_enabled: false,
@@ -1336,6 +1368,8 @@ fn main() {
             dispatch_print_job,
             print_bridge_status,
             search_audit_log,
+            export_audit_ledger,
+            trim_audit_ledger,
             approve_proof,
             reject_proof,
             template_catalog_command,

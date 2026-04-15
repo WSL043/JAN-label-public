@@ -4,6 +4,8 @@ import { invoke, isTauri } from "@tauri-apps/api/core";
 const DISPATCH_PRINT_JOB_COMMAND = "dispatch_print_job";
 const PRINT_BRIDGE_STATUS_COMMAND = "print_bridge_status";
 const SEARCH_AUDIT_LOG_COMMAND = "search_audit_log";
+const EXPORT_AUDIT_LEDGER_COMMAND = "export_audit_ledger";
+const TRIM_AUDIT_LEDGER_COMMAND = "trim_audit_ledger";
 const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
@@ -25,6 +27,8 @@ export type PrintBridgeStatus = {
   proofOutputDir: string;
   printOutputDir: string;
   spoolOutputDir: string;
+  auditLogDir: string;
+  auditBackupDir: string;
   printAdapterKind: string;
   windowsPrinterName: string;
   allowWithoutProofEnabled: boolean;
@@ -93,6 +97,48 @@ export type AuditSearchQuery = {
 
 export type AuditSearchResult = {
   entries: AuditSearchEntry[];
+};
+
+export type AuditLedgerScope = "all" | "dispatch" | "proof";
+
+export type AuditLedgerSnapshot = {
+  dispatches: PersistedDispatchRecord[];
+  proofs: ProofRecord[];
+};
+
+export type AuditArtifactInfo = {
+  fileName: string;
+  filePath: string;
+  createdAtUtc: string;
+  sizeBytes: number;
+};
+
+export type AuditExportRequest = {
+  scope?: AuditLedgerScope;
+};
+
+export type AuditExportResult = {
+  scope: AuditLedgerScope;
+  dispatchCount: number;
+  proofCount: number;
+  snapshot: AuditLedgerSnapshot;
+};
+
+export type AuditRetentionRequest = {
+  scope?: AuditLedgerScope;
+  maxAgeDays?: number;
+  maxEntries?: number;
+  dryRun?: boolean;
+};
+
+export type AuditRetentionResult = {
+  scope: AuditLedgerScope;
+  dryRun: boolean;
+  retainedDispatchCount: number;
+  retainedProofCount: number;
+  removedDispatchCount: number;
+  removedProofCount: number;
+  backup?: AuditArtifactInfo;
 };
 
 export type ProofReviewRequest = {
@@ -205,6 +251,28 @@ export async function searchAuditLog(query: AuditSearchQuery = {}): Promise<Audi
     );
   }
   return invoke<AuditSearchResult>(SEARCH_AUDIT_LOG_COMMAND, { query });
+}
+
+export async function exportAuditLedger(
+  request: AuditExportRequest = {},
+): Promise<AuditExportResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to export audit data.",
+    );
+  }
+  return invoke<AuditExportResult>(EXPORT_AUDIT_LEDGER_COMMAND, { request });
+}
+
+export async function trimAuditLedger(
+  request: AuditRetentionRequest,
+): Promise<AuditRetentionResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to trim audit data.",
+    );
+  }
+  return invoke<AuditRetentionResult>(TRIM_AUDIT_LEDGER_COMMAND, { request });
 }
 
 export async function approveProof(request: ProofReviewRequest): Promise<ProofRecord> {

@@ -15,6 +15,9 @@ import { templateVersionOf, toDispatchRequest } from "@label/job-schema";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { CSSProperties, ChangeEvent, FormEvent } from "react";
 import {
+  type AuditExportResult,
+  type AuditLedgerScope,
+  type AuditRetentionResult,
   type AuditSearchEntry,
   type BridgeWarning,
   type LegacyProofSeedRequest,
@@ -25,6 +28,7 @@ import {
   type TemplateDraftPreviewResult,
   approveProof,
   dispatchPrintJob,
+  exportAuditLedger,
   fetchPrintBridgeStatus,
   fetchTemplateCatalog,
   isTauriConnected,
@@ -32,6 +36,7 @@ import {
   rejectProof,
   searchAuditLog,
   seedLegacyProofs,
+  trimAuditLedger,
   validateLegacyProofSeed,
 } from "./tauriClient";
 
@@ -179,6 +184,9 @@ type AuditSearchState = {
   entries: AuditSearchEntry[];
   message: string;
   lastUpdatedAt: string | null;
+};
+type AuditMaintenanceState = SubmitState & {
+  detail: string | null;
 };
 type ProofReviewAction = "approve" | "reject" | null;
 type ProofReviewState = SubmitState & {
@@ -2055,6 +2063,52 @@ function downloadText(filename: string, value: string): void {
   URL.revokeObjectURL(url);
 }
 
+function buildAuditExportFilename(scope: AuditLedgerScope, exportedAt: string): string {
+  const token = exportedAt.replace(/[:.]/g, "-");
+  return `audit-ledger-${scope}-${token}.json`;
+}
+
+function buildAuditExportDocument(result: AuditExportResult): string {
+  return JSON.stringify(
+    {
+      schema_version: "audit-ledger-export-v1",
+      exported_at: new Date().toISOString(),
+      scope: result.scope,
+      snapshot: result.snapshot,
+    },
+    null,
+    2,
+  );
+}
+
+function parseOptionalPositiveInteger(value: string, label: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return null;
+  }
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${label} must be a whole number.`);
+  }
+  const parsed = Number.parseInt(trimmed, 10);
+  if (parsed < 1) {
+    throw new Error(`${label} must be greater than or equal to 1.`);
+  }
+  return parsed;
+}
+
+function describeAuditTrimResult(result: AuditRetentionResult): string {
+  const summary = `${result.removedDispatchCount} dispatch and ${result.removedProofCount} proof entr${
+    result.removedDispatchCount + result.removedProofCount === 1 ? "y" : "ies"
+  }`;
+  if (result.dryRun) {
+    return `Dry run complete. ${summary} would be removed.`;
+  }
+  if (result.backup) {
+    return `Trim complete. ${summary} moved with backup at ${result.backup.filePath}.`;
+  }
+  return `Trim complete. ${summary} removed.`;
+}
+
 function buildTemplateAssetPayload(
   form: FormState,
   mapping: ColumnMapping,
@@ -2124,6 +2178,20 @@ export function App() {
     entries: [],
     message: "Audit ledger has not been loaded yet.",
     lastUpdatedAt: null,
+  });
+  const [auditScope, setAuditScope] = useState<AuditLedgerScope>("all");
+  const [auditMaxAgeDays, setAuditMaxAgeDays] = useState("30");
+  const [auditMaxEntries, setAuditMaxEntries] = useState("500");
+  const [auditDryRun, setAuditDryRun] = useState(true);
+  const [auditExportState, setAuditExportState] = useState<AuditMaintenanceState>({
+    phase: "idle",
+    message: "",
+    detail: null,
+  });
+  const [auditTrimState, setAuditTrimState] = useState<AuditMaintenanceState>({
+    phase: "idle",
+    message: "",
+    detail: null,
   });
   const [proofReviewNotes, setProofReviewNotes] = useState("");
   const [proofReview, setProofReview] = useState<ProofReviewState>({
@@ -2825,6 +2893,110 @@ export function App() {
         entries: [],
         message: `Audit search failed: ${formatErrorMessage(error)}`,
         lastUpdatedAt: null,
+      });
+    }
+  });
+
+  const runAuditExport = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditExportState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        detail: null,
+      });
+      return;
+    }
+
+    setAuditExportState({
+      phase: "submitting",
+      message: "Building audit export from desktop ledger...",
+      detail: null,
+    });
+
+    try {
+      const result = await exportAuditLedger({ scope: auditScope });
+      const exportedAt = new Date().toISOString();
+      downloadText(
+        buildAuditExportFilename(result.scope, exportedAt),
+        buildAuditExportDocument(result),
+      );
+      setAuditExportState({
+        phase: "success",
+        message: `Exported ${result.dispatchCount} dispatch and ${result.proofCount} proof entries as JSON.`,
+        detail: null,
+      });
+    } catch (error) {
+      setAuditExportState({
+        phase: "error",
+        message: `Audit export failed: ${formatErrorMessage(error)}`,
+        detail: null,
+      });
+    }
+  });
+
+  const runAuditTrim = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setAuditTrimState({
+        phase: "error",
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        detail: null,
+      });
+      return;
+    }
+
+    let maxAgeDays: number | null;
+    let maxEntries: number | null;
+    try {
+      maxAgeDays = parseOptionalPositiveInteger(auditMaxAgeDays, "Max age days");
+      maxEntries = parseOptionalPositiveInteger(auditMaxEntries, "Max entries");
+    } catch (error) {
+      setAuditTrimState({
+        phase: "error",
+        message: formatErrorMessage(error),
+        detail: null,
+      });
+      return;
+    }
+
+    if (maxAgeDays === null && maxEntries === null) {
+      setAuditTrimState({
+        phase: "error",
+        message: "Set max age days, max entries, or both before running retention.",
+        detail: null,
+      });
+      return;
+    }
+
+    setAuditTrimState({
+      phase: "submitting",
+      message: auditDryRun
+        ? "Running audit retention dry run..."
+        : "Trimming audit ledger and writing backup bundle...",
+      detail: null,
+    });
+
+    try {
+      const result = await trimAuditLedger({
+        scope: auditScope,
+        maxAgeDays: maxAgeDays ?? undefined,
+        maxEntries: maxEntries ?? undefined,
+        dryRun: auditDryRun,
+      });
+      setAuditTrimState({
+        phase: "success",
+        message: describeAuditTrimResult(result),
+        detail: result.backup?.filePath ?? null,
+      });
+      if (!result.dryRun) {
+        void refreshAuditSearch(auditQuery);
+      }
+    } catch (error) {
+      setAuditTrimState({
+        phase: "error",
+        message: `Audit retention failed: ${formatErrorMessage(error)}`,
+        detail: null,
       });
     }
   });
@@ -4636,6 +4808,99 @@ export function App() {
               placeholder="Optional approval or rejection note for the proof ledger."
             />
           </label>
+        </div>
+        <div className="proof-note">
+          <strong>Audit maintenance</strong>
+          <p>
+            Export the current desktop ledger as JSON, then dry-run or apply retention with a backup
+            bundle written under the desktop audit backup directory.
+          </p>
+          <small>
+            {bridgeStatusAvailable && bridgeStatus.status
+              ? `audit log dir: ${bridgeStatus.status.auditLogDir} / backup dir: ${bridgeStatus.status.auditBackupDir}`
+              : "Desktop bridge unavailable. Audit maintenance needs desktop-shell."}
+          </small>
+          <div className="form-grid">
+            <label className="field">
+              <span>Scope</span>
+              <select
+                value={auditScope}
+                onChange={(event) => setAuditScope(event.target.value as AuditLedgerScope)}
+              >
+                <option value="all">All ledgers</option>
+                <option value="dispatch">Dispatch only</option>
+                <option value="proof">Proof only</option>
+              </select>
+            </label>
+            <label className="field">
+              <span>Max age days</span>
+              <input
+                value={auditMaxAgeDays}
+                onChange={(event) => setAuditMaxAgeDays(event.target.value)}
+                placeholder="30"
+              />
+            </label>
+            <label className="field">
+              <span>Max entries</span>
+              <input
+                value={auditMaxEntries}
+                onChange={(event) => setAuditMaxEntries(event.target.value)}
+                placeholder="500"
+              />
+            </label>
+            <label className="field checkbox-field">
+              <span>Retention mode</span>
+              <div className="checkbox-row">
+                <input
+                  id="audit-dry-run"
+                  type="checkbox"
+                  checked={auditDryRun}
+                  onChange={(event) => setAuditDryRun(event.target.checked)}
+                />
+                <label htmlFor="audit-dry-run">Dry run first</label>
+              </div>
+            </label>
+          </div>
+          <div className="toolbar">
+            <button
+              className="button-secondary"
+              type="button"
+              onClick={() => {
+                void runAuditExport();
+              }}
+              disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+            >
+              Export audit JSON
+            </button>
+            <button
+              className={auditDryRun ? "button-secondary" : "button-primary"}
+              type="button"
+              onClick={() => {
+                void runAuditTrim();
+              }}
+              disabled={!bridgeStatusAvailable || auditTrimState.phase === "submitting"}
+            >
+              {auditDryRun ? "Run retention dry run" : "Apply retention trim"}
+            </button>
+          </div>
+          {auditExportState.phase === "submitting" ? (
+            <p className="notice-text">{auditExportState.message}</p>
+          ) : null}
+          {auditExportState.phase === "error" ? (
+            <p className="status-fail">{auditExportState.message}</p>
+          ) : null}
+          {auditExportState.phase === "success" ? (
+            <p className="status-ok">{auditExportState.message}</p>
+          ) : null}
+          {auditTrimState.phase === "submitting" ? (
+            <p className="notice-text">{auditTrimState.message}</p>
+          ) : null}
+          {auditTrimState.phase === "error" ? (
+            <p className="status-fail">{auditTrimState.message}</p>
+          ) : null}
+          {auditTrimState.phase === "success" ? (
+            <p className="status-ok">{auditTrimState.message}</p>
+          ) : null}
         </div>
         <div className="proof-note">
           <strong>Legacy proof seed</strong>

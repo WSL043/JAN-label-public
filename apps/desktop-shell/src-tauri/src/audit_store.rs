@@ -1,9 +1,11 @@
 use audit_log::{
-    AuditActor, AuditQuery, AuditSearchEntry, AuditSearchResult, DispatchMatchSubject,
-    PersistedDispatchRecord, ProofRecord, ProofStatus,
+    AuditActor, AuditArtifactInfo, AuditExportRequest, AuditExportResult, AuditLedgerScope,
+    AuditLedgerSnapshot, AuditQuery, AuditRetentionRequest, AuditRetentionResult,
+    AuditSearchEntry, AuditSearchResult, DispatchMatchSubject, PersistedDispatchRecord,
+    ProofRecord, ProofStatus,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fs::{self, OpenOptions};
 use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
@@ -14,20 +16,16 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 const DISPATCH_LEDGER_FILE: &str = "dispatch-ledger.json";
 const PROOF_LEDGER_FILE: &str = "proof-ledger.json";
 const STORE_LOCK_FILE: &str = "audit-store.lock";
+const BACKUP_DIR: &str = "backups";
 const MAX_AUDIT_RESULT_LIMIT: usize = 200;
 const DEFAULT_AUDIT_RESULT_LIMIT: usize = 50;
 const LOCK_WAIT_TIMEOUT: Duration = Duration::from_secs(3);
 const LOCK_WAIT_INTERVAL: Duration = Duration::from_millis(25);
+const AUDIT_BUNDLE_SCHEMA_VERSION: &str = "audit-ledger-bundle-v1";
 
 #[derive(Debug, Clone)]
 pub struct AuditStore {
     root: PathBuf,
-}
-
-#[derive(Debug, Clone)]
-pub struct AuditLedgerSnapshot {
-    pub dispatches: Vec<PersistedDispatchRecord>,
-    pub proofs: Vec<ProofRecord>,
 }
 
 #[derive(Debug, Clone)]
@@ -213,6 +211,60 @@ impl AuditStore {
         })
     }
 
+    pub fn export(&self, request: AuditExportRequest) -> Result<AuditExportResult, String> {
+        self.with_lock(|| {
+            let snapshot = scoped_snapshot(
+                AuditLedgerSnapshot {
+                    dispatches: self.load_dispatch_records()?,
+                    proofs: self.load_proof_records()?,
+                },
+                request.scope.unwrap_or_default(),
+            );
+            Ok(AuditExportResult {
+                scope: request.scope.unwrap_or_default(),
+                dispatch_count: snapshot.dispatches.len(),
+                proof_count: snapshot.proofs.len(),
+                snapshot,
+            })
+        })
+    }
+
+    pub fn trim(&self, request: AuditRetentionRequest) -> Result<AuditRetentionResult, String> {
+        validate_retention_request(&request)?;
+        let scope = request.scope.unwrap_or_default();
+        self.with_lock(|| {
+            let dispatches = self.load_dispatch_records()?;
+            let proofs = self.load_proof_records()?;
+            let mut plan = build_retention_plan(&dispatches, &proofs, scope, &request)?;
+
+            if !request.dry_run {
+                if let Some(bundle) = plan.backup_bundle.as_mut() {
+                    self.write_backup_bundle(bundle)?;
+                }
+                if scope != AuditLedgerScope::Proof {
+                    self.save_dispatch_records(&plan.retained_dispatches)?;
+                }
+                if scope != AuditLedgerScope::Dispatch {
+                    self.save_proof_records(&plan.retained_proofs)?;
+                }
+            }
+
+            Ok(AuditRetentionResult {
+                scope,
+                dry_run: request.dry_run,
+                retained_dispatch_count: plan.retained_dispatches.len(),
+                retained_proof_count: plan.retained_proofs.len(),
+                removed_dispatch_count: plan.removed_dispatches.len(),
+                removed_proof_count: plan.removed_proofs.len(),
+                backup: if request.dry_run {
+                    None
+                } else {
+                    plan.backup_bundle.as_ref().map(|bundle| bundle.artifact.clone())
+                },
+            })
+        })
+    }
+
     pub fn seed_legacy_proofs(&self, records: Vec<LegacyProofSeedRecord>) -> Result<(), String> {
         self.with_lock(|| {
             let mut dispatches = self.load_dispatch_records()?;
@@ -293,14 +345,320 @@ impl AuditStore {
         self.root.join(PROOF_LEDGER_FILE)
     }
 
+    pub fn backup_dir(&self) -> PathBuf {
+        self.root.join(BACKUP_DIR)
+    }
+
     fn lock_path(&self) -> PathBuf {
         self.root.join(STORE_LOCK_FILE)
+    }
+
+    fn write_backup_bundle(&self, bundle: &mut AuditLedgerBundle) -> Result<(), String> {
+        let path = self.backup_dir().join(&bundle.artifact.file_name);
+        bundle.artifact.file_path = path.to_string_lossy().into_owned();
+        let size_bytes = write_json_file(&path, bundle)?;
+        bundle.artifact.size_bytes = size_bytes;
+        Ok(())
     }
 
     fn with_lock<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         let _guard = acquire_store_lock(&self.lock_path())?;
         operation()
     }
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AuditLedgerBundle {
+    schema_version: &'static str,
+    created_at_utc: String,
+    scope: AuditLedgerScope,
+    dispatches: Vec<PersistedDispatchRecord>,
+    proofs: Vec<ProofRecord>,
+    artifact: AuditArtifactInfo,
+}
+
+#[derive(Debug, Clone)]
+struct RetentionPlan {
+    retained_dispatches: Vec<PersistedDispatchRecord>,
+    retained_proofs: Vec<ProofRecord>,
+    removed_dispatches: Vec<PersistedDispatchRecord>,
+    removed_proofs: Vec<ProofRecord>,
+    backup_bundle: Option<AuditLedgerBundle>,
+}
+
+fn scoped_snapshot(snapshot: AuditLedgerSnapshot, scope: AuditLedgerScope) -> AuditLedgerSnapshot {
+    match scope {
+        AuditLedgerScope::All => snapshot,
+        AuditLedgerScope::Dispatch => AuditLedgerSnapshot {
+            dispatches: snapshot.dispatches,
+            proofs: Vec::new(),
+        },
+        AuditLedgerScope::Proof => AuditLedgerSnapshot {
+            dispatches: Vec::new(),
+            proofs: snapshot.proofs,
+        },
+    }
+}
+
+fn validate_retention_request(request: &AuditRetentionRequest) -> Result<(), String> {
+    if request.max_age_days.is_none() && request.max_entries.is_none() {
+        return Err("retention requires maxAgeDays, maxEntries, or both".to_string());
+    }
+    if matches!(request.max_age_days, Some(0)) {
+        return Err("maxAgeDays must be greater than or equal to 1".to_string());
+    }
+    if matches!(request.max_entries, Some(0)) {
+        return Err("maxEntries must be greater than or equal to 1".to_string());
+    }
+    Ok(())
+}
+
+fn build_retention_plan(
+    dispatches: &[PersistedDispatchRecord],
+    proofs: &[ProofRecord],
+    scope: AuditLedgerScope,
+    request: &AuditRetentionRequest,
+) -> Result<RetentionPlan, String> {
+    let dispatch_keep = match scope {
+        AuditLedgerScope::Proof => (0..dispatches.len()).collect::<HashSet<_>>(),
+        AuditLedgerScope::All | AuditLedgerScope::Dispatch => {
+            select_dispatch_keep_indices(dispatches, request)?
+        }
+    };
+    let proof_keep = match scope {
+        AuditLedgerScope::Dispatch => (0..proofs.len()).collect::<HashSet<_>>(),
+        AuditLedgerScope::All | AuditLedgerScope::Proof => select_proof_keep_indices(proofs, request)?,
+    };
+
+    let mut dispatch_keep = dispatch_keep;
+    preserve_required_dispatches(dispatches, proofs, &proof_keep, &mut dispatch_keep);
+
+    let retained_dispatches = dispatches
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| dispatch_keep.contains(index))
+        .map(|(_, record)| record.clone())
+        .collect::<Vec<_>>();
+    let removed_dispatches = dispatches
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !dispatch_keep.contains(index))
+        .map(|(_, record)| record.clone())
+        .collect::<Vec<_>>();
+    let retained_proofs = proofs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| proof_keep.contains(index))
+        .map(|(_, record)| record.clone())
+        .collect::<Vec<_>>();
+    let removed_proofs = proofs
+        .iter()
+        .enumerate()
+        .filter(|(index, _)| !proof_keep.contains(index))
+        .map(|(_, record)| record.clone())
+        .collect::<Vec<_>>();
+
+    let backup_bundle = if removed_dispatches.is_empty() && removed_proofs.is_empty() {
+        None
+    } else {
+        Some(build_backup_bundle(
+            scope,
+            &removed_dispatches,
+            &removed_proofs,
+        ))
+    };
+
+    Ok(RetentionPlan {
+        retained_dispatches,
+        retained_proofs,
+        removed_dispatches,
+        removed_proofs,
+        backup_bundle,
+    })
+}
+
+fn select_dispatch_keep_indices(
+    dispatches: &[PersistedDispatchRecord],
+    request: &AuditRetentionRequest,
+) -> Result<HashSet<usize>, String> {
+    let cutoff_epoch = request
+        .max_age_days
+        .map(|days| current_unix_timestamp_secs() - i64::from(days) * 86_400);
+    let mut ranked = dispatches
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            let epoch = if cutoff_epoch.is_some() {
+                parse_rfc3339_utc_timestamp_to_unix_secs(&record.audit.occurred_at).map_err(|error| {
+                    format!(
+                        "dispatch record '{}' has invalid occurredAt '{}': {error}",
+                        record.audit.job_id.0, record.audit.occurred_at
+                    )
+                })?
+            } else {
+                0
+            };
+            Ok((index, epoch, record.audit.occurred_at.clone()))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    let mut keep = HashSet::new();
+    for (position, (index, epoch, _)) in ranked.into_iter().enumerate() {
+        let within_entries = request.max_entries.map(|limit| position < limit).unwrap_or(true);
+        let within_age = cutoff_epoch.map(|cutoff| epoch >= cutoff).unwrap_or(true);
+        if within_entries && within_age {
+            keep.insert(index);
+        }
+    }
+    Ok(keep)
+}
+
+fn select_proof_keep_indices(
+    proofs: &[ProofRecord],
+    request: &AuditRetentionRequest,
+) -> Result<HashSet<usize>, String> {
+    let cutoff_epoch = request
+        .max_age_days
+        .map(|days| current_unix_timestamp_secs() - i64::from(days) * 86_400);
+    let mut ranked = proofs
+        .iter()
+        .enumerate()
+        .map(|(index, record)| {
+            let timestamp = proof_retention_timestamp(record);
+            let epoch = if cutoff_epoch.is_some() {
+                parse_rfc3339_utc_timestamp_to_unix_secs(&timestamp).map_err(|error| {
+                    format!(
+                        "proof record '{}' has invalid retention timestamp '{}': {error}",
+                        record.proof_job_id.0, timestamp
+                    )
+                })?
+            } else {
+                0
+            };
+            Ok((index, epoch, timestamp))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    ranked.sort_by(|left, right| {
+        right
+            .1
+            .cmp(&left.1)
+            .then_with(|| right.2.cmp(&left.2))
+            .then_with(|| left.0.cmp(&right.0))
+    });
+
+    let mut keep = HashSet::new();
+    for (position, (index, epoch, _)) in ranked.into_iter().enumerate() {
+        let within_entries = request.max_entries.map(|limit| position < limit).unwrap_or(true);
+        let within_age = cutoff_epoch.map(|cutoff| epoch >= cutoff).unwrap_or(true);
+        if within_entries && within_age {
+            keep.insert(index);
+        }
+    }
+    Ok(keep)
+}
+
+fn preserve_required_dispatches(
+    dispatches: &[PersistedDispatchRecord],
+    proofs: &[ProofRecord],
+    proof_keep: &HashSet<usize>,
+    dispatch_keep: &mut HashSet<usize>,
+) {
+    for proof_index in proof_keep {
+        let proof_job_id = &proofs[*proof_index].proof_job_id.0;
+        for (dispatch_index, dispatch) in dispatches.iter().enumerate() {
+            if dispatch.mode == "proof" && dispatch.audit.job_id.0 == *proof_job_id {
+                dispatch_keep.insert(dispatch_index);
+            }
+        }
+    }
+
+    let mut dispatches_by_job_id = HashMap::<String, Vec<usize>>::new();
+    for (index, record) in dispatches.iter().enumerate() {
+        dispatches_by_job_id
+            .entry(record.audit.job_id.0.clone())
+            .or_default()
+            .push(index);
+    }
+
+    let mut stack = dispatch_keep.iter().copied().collect::<Vec<_>>();
+    while let Some(index) = stack.pop() {
+        let record = &dispatches[index];
+        if let Some(parent_job_id) = record.audit.parent_job_id.as_ref() {
+            if let Some(parent_indexes) = dispatches_by_job_id.get(&parent_job_id.0) {
+                for parent_index in parent_indexes {
+                    if dispatch_keep.insert(*parent_index) {
+                        stack.push(*parent_index);
+                    }
+                }
+            }
+        }
+        let lineage_root = &record.audit.job_lineage_id.0;
+        if lineage_root != &record.audit.job_id.0 {
+            if let Some(root_indexes) = dispatches_by_job_id.get(lineage_root) {
+                for root_index in root_indexes {
+                    if dispatch_keep.insert(*root_index) {
+                        stack.push(*root_index);
+                    }
+                }
+            }
+        }
+    }
+}
+
+fn proof_retention_timestamp(record: &ProofRecord) -> String {
+    record
+        .decision
+        .as_ref()
+        .map(|decision| decision.occurred_at.clone())
+        .unwrap_or_else(|| record.requested_at.clone())
+}
+
+fn build_backup_bundle(
+    scope: AuditLedgerScope,
+    removed_dispatches: &[PersistedDispatchRecord],
+    removed_proofs: &[ProofRecord],
+) -> AuditLedgerBundle {
+    let created_at_utc = current_utc_timestamp_string();
+    let file_name = format!(
+        "audit-retention-{}-{}.json",
+        scope_file_token(scope),
+        compact_timestamp_token(&created_at_utc)
+    );
+    let artifact = AuditArtifactInfo {
+        file_name: file_name.clone(),
+        file_path: format!("backups/{file_name}"),
+        created_at_utc: created_at_utc.clone(),
+        size_bytes: 0,
+    };
+
+    AuditLedgerBundle {
+        schema_version: AUDIT_BUNDLE_SCHEMA_VERSION,
+        created_at_utc,
+        scope,
+        dispatches: removed_dispatches.to_vec(),
+        proofs: removed_proofs.to_vec(),
+        artifact,
+    }
+}
+
+fn scope_file_token(scope: AuditLedgerScope) -> &'static str {
+    match scope {
+        AuditLedgerScope::All => "all",
+        AuditLedgerScope::Dispatch => "dispatch",
+        AuditLedgerScope::Proof => "proof",
+    }
+}
+
+fn compact_timestamp_token(value: &str) -> String {
+    value.chars().filter(|value| value.is_ascii_digit()).collect()
 }
 
 fn matches_search(entry: &AuditSearchEntry, search_text: Option<&str>) -> bool {
@@ -482,6 +840,13 @@ fn write_json_vec<T>(path: &Path, records: &[T]) -> Result<(), String>
 where
     T: Serialize,
 {
+    write_json_file(path, records).map(|_| ())
+}
+
+fn write_json_file<T>(path: &Path, value: &T) -> Result<u64, String>
+where
+    T: Serialize + ?Sized,
+{
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).map_err(|error| {
             format!(
@@ -491,18 +856,164 @@ where
         })?;
     }
 
-    let payload = serde_json::to_string_pretty(records)
+    let payload = serde_json::to_string_pretty(value)
         .map_err(|error| format!("failed to serialize audit ledger '{}': {error}", path.display()))?;
     let temp_path = unique_temp_path(path);
-    fs::write(&temp_path, payload)
+    let mut file = fs::File::create(&temp_path)
+        .map_err(|error| format!("failed to create audit ledger '{}': {error}", temp_path.display()))?;
+    file.write_all(payload.as_bytes())
         .map_err(|error| format!("failed to write audit ledger '{}': {error}", temp_path.display()))?;
+    file.sync_all()
+        .map_err(|error| format!("failed to flush audit ledger '{}': {error}", temp_path.display()))?;
+    drop(file);
     fs::rename(&temp_path, path).map_err(|error| {
         format!(
             "failed to finalize audit ledger '{}' from '{}': {error}",
             path.display(),
             temp_path.display()
         )
-    })
+    })?;
+    Ok(payload.len() as u64)
+}
+
+fn current_unix_timestamp_secs() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("system time should be after unix epoch")
+        .as_secs() as i64
+}
+
+fn current_utc_timestamp_string() -> String {
+    format_unix_timestamp_rfc3339(current_unix_timestamp_secs())
+}
+
+fn parse_rfc3339_utc_timestamp_to_unix_secs(value: &str) -> Result<i64, String> {
+    let value = value.trim();
+    if !value.ends_with('Z') {
+        return Err("timestamp must end with 'Z'".to_string());
+    }
+    let core = &value[..value.len() - 1];
+    let (date_part, time_part) = core
+        .split_once('T')
+        .ok_or_else(|| "timestamp must include 'T' separator".to_string())?;
+    let mut date = date_part.split('-');
+    let year = parse_i32_component(date.next(), "year")?;
+    let month = parse_u32_component(date.next(), "month")?;
+    let day = parse_u32_component(date.next(), "day")?;
+    if date.next().is_some() {
+        return Err("timestamp has extra date components".to_string());
+    }
+
+    let mut time = time_part.split(':');
+    let hour = parse_u32_component(time.next(), "hour")?;
+    let minute = parse_u32_component(time.next(), "minute")?;
+    let second_value = time
+        .next()
+        .ok_or_else(|| "timestamp missing second component".to_string())?;
+    if time.next().is_some() {
+        return Err("timestamp has extra time components".to_string());
+    }
+    let second_component = second_value
+        .split_once('.')
+        .map(|(head, _)| head)
+        .unwrap_or(second_value);
+    let second = parse_u32_component(Some(second_component), "second")?;
+
+    validate_calendar_components(year, month, day, hour, minute, second)?;
+
+    let days = days_from_civil(year, month, day);
+    Ok(days * 86_400 + i64::from(hour) * 3_600 + i64::from(minute) * 60 + i64::from(second))
+}
+
+fn parse_i32_component(value: Option<&str>, label: &str) -> Result<i32, String> {
+    let value = value.ok_or_else(|| format!("timestamp missing {label} component"))?;
+    value
+        .parse::<i32>()
+        .map_err(|_| format!("timestamp has invalid {label} component"))
+}
+
+fn parse_u32_component(value: Option<&str>, label: &str) -> Result<u32, String> {
+    let value = value.ok_or_else(|| format!("timestamp missing {label} component"))?;
+    value
+        .parse::<u32>()
+        .map_err(|_| format!("timestamp has invalid {label} component"))
+}
+
+fn validate_calendar_components(
+    year: i32,
+    month: u32,
+    day: u32,
+    hour: u32,
+    minute: u32,
+    second: u32,
+) -> Result<(), String> {
+    if !(1..=12).contains(&month) {
+        return Err("timestamp month must be between 1 and 12".to_string());
+    }
+    if hour > 23 {
+        return Err("timestamp hour must be between 0 and 23".to_string());
+    }
+    if minute > 59 {
+        return Err("timestamp minute must be between 0 and 59".to_string());
+    }
+    if second > 59 {
+        return Err("timestamp second must be between 0 and 59".to_string());
+    }
+    let max_day = days_in_month(year, month);
+    if day == 0 || day > max_day {
+        return Err(format!("timestamp day must be between 1 and {max_day}"));
+    }
+    Ok(())
+}
+
+fn days_in_month(year: i32, month: u32) -> u32 {
+    match month {
+        1 | 3 | 5 | 7 | 8 | 10 | 12 => 31,
+        4 | 6 | 9 | 11 => 30,
+        2 if is_leap_year(year) => 29,
+        2 => 28,
+        _ => 31,
+    }
+}
+
+fn is_leap_year(year: i32) -> bool {
+    (year % 4 == 0 && year % 100 != 0) || year % 400 == 0
+}
+
+fn days_from_civil(year: i32, month: u32, day: u32) -> i64 {
+    let year = year - if month <= 2 { 1 } else { 0 };
+    let era = if year >= 0 { year } else { year - 399 } / 400;
+    let year_of_era = year - era * 400;
+    let month = month as i32;
+    let day_of_year =
+        (153 * (month + if month > 2 { -3 } else { 9 }) + 2) / 5 + day as i32 - 1;
+    let day_of_era = year_of_era * 365 + year_of_era / 4 - year_of_era / 100 + day_of_year;
+    i64::from(era) * 146_097 + i64::from(day_of_era) - 719_468
+}
+
+fn format_unix_timestamp_rfc3339(value: i64) -> String {
+    let days = value.div_euclid(86_400);
+    let seconds_of_day = value.rem_euclid(86_400);
+    let (year, month, day) = civil_from_days(days);
+    let hour = seconds_of_day / 3_600;
+    let minute = (seconds_of_day % 3_600) / 60;
+    let second = seconds_of_day % 60;
+    format!("{year:04}-{month:02}-{day:02}T{hour:02}:{minute:02}:{second:02}Z")
+}
+
+fn civil_from_days(days: i64) -> (i32, u32, u32) {
+    let days = days + 719_468;
+    let era = if days >= 0 { days } else { days - 146_096 } / 146_097;
+    let day_of_era = days - era * 146_097;
+    let year_of_era =
+        (day_of_era - day_of_era / 1_460 + day_of_era / 36_524 - day_of_era / 146_096) / 365;
+    let year = year_of_era as i32 + era as i32 * 400;
+    let day_of_year = day_of_era - (365 * year_of_era + year_of_era / 4 - year_of_era / 100);
+    let month_piece = (5 * day_of_year + 2) / 153;
+    let day = day_of_year - (153 * month_piece + 2) / 5 + 1;
+    let month = month_piece + if month_piece < 10 { 3 } else { -9 };
+    let year = year + if month <= 2 { 1 } else { 0 };
+    (year, month as u32, day as u32)
 }
 
 fn acquire_store_lock(path: &Path) -> Result<AuditStoreLockGuard, String> {
@@ -595,8 +1106,9 @@ impl ProofStatusLabel for ProofRecord {
 mod tests {
     use super::{AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
     use audit_log::{
-        AuditActor, AuditQuery, DispatchMatchSubject, PersistedDispatchRecord, PrintAuditRecord,
-        PrintJobId, PrintJobLineageId, ProofRecord, ProofStatus,
+        AuditActor, AuditExportRequest, AuditLedgerScope, AuditQuery, AuditRetentionRequest,
+        DispatchMatchSubject, PersistedDispatchRecord, PrintAuditRecord, PrintJobId,
+        PrintJobLineageId, ProofRecord, ProofStatus,
     };
     use std::env;
     use std::fs;
@@ -793,6 +1305,174 @@ mod tests {
         assert!(err.contains("already exists"));
     }
 
+    #[test]
+    fn export_scopes_return_expected_ledgers() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-EXPORT");
+        store
+            .register_pending_proof(proof.clone())
+            .expect("pending proof should persist");
+        store
+            .record_dispatch(sample_proof_dispatch(&proof))
+            .expect("dispatch should persist");
+
+        let dispatch_only = store
+            .export(AuditExportRequest {
+                scope: Some(AuditLedgerScope::Dispatch),
+            })
+            .expect("dispatch export should succeed");
+        assert_eq!(dispatch_only.dispatch_count, 1);
+        assert_eq!(dispatch_only.proof_count, 0);
+
+        let proof_only = store
+            .export(AuditExportRequest {
+                scope: Some(AuditLedgerScope::Proof),
+            })
+            .expect("proof export should succeed");
+        assert_eq!(proof_only.dispatch_count, 0);
+        assert_eq!(proof_only.proof_count, 1);
+    }
+
+    #[test]
+    fn trim_dry_run_does_not_mutate_ledgers() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0001",
+                "JOB-PRINT-0001",
+                None,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("dispatch should persist");
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0002",
+                "JOB-PRINT-0002",
+                None,
+                "2026-04-15T10:00:00Z",
+            ))
+            .expect("dispatch should persist");
+
+        let result = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::Dispatch),
+                max_age_days: None,
+                max_entries: Some(1),
+                dry_run: true,
+            })
+            .expect("dry run should succeed");
+
+        assert_eq!(result.removed_dispatch_count, 1);
+        assert!(result.backup.is_none());
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 2);
+    }
+
+    #[test]
+    fn trim_all_scope_keeps_proof_dispatch_dependency_chain() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-TRIM");
+        store
+            .register_pending_proof(proof.clone())
+            .expect("pending proof should persist");
+        store
+            .record_dispatch(sample_proof_dispatch_with_time(
+                &proof,
+                "2026-04-15T08:00:00Z",
+            ))
+            .expect("proof dispatch should persist");
+        store
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-PROOF-TRIM".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T09:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0100",
+                "JOB-PROOF-TRIM",
+                Some("JOB-PROOF-TRIM"),
+                "2026-04-15T10:00:00Z",
+            ))
+            .expect("newer print dispatch should persist");
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0101",
+                "JOB-PROOF-TRIM",
+                Some("JOB-PRINT-0100"),
+                "2026-04-15T11:00:00Z",
+            ))
+            .expect("newest print dispatch should persist");
+
+        let result = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::All),
+                max_age_days: None,
+                max_entries: Some(1),
+                dry_run: false,
+            })
+            .expect("trim should succeed");
+
+        assert_eq!(result.retained_proof_count, 1);
+        assert_eq!(result.retained_dispatch_count, 3);
+        assert_eq!(result.removed_dispatch_count, 0);
+        assert!(result.backup.is_none());
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.proofs.len(), 1);
+        assert_eq!(snapshot.dispatches.len(), 3);
+        assert!(snapshot
+            .dispatches
+            .iter()
+            .any(|record| record.audit.job_id.0 == "JOB-PROOF-TRIM"));
+    }
+
+    #[test]
+    fn trim_dispatch_scope_writes_backup_bundle() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0200",
+                "JOB-PRINT-0200",
+                None,
+                "2026-04-15T09:00:00Z",
+            ))
+            .expect("dispatch should persist");
+        store
+            .record_dispatch(sample_print_dispatch(
+                "JOB-PRINT-0201",
+                "JOB-PRINT-0201",
+                None,
+                "2026-04-15T10:00:00Z",
+            ))
+            .expect("dispatch should persist");
+
+        let result = store
+            .trim(AuditRetentionRequest {
+                scope: Some(AuditLedgerScope::Dispatch),
+                max_age_days: None,
+                max_entries: Some(1),
+                dry_run: false,
+            })
+            .expect("trim should succeed");
+
+        let backup = result.backup.expect("backup should be written");
+        assert!(Path::new(&backup.file_path).exists());
+        assert!(backup.file_name.ends_with(".json"));
+        assert!(backup.size_bytes > 0);
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 1);
+    }
+
     fn sample_proof(job_id: &str) -> ProofRecord {
         ProofRecord::pending(
             PrintJobId(job_id.to_string()),
@@ -808,13 +1488,20 @@ mod tests {
     }
 
     fn sample_proof_dispatch(proof: &ProofRecord) -> PersistedDispatchRecord {
+        sample_proof_dispatch_with_time(proof, &proof.requested_at)
+    }
+
+    fn sample_proof_dispatch_with_time(
+        proof: &ProofRecord,
+        occurred_at: &str,
+    ) -> PersistedDispatchRecord {
         PersistedDispatchRecord {
             audit: PrintAuditRecord::dispatch(
                 proof.proof_job_id.clone(),
                 proof.job_lineage_id.clone(),
                 None,
                 proof.requested_by.clone(),
-                proof.requested_at.clone(),
+                occurred_at.to_string(),
                 None,
             ),
             mode: "proof".to_string(),
@@ -858,6 +1545,34 @@ mod tests {
                 submission_external_job_id: format!("legacy-seed:{job_id}"),
             },
             proof,
+        }
+    }
+
+    fn sample_print_dispatch(
+        job_id: &str,
+        lineage_id: &str,
+        parent_job_id: Option<&str>,
+        occurred_at: &str,
+    ) -> PersistedDispatchRecord {
+        PersistedDispatchRecord {
+            audit: PrintAuditRecord::dispatch(
+                PrintJobId(job_id.to_string()),
+                PrintJobLineageId(lineage_id.to_string()),
+                parent_job_id.map(|value| PrintJobId(value.to_string())),
+                AuditActor {
+                    user_id: "ops.user".to_string(),
+                    display_name: "Ops User".to_string(),
+                },
+                occurred_at.to_string(),
+                None,
+            ),
+            mode: "print".to_string(),
+            template_version: "basic-50x30@v1".to_string(),
+            match_subject: sample_match_subject(),
+            artifact_media_type: "application/pdf".to_string(),
+            artifact_byte_size: 256,
+            submission_adapter_kind: "pdf".to_string(),
+            submission_external_job_id: format!("print:{job_id}"),
         }
     }
 

@@ -22,6 +22,7 @@
 | T-028b | P1 | done | Codex + Sub-Agent | `admin-web` に audit search UI を追加 | local ledger の検索、proof status 表示、proof pinning ができる |
 | T-028c | P2 | done | Codex + Sub-Agent | legacy proof seed / migration を実装 | `validate_legacy_proof_seed` / `seed_legacy_proofs` と seed UI で pending seed ができる |
 | T-028d | P1 | done | Codex + Sub-Agent | audit persistence failure を release blocker にする | dispatch 前に ledger writable を preflight し、dispatch 後の audit persistence failure も fatal にする |
+| T-028e | P1 | done | Codex + Sub-Agent | audit export / retention / backup を運用導線に載せる | scoped export、dry-run trim、backup bundle、UI 操作が揃う |
 | T-032c | P1 | done | Codex + Sub-Agent | packaged template catalog を desktop-shell から配布する | `admin-web` が desktop catalog を読み、unknown `template_version` を submit 前に明示する |
 | T-032b | P1 | done | Codex + Sub-Agent | structured template editor の UX と preview 基線を実装 | workbench CSS、local canvas、Rust preview 導線が揃う |
 | T-033b | P1 | done | Codex + Sub-Agent | render parity を改善 | border visible、background / border / field color が SVG / PDF に反映される |
@@ -36,7 +37,6 @@
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-028 | P1 | in_progress | Codex + Sub-Agent | audit を release 運用まで上げる | review / search / retention / export の運用導線が揃う |
 | T-029 | P2 | pending | Codex + Operator | 運用 runbook / 停止・再開・エスカレーション整備 | 現場向けの手順書と障害時の判断基準が揃う |
 | T-032 | P1 | in_progress | Codex + Sub-Agent | label authoring core を BarTender 最低線まで上げる | schema / asset / preview / proof が一連の authoring flow になる |
 | T-032a | P1 | pending | Codex + Sub-Agent | template catalog write-back / manifest 連携 | editor の生 JSON が packaged template と同期される |
@@ -47,6 +47,7 @@
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
+| T-028f | P2 | pending | Codex + Sub-Agent | audit backup list / restore 運用を整える | backup bundle の一覧・復元手順が docs と実装で固まる |
 | T-012 | P3 | pending | Codex + Infra | self-hosted runner / webhook 運用 | GitHub 側 Codex の自動運用を固定化する |
 | T-016 | P3 | pending | Codex | release notes 補助生成 | maintenance ledger から release note を半自動生成できる |
 

@@ -38,7 +38,15 @@ lineage ルール:
 - `admin-web` の proof inbox から `approve` / `reject` を行う
 - approved proof は UI から print form に pin できる
 
-## 4. legacy proof seed フロー
+## 4. audit export / retention
+
+- `export_audit_ledger` は `all / dispatch / proof` scope の snapshot を返す
+- `admin-web` はこれを JSON download にする
+- `trim_audit_ledger` は `maxAgeDays` / `maxEntries` / `dryRun` を受ける
+- trim は proof record と proof dispatch の依存を壊さないように keep set を補強する
+- actual trim 時は removed records を `audit/backups/` 配下の single JSON bundle として先に保存する
+
+## 5. legacy proof seed フロー
 
 1. `admin-web` の legacy proof seed UI で CSV / XLSX を読み込む
 2. `validate_legacy_proof_seed` で row 単位の妥当性を確認する
@@ -51,13 +59,14 @@ lineage ルール:
 - 既存 `proofJobId` / `jobLineageId` と衝突する seed は拒否
 - seed で approved にはしない
 
-## 5. bridge status
+## 6. bridge status
 
 `print_bridge_status` は以下を返す:
 
 - available adapters
 - resolved zint path
 - proof / print / spool output dirs
+- audit log / audit backup dirs
 - active print adapter
 - windows printer name
 - `warningDetails[]`
@@ -68,7 +77,7 @@ lineage ルール:
 
 `admin-web` は `warningDetails` を正とし、`severity === "error"` の warning があれば submit を block する。
 
-## 6. template authoring / preview
+## 7. template authoring / preview
 
 現在の authoring 導線:
 
@@ -88,7 +97,7 @@ lineage ルール:
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
 - つまり authoring preview と本番 dispatch の write-back はまだ未接続
 
-## 7. Excel / CSV 取り込みの方針
+## 8. Excel / CSV 取り込みの方針
 
 - CSV / XLSX は strict DB 連携なしで使えるようにする
 - header は alias mapping で吸収する
@@ -97,9 +106,8 @@ lineage ルール:
   - 13-digit numeric JAN は warning
 - JAN の最終正規化と検証は Rust 側で行う
 
-## 8. まだ未接続の部分
+## 9. まだ未接続の部分
 
-- audit retention / export / backup
 - 実機プリンタの printer matrix
 - authored template の manifest write-back
 - authored template を proof / print dispatch に反映する経路

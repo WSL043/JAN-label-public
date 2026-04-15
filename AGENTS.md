@@ -28,6 +28,8 @@
 - proof / print dispatch の最終 gate は `apps/desktop-shell` を正とする
 - packaged template catalog の存在確認は `apps/desktop-shell` を正とする
 - live template draft の `template_version` が desktop catalog に無い間は queue / proof / print submit に進めない
+- audit retention は proof / proof-dispatch 依存を壊さないことを優先する
+- audit trim の backup は単一 JSON bundle で残す
 
 ## 3. 変更時の最低確認
 

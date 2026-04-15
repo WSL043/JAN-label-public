@@ -179,6 +179,73 @@ pub struct AuditSearchResult {
     pub entries: Vec<AuditSearchEntry>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum AuditLedgerScope {
+    #[default]
+    All,
+    Dispatch,
+    Proof,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditLedgerSnapshot {
+    pub dispatches: Vec<PersistedDispatchRecord>,
+    pub proofs: Vec<ProofRecord>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditArtifactInfo {
+    pub file_name: String,
+    pub file_path: String,
+    pub created_at_utc: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditExportRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AuditLedgerScope>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditExportResult {
+    pub scope: AuditLedgerScope,
+    pub dispatch_count: usize,
+    pub proof_count: usize,
+    pub snapshot: AuditLedgerSnapshot,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditRetentionRequest {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub scope: Option<AuditLedgerScope>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_age_days: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub max_entries: Option<usize>,
+    #[serde(default)]
+    pub dry_run: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AuditRetentionResult {
+    pub scope: AuditLedgerScope,
+    pub dry_run: bool,
+    pub retained_dispatch_count: usize,
+    pub retained_proof_count: usize,
+    pub removed_dispatch_count: usize,
+    pub removed_proof_count: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub backup: Option<AuditArtifactInfo>,
+}
+
 #[cfg(test)]
 mod tests {
     use super::{

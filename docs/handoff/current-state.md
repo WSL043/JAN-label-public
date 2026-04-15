@@ -19,6 +19,7 @@
   - template asset export / import
   - CSV / XLSX import と alias mapping
   - proof inbox / audit search / approved proof pinning
+  - audit export と retention dry-run / apply
   - legacy proof seed UI
   - bridge status と structured warning 表示
   - desktop template catalog sync と unknown `template_version` の事前表示
@@ -30,6 +31,7 @@
   - `dispatch_print_job`
   - `print_bridge_status`
   - `search_audit_log`
+  - `export_audit_ledger` / `trim_audit_ledger`
   - `approve_proof` / `reject_proof`
   - `template_catalog_command`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
@@ -49,6 +51,8 @@
   - dispatch 後の audit persistence failure を fatal として扱う
   - approved proof 由来の lineage を backend で補完し、explicit lineage / reprint parent の不一致を拒否する
   - approved proof artifact を absolute path / PDF 拡張子 / non-empty / PDF header まで検証する
+  - audit export を scoped snapshot として返す
+  - audit retention は proof dependency chain を保ったまま trim し、removed records を single JSON backup bundle で残す
 - `admin-web`
   - structured template editor の CSS と workbench レイアウトを実装
   - local canvas と Rust preview を並べて確認できる
@@ -58,6 +62,7 @@
   - template validation に duplicate / out-of-bounds / unsupported placeholder / preview-only placeholder を追加
   - desktop template catalog を読み、unknown `template_version` を proof / print 前に可視化する
   - catalog mismatch がある draft は queue / manual / batch submit まで block する
+  - audit scope / max age / max entries / dry-run を UI から操作できる
 
 ## 3. 現在の release 境界
 
@@ -70,6 +75,9 @@
 - proof / print dispatch は audit ledger が writable でない限り開始しない
 - dispatch 後の audit persistence failure は success 扱いにしない
 - approved proof artifact は proof output dir 配下の non-empty PDF で、PDF header を読める必要がある
+- audit export は desktop ledger snapshot を JSON として出力する
+- audit retention は `maxAgeDays` / `maxEntries` を受け、proof / proof-dispatch 依存を保ちながら trim する
+- audit trim の backup は `audit/backups/` 配下の single JSON bundle に残す
 - `warningDetails[]` の `code / severity / message` を UI が正として扱う
 - Rust preview は live template JSON を描画する
 - ただし proof / print dispatch はまだ packaged manifest の `template_version` を使う
@@ -94,10 +102,10 @@
 
 ## 5. 次の主タスク
 
-1. `T-028`: audit retention / export / backup
-2. `T-032`: template authoring core の write-back / catalog 連携
-3. `T-033`: preview / proof parity を上げる
-4. `T-029`: 運用 runbook / 停止・再開・エスカレーション整備
+1. `T-032`: template authoring core の write-back / catalog 連携
+2. `T-033`: preview / proof parity を上げる
+3. `T-029`: 運用 runbook / 停止・再開・エスカレーション整備
+4. `T-012`: self-hosted runner / webhook 運用
 
 ## 6. 明確な blocker
 
