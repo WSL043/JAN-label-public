@@ -35,11 +35,14 @@ Priority order for post-`v0.1.2` branch work.
 | T-038 | P1 | done | Codex + Sub-Agent | Printer route and proof gate hardening | Adapter route and proof gate checks are enforced in bridge/backend |
 | T-039 | P1 | done | Codex + Sub-Agent | Import / retry / batch UX hardening | Queue snapshot, retry lineage, lazy XLSX import, and submit state are stable |
 | T-040 | P1 | done | Codex + Sub-Agent | Render/schema hardening | SVG attribute safety and template color constraints are enforced |
+| T-046a | P1 | done | Codex + Sub-Agent | Desktop shell UX reset | `admin-web` uses a rail/workspace/inspector/status-bar shell instead of a single long webpage layout |
 
 ## Now
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
+| T-046 | P1 | pending | Codex + Sub-Agent | Queue and audit desktop grid tooling | Queue/audit tables support denser desktop interaction such as filters, sort, and larger-data navigation |
+| T-047 | P1 | pending | Codex + Sub-Agent | Template authoring interaction hardening | Template lane separates field/property/preview concerns and reduces current dense editor overload |
 | T-028f-restore | P2 | pending | Codex + Sub-Agent | Audit backup restore flow | Backup bundles can be restored from the desktop UI or documented operator procedure |
 | T-016 | P3 | pending | Codex | Release notes automation | Release notes can be generated from the maintenance ledger with low manual cleanup |
 | T-043 | P3 | pending | Codex + Sub-Agent | Release checklist automation | The release branch can emit a concise machine-readable readiness report |

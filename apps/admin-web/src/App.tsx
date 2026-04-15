@@ -44,18 +44,6 @@ import {
   validateLegacyProofSeed,
 } from "./tauriClient";
 
-const corePillars = [
-  "Print correctness stays in Rust, not the UI.",
-  "The admin screen only assembles a draft and operator intent.",
-  "Printer differences stay behind printer profiles and adapters.",
-];
-
-const operatorNotes = [
-  "JAN normalization remains in Rust. This interface flags 12-digit input but does not invent checksums.",
-  "Template and printer route stay explicit and stable to keep core integration deterministic.",
-  "Operators can map uploaded columns to draft fields so spreadsheets do not need perfect structure.",
-];
-
 const templateOptions: TemplateOption[] = [
   {
     id: "basic-50x30",
@@ -215,6 +203,14 @@ type TemplateRenderPreviewState = {
   phase: TemplateRenderPreviewPhase;
   message: string;
   result: TemplateDraftPreviewResult | null;
+};
+type WorkspaceMode = "compose" | "templates" | "queue" | "audit";
+type ActivityTone = "neutral" | "ok" | "warning" | "error";
+type ActivityItem = {
+  id: string;
+  label: string;
+  message: string;
+  tone: ActivityTone;
 };
 
 type FormState = {
@@ -2216,6 +2212,7 @@ export function App() {
   const initialMappingState = loadColumnMappingFromStorage();
   const initialSourceState = restoreSourceFromStorage();
 
+  const [activeWorkspace, setActiveWorkspace] = useState<WorkspaceMode>("compose");
   const [session, setSession] = useState(createSession);
   const [form, setForm] = useState(createInitialFormState);
   const [showErrors, setShowErrors] = useState(false);
@@ -2410,7 +2407,7 @@ export function App() {
   const snapshotJson = draftSnapshot ? JSON.stringify(draftSnapshot, null, 2) : null;
   const draftIsStale =
     Boolean(snapshotJson) && Boolean(liveDraftJson) && snapshotJson !== liveDraftJson;
-  const previewJson = snapshotJson ?? liveDraftJson;
+  const previewJson = liveDraftJson ?? snapshotJson;
 
   const sourceRows = useMemo(() => toSourceRows(sourceData), [sourceData]);
   const preparedRows = useMemo(() => {
@@ -2550,6 +2547,217 @@ export function App() {
           : "1px",
       }
     : undefined;
+  const pendingProofCount = auditSearch.entries.filter(
+    (entry) => entry.proof?.status === "pending",
+  ).length;
+  const workspaceItems: Array<{
+    id: WorkspaceMode;
+    label: string;
+    description: string;
+    badge: string;
+  }> = [
+    {
+      id: "compose",
+      label: "Draft",
+      description: "Manual compose and live payload review",
+      badge: draft ? "ready" : "incomplete",
+    },
+    {
+      id: "templates",
+      label: "Template",
+      description: "Authoring, JSON, and renderer parity",
+      badge: templateValidation.status,
+    },
+    {
+      id: "queue",
+      label: "Queue",
+      description: "Import, validate, and dispatch batches",
+      badge: queuedRows.length > 0 ? String(queuedRows.length) : String(sourceRows.length),
+    },
+    {
+      id: "audit",
+      label: "Audit",
+      description: "Proof approvals, export, retention",
+      badge:
+        pendingProofCount > 0 ? `${pendingProofCount} pending` : String(auditSearch.entries.length),
+    },
+  ];
+  const workspaceDetailById: Record<WorkspaceMode, { title: string; summary: string }> = {
+    compose: {
+      title: "Draft Composer",
+      summary: "Manual draft entry, execution intent, and live payload review.",
+    },
+    templates: {
+      title: "Template Workbench",
+      summary: "Structured authoring, catalog-aligned JSON, and renderer parity checks.",
+    },
+    queue: {
+      title: "Import And Queue",
+      summary: "Spreadsheet intake, mapping, row validation, and staged batch dispatch.",
+    },
+    audit: {
+      title: "Audit And Proof Review",
+      summary: "Approval flow, retention, backup inventory, and legacy proof migration.",
+    },
+  };
+  const activeWorkspaceMeta = workspaceDetailById[activeWorkspace];
+  const activityFeed = useMemo<ActivityItem[]>(() => {
+    const items: ActivityItem[] = [];
+    const pushItem = (
+      id: string,
+      label: string,
+      message: string | null | undefined,
+      tone: ActivityTone,
+    ) => {
+      const normalized = message?.trim();
+      if (!normalized) {
+        return;
+      }
+      items.push({ id, label, message: normalized, tone });
+    };
+
+    pushItem(
+      "bridge",
+      "Bridge",
+      bridgeStatus.message,
+      bridgeStatus.phase === "error"
+        ? "error"
+        : bridgeStatus.phase === "unavailable"
+          ? "warning"
+          : "neutral",
+    );
+    pushItem(
+      "manual",
+      "Manual dispatch",
+      manualSubmit.message,
+      manualSubmit.phase === "error"
+        ? "error"
+        : manualSubmit.phase === "success"
+          ? "ok"
+          : manualSubmit.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "batch",
+      "Batch dispatch",
+      batchSubmit.message,
+      batchSubmit.phase === "error"
+        ? "error"
+        : batchSubmit.phase === "success"
+          ? "ok"
+          : batchSubmit.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "template-save",
+      "Template catalog",
+      templateCatalogWriteState.message,
+      templateCatalogWriteState.phase === "error"
+        ? "error"
+        : templateCatalogWriteState.phase === "success"
+          ? "ok"
+          : templateCatalogWriteState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-search",
+      "Audit search",
+      auditSearch.message,
+      auditSearch.phase === "error"
+        ? "error"
+        : auditSearch.phase === "ready"
+          ? "ok"
+          : auditSearch.phase === "loading"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "proof-review",
+      "Proof review",
+      proofReview.message,
+      proofReview.phase === "error"
+        ? "error"
+        : proofReview.phase === "success"
+          ? "ok"
+          : proofReview.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-export",
+      "Audit export",
+      auditExportState.message,
+      auditExportState.phase === "error"
+        ? "error"
+        : auditExportState.phase === "success"
+          ? "ok"
+          : auditExportState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "audit-trim",
+      "Audit trim",
+      auditTrimState.message,
+      auditTrimState.phase === "error"
+        ? "error"
+        : auditTrimState.phase === "success"
+          ? "ok"
+          : auditTrimState.phase === "submitting"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "legacy-proof",
+      "Legacy proof",
+      legacyProofSeedState.message,
+      legacyProofSeedState.phase === "error"
+        ? "error"
+        : legacyProofSeedState.phase === "success"
+          ? "ok"
+          : legacyProofSeedState.phase === "validating" || legacyProofSeedState.phase === "seeding"
+            ? "warning"
+            : "neutral",
+    );
+    pushItem(
+      "template-preview",
+      "Renderer preview",
+      templateRenderPreview.message,
+      templateRenderPreview.phase === "error"
+        ? "error"
+        : templateRenderPreview.phase === "ready"
+          ? "ok"
+          : templateRenderPreview.phase === "rendering"
+            ? "warning"
+            : "neutral",
+    );
+
+    return items.slice(0, 8);
+  }, [
+    auditExportState.message,
+    auditExportState.phase,
+    auditSearch.message,
+    auditSearch.phase,
+    auditTrimState.message,
+    auditTrimState.phase,
+    batchSubmit.message,
+    batchSubmit.phase,
+    bridgeStatus.message,
+    bridgeStatus.phase,
+    legacyProofSeedState.message,
+    legacyProofSeedState.phase,
+    manualSubmit.message,
+    manualSubmit.phase,
+    proofReview.message,
+    proofReview.phase,
+    templateCatalogWriteState.message,
+    templateCatalogWriteState.phase,
+    templateRenderPreview.message,
+    templateRenderPreview.phase,
+  ]);
 
   useEffect(() => {
     if (!allowWithoutProofEnabled && form.executionAllowWithoutProof) {
@@ -2959,6 +3167,11 @@ export function App() {
         }))
         .slice(),
     );
+  }
+
+  function clearQueueSnapshot() {
+    setQueuedRows([]);
+    setBatchSubmit({ phase: "idle", message: "", results: [] });
   }
 
   async function runLegacyProofSeed(action: LegacyProofSeedPhase) {
@@ -3462,7 +3675,7 @@ export function App() {
     if (!draft) {
       setManualSubmit({
         phase: "error",
-        message: "Cannot submit: manual draft is not valid. Complete the form and snapshot first.",
+        message: "Cannot submit: manual draft is not valid. Complete the required fields first.",
         result: null,
       });
       return;
@@ -3485,9 +3698,10 @@ export function App() {
     }
     setManualSubmit({
       phase: "submitting",
-      message: "Submitting manual draft to desktop backend...",
+      message: "Submitting current manual draft to desktop backend...",
       result: null,
     });
+    setDraftSnapshot(draft);
     try {
       const result = await dispatchDraft(draft, buildProofLinkedDispatchOptions(draft));
       setManualSubmit({
@@ -3821,107 +4035,1891 @@ export function App() {
     setManualSubmit({ phase: "idle", message: "", result: null });
   }
 
-  function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function stageManualDraft() {
     setShowErrors(true);
-    if (!draft) return;
+    if (!draft) {
+      return;
+    }
     setDraftSnapshot(draft);
   }
 
-  return (
-    <main className="page">
-      <section className="hero hero-grid">
-        <div>
-          <p className="eyebrow">Issue #4</p>
-          <h1>Label Authoring</h1>
-          <p className="lede">
-            Add template authoring and print-data import so operators can create drafts from
-            spreadsheets, while core rendering and normalization remain in Rust.
-          </p>
-        </div>
-        <div className="hero-meta">
-          <p>
-            <strong>Session job</strong>
-            <span>{session.jobId}</span>
-          </p>
-          <p>
-            <strong>Requested at</strong>
-            <span>{session.requestedAt}</span>
-          </p>
-          <p>
-            <strong>Template route</strong>
-            <span>{templateOptionLabel}</span>
-          </p>
-          <p>
-            <strong>Status</strong>
-            <span className={`status-pill ${draft ? "ready" : "blocked"}`}>
-              {draft ? "Manual draft ready" : "Manual input incomplete"}
-            </span>
-          </p>
-          <p>
-            <strong>Execution</strong>
-            <span className={`status-pill ${executionModeChipClass}`}>{executionModeLabel}</span>
-          </p>
-        </div>
-      </section>
+  function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    stageManualDraft();
+  }
 
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Desktop bridge status</h2>
+  return (
+    <main className="page app-shell">
+      <header className="app-topbar">
+        <div className="app-brand">
+          <span className="app-kicker">JAN Label Desktop</span>
+          <strong>Operations Console</strong>
+          <p>{activeWorkspaceMeta.summary}</p>
+        </div>
+        <div className="app-current-view">
+          <h1>{activeWorkspaceMeta.title}</h1>
           <p>
-            Checks desktop bridge readiness before dispatch and exposes output paths for operator
-            verification.
+            Session {session.jobId} / template {templateOptionLabel} / execution{" "}
+            {executionModeLabel}
           </p>
         </div>
-        <div className="preview-summary">
-          <div>
-            <span>Status</span>
-            <strong>
-              {bridgeStatus.phase === "ready"
-                ? "Ready"
-                : bridgeStatus.phase === "loading"
-                  ? "Checking..."
-                  : bridgeStatus.phase === "error"
-                    ? "Unavailable with error"
-                    : "Unavailable (browser preview mode)"}
-            </strong>
-            <small>{bridgeStatus.message}</small>
+        <div className="app-commandbar">
+          {activeWorkspace === "compose" ? (
+            <>
+              <button className="button-secondary" type="button" onClick={stageManualDraft}>
+                Stage draft
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void submitManualDraft()}
+                disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+              >
+                Submit current draft
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "templates" ? (
+            <>
+              <button className="button-secondary" type="button" onClick={validateTemplateText}>
+                Validate template
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void runTemplateCatalogSave()}
+                disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
+              >
+                Save to catalog
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "queue" ? (
+            <>
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={buildQueueSnapshot}
+                disabled={!isQueueReady}
+              >
+                Build queue
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => void submitQueuedRows()}
+                disabled={
+                  !canSubmitQueuedRows ||
+                  batchSubmit.phase === "submitting" ||
+                  isBridgeSubmitBlocked
+                }
+              >
+                Dispatch queue
+              </button>
+            </>
+          ) : null}
+          {activeWorkspace === "audit" ? (
+            <>
+              <button
+                className="button-secondary"
+                type="button"
+                onClick={() => {
+                  void refreshAuditSearch(auditQuery);
+                }}
+              >
+                Refresh audit
+              </button>
+              <button
+                className="button-primary"
+                type="button"
+                onClick={() => {
+                  void runAuditExport();
+                }}
+                disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+              >
+                Export audit
+              </button>
+            </>
+          ) : null}
+        </div>
+      </header>
+
+      <div className="app-body">
+        <aside className="app-rail">
+          <div className="rail-group">
+            <span className="rail-heading">Workspaces</span>
+            {workspaceItems.map((item) => (
+              <button
+                key={item.id}
+                className={`rail-button ${activeWorkspace === item.id ? "active" : ""}`}
+                type="button"
+                aria-pressed={activeWorkspace === item.id}
+                onClick={() => setActiveWorkspace(item.id)}
+              >
+                <strong>{item.label}</strong>
+                <small>{item.description}</small>
+                <span className="rail-badge">{item.badge}</span>
+              </button>
+            ))}
           </div>
-          <div>
-            <span>Bridge adapter</span>
-            <strong>
-              {bridgeStatusAvailable ? bridgeStatus.status?.printAdapterKind : "unknown"}
-            </strong>
-            <small>
-              Available adapters:{" "}
-              {bridgeStatusAvailable
-                ? bridgeStatus.status?.availableAdapters.join(", ")
-                : "not available"}
-            </small>
+
+          <div className="rail-group">
+            <span className="rail-heading">Operations</span>
+            <button className="rail-command" type="button" onClick={refreshBridgeStatus}>
+              Refresh bridge
+            </button>
+            <button className="rail-command" type="button" onClick={restorePersistedState}>
+              Restore saved state
+            </button>
+            <button className="rail-command" type="button" onClick={clearPersistedState}>
+              Clear saved state
+            </button>
           </div>
-          <div>
-            <span>Zint / paths</span>
-            <strong>
-              {bridgeStatusAvailable ? bridgeStatus.status?.resolvedZintPath : "unknown"}
-            </strong>
-            <small>
-              proof: {bridgeStatusAvailable ? bridgeStatus.status?.proofOutputDir : "-"}
-              {" / "}
-              print: {bridgeStatusAvailable ? bridgeStatus.status?.printOutputDir : "-"}
-              {" / "}
-              spool: {bridgeStatusAvailable ? bridgeStatus.status?.spoolOutputDir : "-"}
-            </small>
-            {bridgeStatusAvailable && bridgeStatus.status?.windowsPrinterName ? (
-              <small>Printer: {bridgeStatus.status?.windowsPrinterName}</small>
+        </aside>
+
+        <section className="app-workspace">
+          <div className="workspace-header-shell">
+            <div className="workspace-title-group">
+              <span className="workspace-kicker">Current workspace</span>
+              <h2>{activeWorkspaceMeta.title}</h2>
+              <p>{activeWorkspaceMeta.summary}</p>
+            </div>
+            <div className="workspace-meta-grid">
+              <div>
+                <span>Bridge</span>
+                <strong>{bridgeStatus.phase === "ready" ? "Ready" : bridgeStatus.phase}</strong>
+              </div>
+              <div>
+                <span>Queue</span>
+                <strong>{queuedRows.length} staged</strong>
+              </div>
+              <div>
+                <span>Audit</span>
+                <strong>{pendingProofCount} pending</strong>
+              </div>
+            </div>
+          </div>
+
+          <div className="workspace-scroll">
+            {activeWorkspace === "compose" ? (
+              <div className="workspace-stack">
+                {hasPersistedState ? (
+                  <section className="panel">
+                    <div className="section-heading">
+                      <h2>Recovered operator state</h2>
+                      <p>
+                        Restore template draft, source review, and field mapping after restart or
+                        accidental close.
+                      </p>
+                    </div>
+                    <p className="data-summary">
+                      Template draft: {formatSavedAt(templatePersistedState.savedAt)} /{" "}
+                      {templatePersistedState.status}
+                      {templatePersistedState.message ? ` (${templatePersistedState.message})` : ""}
+                    </p>
+                    <p className="data-summary">
+                      Source review: {formatSavedAt(sourcePersistedState.savedAt)} /{" "}
+                      {sourcePersistedState.status}
+                      {sourcePersistedState.message ? ` (${sourcePersistedState.message})` : ""}
+                    </p>
+                    <p className="data-summary">
+                      Column mapping: {formatSavedAt(mappingPersistedState.savedAt)} /{" "}
+                      {mappingPersistedState.status}
+                      {mappingPersistedState.message ? ` (${mappingPersistedState.message})` : ""}
+                    </p>
+                    {restoreStateNotice ? (
+                      <p className="notice-text">{restoreStateNotice}</p>
+                    ) : null}
+                    <div className="toolbar">
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={restorePersistedState}
+                      >
+                        Restore saved state
+                      </button>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={clearPersistedState}
+                      >
+                        Clear saved state
+                      </button>
+                    </div>
+                  </section>
+                ) : null}
+
+                <section className="workspace">
+                  <form className="panel form-panel" noValidate onSubmit={handleSubmit}>
+                    <div className="section-heading">
+                      <h2>Draft composer</h2>
+                      <p>
+                        Use the manual compose lane for single labels and controlled proof or print
+                        intent.
+                      </p>
+                    </div>
+
+                    <div className="form-grid">
+                      <label className="field">
+                        <span>Parent SKU</span>
+                        <input
+                          value={form.parentSku}
+                          onChange={(event) => updateField("parentSku", event.target.value)}
+                        />
+                        {visibleErrors.parentSku ? (
+                          <small className="error-text">{visibleErrors.parentSku}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>SKU</span>
+                        <input
+                          value={form.sku}
+                          onChange={(event) => updateField("sku", event.target.value)}
+                        />
+                        {visibleErrors.sku ? (
+                          <small className="error-text">{visibleErrors.sku}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>JAN</span>
+                        <input
+                          inputMode="numeric"
+                          value={form.jan}
+                          onChange={(event) => updateField("jan", event.target.value)}
+                          placeholder="4006381333931"
+                        />
+                        <small className="hint-text">
+                          Rust-side normalization accepts 12-digit input; 13-digit checksum is
+                          preferred.
+                        </small>
+                        {visibleErrors.jan ? (
+                          <small className="error-text">{visibleErrors.jan}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Quantity</span>
+                        <input
+                          inputMode="numeric"
+                          value={form.qty}
+                          onChange={(event) => updateField("qty", event.target.value)}
+                        />
+                        {visibleErrors.qty ? (
+                          <small className="error-text">{visibleErrors.qty}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Brand</span>
+                        <input
+                          value={form.brand}
+                          onChange={(event) => updateField("brand", event.target.value)}
+                        />
+                        {visibleErrors.brand ? (
+                          <small className="error-text">{visibleErrors.brand}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field">
+                        <span>Template</span>
+                        <select
+                          value={templateReference ? "template-from-spec" : form.templateId}
+                          onChange={(event) => {
+                            if (event.target.value === "template-from-spec") return;
+                            updateField("templateId", event.target.value);
+                          }}
+                        >
+                          {templateReference ? (
+                            <option value="template-from-spec">
+                              Template from spec ({templateReference.id}@{templateReference.version}
+                              )
+                            </option>
+                          ) : null}
+                          {availableTemplateOptions.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label} ({option.catalogSource ?? "unknown"})
+                            </option>
+                          ))}
+                        </select>
+                        {visibleErrors.templateId ? (
+                          <small className="error-text">{visibleErrors.templateId}</small>
+                        ) : null}
+                        {templateCatalogState.phase !== "ready" ? (
+                          <small className="hint-text">{templateCatalogState.message}</small>
+                        ) : null}
+                        {templateReference ? (
+                          <small className="hint-text">
+                            Template route {templateVersionOf(templateReference)} is sourced as{" "}
+                            {templateReferenceCatalogSource}.
+                          </small>
+                        ) : null}
+                        <small className="hint-text">
+                          Desktop catalog: {templateCatalogSummary}.
+                        </small>
+                      </label>
+
+                      <label className="field">
+                        <span>Printer profile</span>
+                        <select
+                          value={form.printerProfileId}
+                          onChange={(event) => updateField("printerProfileId", event.target.value)}
+                        >
+                          {printerProfiles.map((option) => (
+                            <option key={option.id} value={option.id}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                        {visibleErrors.printerProfileId ? (
+                          <small className="error-text">{visibleErrors.printerProfileId}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>Actor</span>
+                        <input
+                          value={form.actor}
+                          onChange={(event) => updateField("actor", event.target.value)}
+                        />
+                        {visibleErrors.actor ? (
+                          <small className="error-text">{visibleErrors.actor}</small>
+                        ) : null}
+                      </label>
+
+                      <label className="field field-wide">
+                        <span>Execution intent</span>
+                        <select
+                          value={form.executionMode}
+                          onChange={(event) =>
+                            updateField("executionMode", event.target.value as ExecutionMode)
+                          }
+                        >
+                          <option value="proof">Proof-only (safe default)</option>
+                          <option value="print">Print-ready</option>
+                        </select>
+                        <small className="hint-text">
+                          Proof mode is the safe default and includes explicit intent in every draft
+                          payload.
+                        </small>
+                      </label>
+
+                      {form.executionMode === "proof" ? (
+                        <>
+                          <label className="field field-wide">
+                            <span>Requested by</span>
+                            <input
+                              value={form.executionRequestedBy}
+                              onChange={(event) =>
+                                updateField("executionRequestedBy", event.target.value)
+                              }
+                              placeholder="Proof requestor"
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Notes</span>
+                            <textarea
+                              className="batch-text"
+                              rows={4}
+                              value={form.executionNotes}
+                              onChange={(event) =>
+                                updateField("executionNotes", event.target.value)
+                              }
+                              placeholder="Use this for print review context (optional)."
+                            />
+                          </label>
+                        </>
+                      ) : (
+                        <>
+                          <label className="field">
+                            <span>Approved by</span>
+                            <input
+                              value={form.executionApprovedBy}
+                              onChange={(event) =>
+                                updateField("executionApprovedBy", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionApprovedBy ? (
+                              <small className="error-text">
+                                {visibleErrors.executionApprovedBy}
+                              </small>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Approved at</span>
+                            <input
+                              type="datetime-local"
+                              value={form.executionApprovedAt}
+                              onChange={(event) =>
+                                updateField("executionApprovedAt", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionApprovedAt ? (
+                              <small className="error-text">
+                                {visibleErrors.executionApprovedAt}
+                              </small>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Source proof job ID</span>
+                            <input
+                              value={form.executionSourceProofJobId}
+                              onChange={(event) =>
+                                updateField("executionSourceProofJobId", event.target.value)
+                              }
+                            />
+                            {visibleErrors.executionSourceProofJobId ? (
+                              <small className="error-text">
+                                {visibleErrors.executionSourceProofJobId}
+                              </small>
+                            ) : null}
+                            {approvedProofEntries.length > 0 ? (
+                              <div className="proof-picker">
+                                <small className="hint-text">
+                                  Approved proofs from the local audit ledger can be pinned into
+                                  print execution.
+                                </small>
+                                <div className="job-actions">
+                                  {approvedProofEntries.slice(0, 4).map((entry) => (
+                                    <button
+                                      key={entry.dispatch.audit.jobId}
+                                      className="button-secondary proof-chip"
+                                      type="button"
+                                      onClick={() => applyApprovedProofToForm(entry)}
+                                    >
+                                      {entry.proof?.proofJobId}
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            ) : null}
+                          </label>
+                          <label className="field">
+                            <span>Allow without proof</span>
+                            <input
+                              type="checkbox"
+                              checked={form.executionAllowWithoutProof}
+                              disabled={!allowWithoutProofEnabled}
+                              onChange={(event) =>
+                                updateField("executionAllowWithoutProof", event.target.checked)
+                              }
+                            />
+                            <small className="hint-text">
+                              Print without linked proof job stays disabled until proof approval
+                              workflow is implemented.
+                            </small>
+                          </label>
+                        </>
+                      )}
+                    </div>
+
+                    <div className="toolbar">
+                      <button className="button-secondary" type="submit">
+                        Stage draft snapshot
+                      </button>
+                      <button
+                        className="button-primary"
+                        type="button"
+                        onClick={submitManualDraft}
+                        disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+                      >
+                        Submit current draft
+                      </button>
+                      <button className="button-secondary" onClick={resetForm} type="button">
+                        Reset session
+                      </button>
+                    </div>
+                    {manualSubmit.phase === "submitting" ? (
+                      <p className="notice-text">Submitting manual draft via Tauri invoke...</p>
+                    ) : null}
+                    {manualSubmit.phase === "error" ? (
+                      <p className="status-fail">{manualSubmit.message}</p>
+                    ) : null}
+                    {bridgeSubmitBlockMessage ? (
+                      <p className="status-fail">{bridgeSubmitBlockMessage}</p>
+                    ) : null}
+                  </form>
+
+                  <aside className="panel preview-panel">
+                    <div className="section-heading">
+                      <h2>Manual draft preview</h2>
+                      <p>Preview stays aligned with print job schema and output adapters.</p>
+                    </div>
+                    <div className="preview-summary">
+                      <div>
+                        <span>Template route</span>
+                        <strong>{templateOptionLabel}</strong>
+                        <small>
+                          {selectedTemplateOption
+                            ? selectedTemplateOption.size
+                            : "template route inferred"}
+                        </small>
+                      </div>
+                      <div>
+                        <span>Output route</span>
+                        <strong>
+                          {selectedPrinterProfile ? selectedPrinterProfile.label : "Missing"}
+                        </strong>
+                        <small>
+                          {selectedPrinterProfile
+                            ? `${selectedPrinterProfile.adapter} / ${selectedPrinterProfile.paperSize} / ${selectedPrinterProfile.dpi} dpi`
+                            : "Select printer profile"}
+                        </small>
+                      </div>
+                      <div>
+                        <span>Execution</span>
+                        <strong>{executionMeta}</strong>
+                        <small>{executionModeLabel}</small>
+                      </div>
+                    </div>
+
+                    {previewJson ? (
+                      <>
+                        <pre className="json-block">{previewJson}</pre>
+                        {draftIsStale ? (
+                          <p className="notice-text">
+                            Live input has moved past the staged snapshot. The preview shows the
+                            current payload; use Stage draft only when you need to pin the snapshot
+                            for export.
+                          </p>
+                        ) : null}
+                        {manualSubmit.phase === "error" ? (
+                          <p className="status-fail">{manualSubmit.message}</p>
+                        ) : null}
+                        {manualSubmit.phase === "success" ? (
+                          <>
+                            <p className="status-ok">{manualSubmit.message}</p>
+                            <pre className="json-block">
+                              {JSON.stringify(manualSubmit.result, null, 2)}
+                            </pre>
+                          </>
+                        ) : null}
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <strong>No draft yet</strong>
+                        <p>Fill required fields to build the live payload.</p>
+                      </div>
+                    )}
+                  </aside>
+                </section>
+              </div>
+            ) : null}
+
+            {activeWorkspace === "templates" ? (
+              <section className="panel">
+                <div className="section-heading">
+                  <h2>Template editor</h2>
+                  <p>
+                    Use a desktop-style authoring lane for page setup, field lists, JSON parity, and
+                    Rust renderer validation.
+                  </p>
+                </div>
+                <div className="proof-note">
+                  <strong>Current release boundary</strong>
+                  <p>
+                    Rust preview below renders the live JSON draft, and template JSON can now be
+                    written to the desktop local catalog via Tauri. Keep template_version explicit
+                    so catalog resolution stays aligned with dispatch gates.
+                  </p>
+                </div>
+                <div className="template-workbench">
+                  <div className="template-editor-column">
+                    {templateEditorModel ? (
+                      <>
+                        <div className="template-control-grid">
+                          <label className="field">
+                            <span>Label name</span>
+                            <input
+                              value={templateEditorModel.labelName}
+                              onChange={(event) =>
+                                updateTemplateMetaField("label_name", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Template version</span>
+                            <input
+                              value={templateEditorModel.templateVersion}
+                              onChange={(event) =>
+                                updateTemplateMetaField("template_version", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="field field-wide">
+                            <span>Description</span>
+                            <input
+                              value={templateEditorModel.description}
+                              onChange={(event) =>
+                                updateTemplateMetaField("description", event.target.value)
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Width (mm)</span>
+                            <input
+                              type="number"
+                              min="1"
+                              step="0.1"
+                              value={templateEditorModel.page.widthMm}
+                              onChange={(event) =>
+                                updateTemplatePageField(
+                                  "width_mm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Height (mm)</span>
+                            <input
+                              type="number"
+                              min="1"
+                              step="0.1"
+                              value={templateEditorModel.page.heightMm}
+                              onChange={(event) =>
+                                updateTemplatePageField(
+                                  "height_mm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                          <label className="field">
+                            <span>Background</span>
+                            <div className="color-row">
+                              <input
+                                type="color"
+                                value={templateEditorModel.page.backgroundFill}
+                                onChange={(event) =>
+                                  updateTemplatePageField("background_fill", event.target.value)
+                                }
+                              />
+                              <input
+                                value={templateEditorModel.page.backgroundFill}
+                                onChange={(event) =>
+                                  updateTemplatePageField("background_fill", event.target.value)
+                                }
+                              />
+                            </div>
+                          </label>
+                          <div className="field checkbox-field">
+                            <span>Border</span>
+                            <label className="checkbox-row">
+                              <input
+                                type="checkbox"
+                                checked={templateEditorModel.border.visible}
+                                onChange={(event) =>
+                                  updateTemplateBorderField("visible", event.target.checked)
+                                }
+                              />
+                              <span>Show border in render and preview</span>
+                            </label>
+                          </div>
+                          <label className="field">
+                            <span>Border color</span>
+                            <div className="color-row">
+                              <input
+                                type="color"
+                                value={templateEditorModel.border.color}
+                                onChange={(event) =>
+                                  updateTemplateBorderField("color", event.target.value)
+                                }
+                              />
+                              <input
+                                value={templateEditorModel.border.color}
+                                onChange={(event) =>
+                                  updateTemplateBorderField("color", event.target.value)
+                                }
+                              />
+                            </div>
+                          </label>
+                          <label className="field">
+                            <span>Border width (mm)</span>
+                            <input
+                              type="number"
+                              min="0"
+                              step="0.1"
+                              value={templateEditorModel.border.widthMm}
+                              onChange={(event) =>
+                                updateTemplateBorderField(
+                                  "width_mm",
+                                  Number.parseFloat(event.target.value || "0"),
+                                )
+                              }
+                            />
+                          </label>
+                        </div>
+
+                        <div className="template-fields-panel">
+                          <div className="data-grid-header">
+                            <strong>Template fields</strong>
+                            <span>{templateEditorModel.fields.length} fields</span>
+                          </div>
+                          <div className="template-field-list">
+                            {templateEditorModel.fields.map((field, index) => (
+                              <article
+                                className="template-field-card"
+                                key={`${field.name}-${index}`}
+                              >
+                                <div className="template-field-header">
+                                  <div>
+                                    <strong>{field.name || `field_${index + 1}`}</strong>
+                                    <small>
+                                      {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
+                                      {field.fontSizeMm.toFixed(1)}mm
+                                    </small>
+                                  </div>
+                                  <div className="template-field-actions">
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => moveTemplateField(index, -1)}
+                                      disabled={index === 0}
+                                    >
+                                      Up
+                                    </button>
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => moveTemplateField(index, 1)}
+                                      disabled={index === templateEditorModel.fields.length - 1}
+                                    >
+                                      Down
+                                    </button>
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => duplicateTemplateField(index)}
+                                    >
+                                      Duplicate
+                                    </button>
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      onClick={() => removeTemplateField(index)}
+                                      disabled={templateEditorModel.fields.length <= 1}
+                                    >
+                                      Delete
+                                    </button>
+                                  </div>
+                                </div>
+                                <div className="template-control-grid">
+                                  <label className="field">
+                                    <span>Name</span>
+                                    <input
+                                      value={field.name}
+                                      onChange={(event) =>
+                                        updateTemplateFieldRow(index, "name", event.target.value)
+                                      }
+                                    />
+                                  </label>
+                                  <label className="field field-wide">
+                                    <span>Text template</span>
+                                    <input
+                                      value={field.template}
+                                      onChange={(event) =>
+                                        updateTemplateFieldRow(
+                                          index,
+                                          "template",
+                                          event.target.value,
+                                        )
+                                      }
+                                    />
+                                    <small className="hint-text">
+                                      Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
+                                      preview-only:{" "}
+                                      {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
+                                    </small>
+                                  </label>
+                                  <label className="field">
+                                    <span>X (mm)</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={field.xMm}
+                                      onChange={(event) =>
+                                        updateTemplateFieldRow(
+                                          index,
+                                          "xMm",
+                                          Number.parseFloat(event.target.value || "0"),
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <label className="field">
+                                    <span>Y (mm)</span>
+                                    <input
+                                      type="number"
+                                      min="0"
+                                      step="0.1"
+                                      value={field.yMm}
+                                      onChange={(event) =>
+                                        updateTemplateFieldRow(
+                                          index,
+                                          "yMm",
+                                          Number.parseFloat(event.target.value || "0"),
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <label className="field">
+                                    <span>Font size (mm)</span>
+                                    <input
+                                      type="number"
+                                      min="0.1"
+                                      step="0.1"
+                                      value={field.fontSizeMm}
+                                      onChange={(event) =>
+                                        updateTemplateFieldRow(
+                                          index,
+                                          "fontSizeMm",
+                                          Number.parseFloat(event.target.value || "0"),
+                                        )
+                                      }
+                                    />
+                                  </label>
+                                  <label className="field">
+                                    <span>Color</span>
+                                    <div className="color-row">
+                                      <input
+                                        type="color"
+                                        value={field.color}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(index, "color", event.target.value)
+                                        }
+                                      />
+                                      <input
+                                        value={field.color}
+                                        onChange={(event) =>
+                                          updateTemplateFieldRow(index, "color", event.target.value)
+                                        }
+                                      />
+                                    </div>
+                                  </label>
+                                </div>
+                              </article>
+                            ))}
+                          </div>
+                          <div className="toolbar">
+                            <button
+                              className="button-primary"
+                              type="button"
+                              onClick={addTemplateField}
+                            >
+                              Add text field
+                            </button>
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <strong>Structured editor unavailable</strong>
+                        <p>
+                          Fix template JSON first. The form-based editor only works against valid
+                          JSON.
+                        </p>
+                      </div>
+                    )}
+
+                    <label className="field field-wide">
+                      <span>Template spec JSON</span>
+                      <textarea
+                        className="batch-text"
+                        value={templateSource}
+                        onChange={(event) => updateTemplateSource(event.target.value)}
+                        onBlur={validateTemplateText}
+                      />
+                      {templateParseError ? (
+                        <small className="error-text">{templateParseError}</small>
+                      ) : null}
+                      {templateImportError ? (
+                        <small className="error-text">{templateImportError}</small>
+                      ) : null}
+                      {templateMetaInfo ? (
+                        <small className="hint-text">
+                          schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
+                          {templateMetaInfo.templateVersion} / label_name:{" "}
+                          {templateMetaInfo.labelName}
+                        </small>
+                      ) : null}
+                    </label>
+                  </div>
+
+                  <aside className="template-preview-column">
+                    <div className="section-heading">
+                      <h3>Visual template preview</h3>
+                      <p>
+                        Approximate label layout preview from the current template spec and live
+                        form values.
+                      </p>
+                    </div>
+                    {templateEditorModel ? (
+                      <>
+                        <div className="preview-summary">
+                          <div>
+                            <span>Label size</span>
+                            <strong>
+                              {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
+                              {templateEditorModel.page.heightMm.toFixed(1)} mm
+                            </strong>
+                            <small>{templateEditorModel.fields.length} fields</small>
+                          </div>
+                          <div>
+                            <span>Template state</span>
+                            <strong>{templateValidation.status}</strong>
+                            <small>
+                              {templateValidation.message ?? "Schema route looks aligned."}
+                            </small>
+                          </div>
+                        </div>
+                        {templateCatalogIssue ? (
+                          <div className="proof-note">
+                            <strong>Catalog mismatch</strong>
+                            <p>{templateCatalogIssue}</p>
+                          </div>
+                        ) : null}
+                        {templateReference ? (
+                          <div className="proof-note">
+                            <strong>Catalog source</strong>
+                            <p>
+                              {templateReferenceVersion} is tracked as{" "}
+                              {templateReferenceCatalogSource}.
+                            </p>
+                          </div>
+                        ) : null}
+                        {templateUsesPreviewOnlyPlaceholder ? (
+                          <div className="proof-note">
+                            <strong>Preview-only placeholder detected</strong>
+                            <p>
+                              <code>{LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS[0]}</code> renders in
+                              the local canvas only. Rust proof/PDF output does not substitute it.
+                            </p>
+                          </div>
+                        ) : null}
+                        <div className="template-canvas-shell">
+                          <div className="template-canvas" style={templateCanvasStyle}>
+                            {templateEditorModel.border.visible ? (
+                              <div className="template-canvas-border" />
+                            ) : null}
+                            {templateEditorModel.fields.map((field, index) => (
+                              <div
+                                className="template-canvas-field"
+                                key={`${field.name}-${index}-preview`}
+                                style={{
+                                  left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
+                                  top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
+                                  fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
+                                  color: field.color,
+                                }}
+                              >
+                                {renderTemplatePreviewText(field.template, templatePreviewBindings)}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                        <div className="proof-note">
+                          <strong>Local binding sample</strong>
+                          <p>
+                            job_id: {templatePreviewBindings.job_id} / sku:{" "}
+                            {templatePreviewBindings.sku} / jan: {templatePreviewBindings.jan}
+                          </p>
+                        </div>
+                        <div className="template-render-preview">
+                          <div className="data-grid-header">
+                            <strong>Rust renderer preview</strong>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              onClick={() => void refreshTemplateRenderPreview()}
+                              disabled={templateRenderPreview.phase === "rendering"}
+                            >
+                              {templateRenderPreview.phase === "rendering"
+                                ? "Rendering..."
+                                : "Refresh Rust preview"}
+                            </button>
+                          </div>
+                          <p className="hint-text">{templateRenderPreview.message}</p>
+                          {templateRenderPreview.phase === "ready" &&
+                          templateRenderPreview.result &&
+                          templateRenderPreviewSvgDataUrl ? (
+                            <>
+                              <div className="preview-summary">
+                                <div>
+                                  <span>Renderer output</span>
+                                  <strong>{templateRenderPreview.result.labelName}</strong>
+                                  <small>
+                                    {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
+                                    {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm / JAN{" "}
+                                    {templateRenderPreview.result.normalizedJan}
+                                  </small>
+                                </div>
+                              </div>
+                              <div className="template-render-preview-frame">
+                                <img
+                                  className="template-render-preview-image"
+                                  src={templateRenderPreviewSvgDataUrl}
+                                  alt="Rust renderer SVG preview"
+                                />
+                              </div>
+                            </>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <div className="empty-state">
+                        <strong>No visual preview</strong>
+                        <p>
+                          Template JSON must be valid before the preview canvas can be rendered.
+                        </p>
+                      </div>
+                    )}
+                  </aside>
+                </div>
+                <div className="toolbar">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => void runTemplateCatalogSave()}
+                    disabled={
+                      !isTauriConnected() || templateCatalogWriteState.phase === "submitting"
+                    }
+                  >
+                    {templateCatalogWriteState.phase === "submitting"
+                      ? "Saving..."
+                      : "Save template to local catalog"}
+                  </button>
+                  <label className="button-secondary fake-button">
+                    Import template JSON / asset
+                    <input
+                      type="file"
+                      accept=".json,application/json"
+                      onChange={handleTemplateImport}
+                    />
+                  </label>
+                  <button className="button-secondary" type="button" onClick={handleTemplateExport}>
+                    Export template JSON
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={handleTemplateAssetExport}
+                  >
+                    Export template asset
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={resetTemplateToDefaults}
+                  >
+                    Reset template
+                  </button>
+                  <button className="button-primary" type="button" onClick={validateTemplateText}>
+                    Validate JSON
+                  </button>
+                </div>
+                {templateCatalogWriteState.message ? (
+                  <p
+                    className={
+                      templateCatalogWriteState.phase === "success"
+                        ? "status-ok"
+                        : templateCatalogWriteState.phase === "error"
+                          ? "status-fail"
+                          : "notice-text"
+                    }
+                  >
+                    {templateCatalogWriteState.message}
+                  </p>
+                ) : null}
+              </section>
+            ) : null}
+
+            {activeWorkspace === "queue" ? (
+              <div className="workspace-stack">
+                <section className="panel">
+                  <div className="section-heading">
+                    <h2>Data source (Excel / CSV)</h2>
+                    <p>
+                      Import operator-owned spreadsheets, map columns, validate rows, and move only
+                      clean rows into the dispatch queue.
+                    </p>
+                  </div>
+                  <div className="toolbar">
+                    <label className="button-secondary fake-button">
+                      Upload CSV/XLSX
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls,text/csv"
+                        onChange={handleDataUpload}
+                      />
+                    </label>
+                    {sourceData ? (
+                      <>
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          onClick={autoDetectMapping}
+                        >
+                          Auto detect mapping
+                        </button>
+                        <button
+                          className="button-secondary"
+                          type="button"
+                          onClick={resetDataSource}
+                        >
+                          Clear source
+                        </button>
+                      </>
+                    ) : null}
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={buildQueueSnapshot}
+                      disabled={!isQueueReady}
+                    >
+                      Snapshot valid rows
+                    </button>
+                  </div>
+
+                  <p className="data-summary">{sourceError ? sourceError : sourceSummary}</p>
+
+                  {sourceData ? (
+                    <>
+                      <div className="mapping-grid">
+                        {requiredFieldList.map((entry) => (
+                          <label className="field" key={entry.key}>
+                            <span>Map {entry.label}</span>
+                            <select
+                              value={fieldMapping[entry.key]}
+                              onChange={(event) =>
+                                updateFieldMapping(entry.key, event.target.value)
+                              }
+                            >
+                              <option value="">-- Select column --</option>
+                              {sourceData.headers.map((header) => (
+                                <option key={header} value={header}>
+                                  {header}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        ))}
+                      </div>
+
+                      <div className="data-grid">
+                        <div className="data-grid-header">
+                          <strong>Source preview (first 8 rows)</strong>
+                          <span>
+                            {readyRowsCount} ready / {pendingRowsCount} pending / {errorRowsCount}{" "}
+                            invalid / {preparedRows.length} rows
+                          </span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>Row</th>
+                              <th>Parent SKU</th>
+                              <th>SKU</th>
+                              <th>JAN</th>
+                              <th>Qty</th>
+                              <th>Brand</th>
+                              <th>Template</th>
+                              <th>Printer</th>
+                              <th>Status</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {parsedTemplateRows.map((entry) => (
+                              <tr key={entry.rowIndex}>
+                                <td>{entry.rowIndex + 1}</td>
+                                <td>{entry.sourceRow[fieldMapping.parentSku] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.sku] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.jan] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.qty] ?? "-"}</td>
+                                <td>{entry.sourceRow[fieldMapping.brand] ?? "-"}</td>
+                                <td>
+                                  {readSourceValue(entry.sourceRow, TEMPLATE_SOURCE_ALIASES) ||
+                                    (entry.draft
+                                      ? `${entry.draft.template.id}@${entry.draft.template.version}`
+                                      : "default")}
+                                </td>
+                                <td>
+                                  {readSourceValue(entry.sourceRow, PRINTER_SOURCE_ALIASES) ||
+                                    (entry.draft ? entry.draft.printerProfile.id : "default")}
+                                </td>
+                                <td
+                                  className={
+                                    entry.status === "ready"
+                                      ? "status-ok"
+                                      : entry.status === "error"
+                                        ? "status-fail"
+                                        : "status-pending"
+                                  }
+                                >
+                                  {entry.status === "pending"
+                                    ? `pending: ${entry.pendingReason ?? "requires operator review"}`
+                                    : entry.errors.join(" / ") ||
+                                      (entry.warnings.length > 0
+                                        ? `ready: ${entry.warnings.join(" / ")}`
+                                        : "ready")}
+                                </td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : null}
+                </section>
+
+                {queuedRows.length > 0 ? (
+                  <section className="panel">
+                    <div className="section-heading">
+                      <h2>Batch draft preview</h2>
+                      <p>
+                        Queue review before dispatch. This lane is for staged rows only, not raw
+                        source data.
+                      </p>
+                    </div>
+                    <pre className="json-block">{previewBatchJson}</pre>
+                    <p className="notice-text">
+                      {queuedRows.length} rows captured. ready: {queuedReadyRowsCount}, submitting:{" "}
+                      {queuedSubmittingRowsCount}, submitted: {queuedSubmittedRowsCount}, failed:{" "}
+                      {queuedFailedRowsCount}.
+                    </p>
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Queue progress</strong>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            <th>Job ID</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {queuedRows.map((entry, index) => (
+                            <tr key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}>
+                              <td>{index + 1}</td>
+                              <td>{entry.draft ? entry.draft.jobId : "-"}</td>
+                              <td className={queuedRowStatusClass(entry.submissionStatus)}>
+                                {entry.submissionStatus}
+                              </td>
+                              <td>{formatQueuedRowResult(entry)}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={submitQueuedRows}
+                      disabled={
+                        !canSubmitQueuedRows ||
+                        batchSubmit.phase === "submitting" ||
+                        isBridgeSubmitBlocked
+                      }
+                    >
+                      Submit queued rows
+                    </button>
+                    <button className="button-secondary" type="button" onClick={clearQueueSnapshot}>
+                      Clear batch snapshot
+                    </button>
+                    {batchSubmit.phase === "submitting" ? (
+                      <p className="notice-text">{batchSubmit.message}</p>
+                    ) : null}
+                    {bridgeSubmitBlockMessage ? (
+                      <p className="status-fail">{bridgeSubmitBlockMessage}</p>
+                    ) : null}
+                    {batchSubmit.phase === "error" ? (
+                      <p className="status-fail">{batchSubmit.message}</p>
+                    ) : null}
+                    {batchSubmit.phase === "success" ? (
+                      <p className="status-ok">{batchSubmit.message}</p>
+                    ) : null}
+                    {batchSubmit.results.length > 0 ? (
+                      <pre className="json-block">
+                        {JSON.stringify(batchSubmit.results, null, 2)}
+                      </pre>
+                    ) : null}
+                  </section>
+                ) : (
+                  <section className="panel">
+                    <div className="empty-state">
+                      <strong>No queued rows</strong>
+                      <p>
+                        Load a source file, confirm column mapping, then snapshot valid rows into
+                        the dispatch queue.
+                      </p>
+                    </div>
+                  </section>
+                )}
+              </div>
+            ) : null}
+
+            {activeWorkspace === "audit" ? (
+              <section className="panel">
+                <div className="section-heading">
+                  <h2>Proof inbox / audit search</h2>
+                  <p>
+                    Keep proof review, audit export, retention, backup inventory, and legacy
+                    migration in a dedicated operational lane.
+                  </p>
+                </div>
+                <div className="form-grid">
+                  <label className="field field-wide">
+                    <span>Search ledger</span>
+                    <input
+                      value={auditQuery}
+                      onChange={(event) => setAuditQuery(event.target.value)}
+                      placeholder="job id, lineage, actor, template, adapter"
+                    />
+                  </label>
+                  <label className="field field-wide">
+                    <span>Review note</span>
+                    <textarea
+                      className="batch-text"
+                      rows={3}
+                      value={proofReviewNotes}
+                      onChange={(event) => setProofReviewNotes(event.target.value)}
+                      placeholder="Optional approval or rejection note for the proof ledger."
+                    />
+                  </label>
+                </div>
+                <div className="proof-note">
+                  <strong>Audit maintenance</strong>
+                  <p>
+                    Export the current desktop ledger as JSON, then dry-run or apply retention with
+                    a backup bundle written under the desktop audit backup directory.
+                  </p>
+                  <small>
+                    {bridgeStatusAvailable && bridgeStatus.status
+                      ? `audit log dir: ${bridgeStatus.status.auditLogDir} / backup dir: ${bridgeStatus.status.auditBackupDir}`
+                      : "Desktop bridge unavailable. Audit maintenance needs desktop-shell."}
+                  </small>
+                  <div className="form-grid">
+                    <label className="field">
+                      <span>Scope</span>
+                      <select
+                        value={auditScope}
+                        onChange={(event) => setAuditScope(event.target.value as AuditLedgerScope)}
+                      >
+                        <option value="all">All ledgers</option>
+                        <option value="dispatch">Dispatch only</option>
+                        <option value="proof">Proof only</option>
+                      </select>
+                    </label>
+                    <label className="field">
+                      <span>Max age days</span>
+                      <input
+                        value={auditMaxAgeDays}
+                        onChange={(event) => setAuditMaxAgeDays(event.target.value)}
+                        placeholder="30"
+                      />
+                    </label>
+                    <label className="field">
+                      <span>Max entries</span>
+                      <input
+                        value={auditMaxEntries}
+                        onChange={(event) => setAuditMaxEntries(event.target.value)}
+                        placeholder="500"
+                      />
+                    </label>
+                    <label className="field checkbox-field">
+                      <span>Retention mode</span>
+                      <div className="checkbox-row">
+                        <input
+                          id="audit-dry-run"
+                          type="checkbox"
+                          checked={auditDryRun}
+                          onChange={(event) => setAuditDryRun(event.target.checked)}
+                        />
+                        <label htmlFor="audit-dry-run">Dry run first</label>
+                      </div>
+                    </label>
+                  </div>
+                  <div className="toolbar">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void runAuditExport();
+                      }}
+                      disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+                    >
+                      Export audit JSON
+                    </button>
+                    <button
+                      className={auditDryRun ? "button-secondary" : "button-primary"}
+                      type="button"
+                      onClick={() => {
+                        void runAuditTrim();
+                      }}
+                      disabled={!bridgeStatusAvailable || auditTrimState.phase === "submitting"}
+                    >
+                      {auditDryRun ? "Run retention dry run" : "Apply retention trim"}
+                    </button>
+                  </div>
+                  {auditExportState.phase === "submitting" ? (
+                    <p className="notice-text">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.phase === "error" ? (
+                    <p className="status-fail">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.phase === "success" ? (
+                    <p className="status-ok">{auditExportState.message}</p>
+                  ) : null}
+                  {auditExportState.detail ? (
+                    <p className="data-summary">{auditExportState.detail}</p>
+                  ) : null}
+                  {auditTrimState.phase === "submitting" ? (
+                    <p className="notice-text">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.phase === "error" ? (
+                    <p className="status-fail">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.phase === "success" ? (
+                    <p className="status-ok">{auditTrimState.message}</p>
+                  ) : null}
+                  {auditTrimState.detail ? (
+                    <p className="data-summary">{auditTrimState.detail}</p>
+                  ) : null}
+                </div>
+                <div className="proof-note">
+                  <strong>Audit backup bundles</strong>
+                  <p>
+                    List backup JSON bundles written by retention runs from the desktop audit backup
+                    directory.
+                  </p>
+                  <div className="toolbar">
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void refreshAuditBackupBundles();
+                      }}
+                      disabled={
+                        auditBackupBundles.phase === "loading" ||
+                        auditBackupBundles.phase === "unavailable" ||
+                        !isTauriConnected()
+                      }
+                    >
+                      {auditBackupBundles.phase === "loading"
+                        ? "Loading backups..."
+                        : "Refresh backup bundles"}
+                    </button>
+                  </div>
+                  {auditBackupBundles.message ? (
+                    <p
+                      className={
+                        auditBackupBundles.phase === "error"
+                          ? "status-fail"
+                          : auditBackupBundles.phase === "success" ||
+                              auditBackupBundles.phase === "ready"
+                            ? "status-ok"
+                            : "notice-text"
+                      }
+                    >
+                      {auditBackupBundles.message}
+                    </p>
+                  ) : null}
+                  {auditBackupBundles.phase === "ready" ? (
+                    auditBackupBundles.bundles.length > 0 ? (
+                      <div className="data-grid">
+                        <div className="data-grid-header">
+                          <strong>Backup bundle list</strong>
+                          <span>{auditBackupBundles.bundles.length}</span>
+                        </div>
+                        <table>
+                          <thead>
+                            <tr>
+                              <th>File</th>
+                              <th>Created</th>
+                              <th>Size</th>
+                              <th>Path</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {auditBackupBundles.bundles.map((bundle) => (
+                              <tr key={bundle.filePath}>
+                                <td>{bundle.fileName}</td>
+                                <td>{formatSavedAt(bundle.createdAtUtc)}</td>
+                                <td>{formatAuditBundleSize(bundle.sizeBytes)}</td>
+                                <td className="data-summary">{bundle.filePath}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <p className="data-summary">No backup bundles found.</p>
+                    )
+                  ) : null}
+                </div>
+                <div className="proof-note">
+                  <strong>Legacy proof seed</strong>
+                  <p>
+                    Import proof PDFs created before the approval ledger existed. Seeded rows stay
+                    pending until they are approved in this inbox.
+                  </p>
+                  <small>
+                    Required columns: {LEGACY_PROOF_SEED_REQUIRED_COLUMNS.join(", ")}
+                    {bridgeStatusAvailable && bridgeStatus.status
+                      ? ` / proof output dir: ${bridgeStatus.status.proofOutputDir}`
+                      : ""}
+                  </small>
+                  <div className="toolbar">
+                    <label className="button-secondary fake-button">
+                      Upload legacy proof CSV/XLSX
+                      <input
+                        type="file"
+                        accept=".csv,.xlsx,.xls,text/csv"
+                        onChange={handleLegacyProofSeedUpload}
+                      />
+                    </label>
+                    {legacyProofSeedSource ? (
+                      <button
+                        className="button-secondary"
+                        type="button"
+                        onClick={() => {
+                          setLegacyProofSeedSource(null);
+                          setLegacyProofSeedError(null);
+                          setLegacyProofSeedState({
+                            phase: "idle",
+                            message: "",
+                            result: null,
+                          });
+                        }}
+                      >
+                        Clear legacy proof file
+                      </button>
+                    ) : null}
+                    <button
+                      className="button-secondary"
+                      type="button"
+                      onClick={() => {
+                        void runLegacyProofSeed("validating");
+                      }}
+                      disabled={
+                        !legacyProofSeedSource ||
+                        legacyProofSeedState.phase === "validating" ||
+                        legacyProofSeedState.phase === "seeding" ||
+                        !bridgeStatusAvailable
+                      }
+                    >
+                      Validate legacy rows
+                    </button>
+                    <button
+                      className="button-primary"
+                      type="button"
+                      onClick={() => {
+                        void runLegacyProofSeed("seeding");
+                      }}
+                      disabled={
+                        !legacyProofSeedSource ||
+                        legacyProofSeedState.phase === "validating" ||
+                        legacyProofSeedState.phase === "seeding" ||
+                        !bridgeStatusAvailable
+                      }
+                    >
+                      Seed pending proofs
+                    </button>
+                  </div>
+                  <p className="data-summary">
+                    {legacyProofSeedError ? legacyProofSeedError : legacyProofSeedSummary}
+                  </p>
+                  {legacyProofSeedState.phase === "validating" ||
+                  legacyProofSeedState.phase === "seeding" ? (
+                    <p className="notice-text">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedState.phase === "error" ? (
+                    <p className="status-fail">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedState.phase === "success" ? (
+                    <p className="status-ok">{legacyProofSeedState.message}</p>
+                  ) : null}
+                  {legacyProofSeedPreviewRows.length > 0 ? (
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Legacy proof preview</strong>
+                        <span>{legacyProofSeedRequest?.rows.length ?? 0} rows</span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Proof job</th>
+                            <th>Template</th>
+                            <th>JAN</th>
+                            <th>Qty</th>
+                            <th>Requested by</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {legacyProofSeedPreviewRows.map((row) => (
+                            <tr key={`${row.proofJobId}-${row.artifactPath}`}>
+                              <td>{row.proofJobId || "-"}</td>
+                              <td>{row.templateVersion || "-"}</td>
+                              <td>{row.matchSubject.jan || "-"}</td>
+                              <td>{row.matchSubject.qty || "-"}</td>
+                              <td>
+                                {row.requestedBy.displayName || row.requestedBy.userId || "-"}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                  {legacyProofSeedState.result?.rows.length ? (
+                    <div className="data-grid">
+                      <div className="data-grid-header">
+                        <strong>Legacy proof validation</strong>
+                        <span>{legacyProofSeedState.result.rows.length} rows</span>
+                      </div>
+                      <table>
+                        <thead>
+                          <tr>
+                            <th>Row</th>
+                            <th>Proof job</th>
+                            <th>Status</th>
+                            <th>Result</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {legacyProofSeedState.result.rows.map((row) => (
+                            <tr key={`${row.rowIndex}-${row.proofJobId}`}>
+                              <td>{row.rowIndex + 1}</td>
+                              <td>{row.proofJobId || "-"}</td>
+                              <td className={row.status === "ok" ? "status-ok" : "status-fail"}>
+                                {row.status}
+                              </td>
+                              <td>{row.message}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : null}
+                </div>
+                <div className="toolbar">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditSearch(auditQuery);
+                    }}
+                  >
+                    Refresh proof inbox
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      setAuditQuery("");
+                      void refreshAuditSearch("");
+                    }}
+                  >
+                    Clear search
+                  </button>
+                </div>
+                <p className="data-summary">
+                  {auditSearch.message}
+                  {auditSearch.lastUpdatedAt
+                    ? ` Last updated: ${formatSavedAt(auditSearch.lastUpdatedAt)}.`
+                    : ""}
+                </p>
+                {proofReview.phase === "submitting" ? (
+                  <p className="notice-text">{proofReview.message}</p>
+                ) : null}
+                {proofReview.phase === "error" ? (
+                  <p className="status-fail">{proofReview.message}</p>
+                ) : null}
+                {proofReview.phase === "success" ? (
+                  <p className="status-ok">{proofReview.message}</p>
+                ) : null}
+                {auditSearch.phase === "error" ? (
+                  <p className="status-fail">{auditSearch.message}</p>
+                ) : null}
+                {auditSearch.entries.length > 0 ? (
+                  <div className="data-grid">
+                    <div className="data-grid-header">
+                      <strong>Recent dispatches</strong>
+                      <span>{auditSearch.entries.length} entries</span>
+                    </div>
+                    <table>
+                      <thead>
+                        <tr>
+                          <th>Occurred</th>
+                          <th>Job</th>
+                          <th>Mode</th>
+                          <th>Actor</th>
+                          <th>Proof</th>
+                          <th>Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {auditSearch.entries.map((entry) => (
+                          <tr key={entry.dispatch.audit.jobId}>
+                            <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
+                            <td>
+                              <strong>{entry.dispatch.audit.jobId}</strong>
+                              <br />
+                              <small>{entry.dispatch.templateVersion}</small>
+                            </td>
+                            <td>
+                              <span
+                                className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
+                              >
+                                {entry.dispatch.mode}
+                              </span>
+                            </td>
+                            <td>
+                              {entry.dispatch.audit.actor.displayName}
+                              <br />
+                              <small>{entry.dispatch.audit.actor.userId}</small>
+                            </td>
+                            <td className={proofStatusClass(entry.proof?.status)}>
+                              {entry.proof ? (
+                                <>
+                                  <strong>{entry.proof.status}</strong>
+                                  <br />
+                                  <small>{entry.proof.proofJobId}</small>
+                                </>
+                              ) : (
+                                <span>not a proof record</span>
+                              )}
+                            </td>
+                            <td>
+                              <div className="audit-actions">
+                                {entry.proof?.status === "pending" ? (
+                                  <>
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      disabled={proofReview.phase === "submitting"}
+                                      onClick={() => {
+                                        void submitProofReview(entry, "approve");
+                                      }}
+                                    >
+                                      Approve
+                                    </button>
+                                    <button
+                                      className="button-secondary"
+                                      type="button"
+                                      disabled={proofReview.phase === "submitting"}
+                                      onClick={() => {
+                                        void submitProofReview(entry, "reject");
+                                      }}
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                ) : null}
+                                {entry.proof?.status === "approved" ? (
+                                  <button
+                                    className="button-secondary"
+                                    type="button"
+                                    onClick={() => applyApprovedProofToForm(entry)}
+                                  >
+                                    Use for print
+                                  </button>
+                                ) : null}
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                ) : (
+                  <div className="empty-state">
+                    <strong>No audit entries</strong>
+                    <p>
+                      Submit a proof job from desktop shell or refresh the search after bridge
+                      startup.
+                    </p>
+                  </div>
+                )}
+              </section>
             ) : null}
           </div>
-        </div>
-        {bridgeStatusAvailable && bridgeStatus.status ? (
-          <div className="proof-note">
-            <strong>Bridge warnings</strong>
+        </section>
+
+        <aside className="app-inspector">
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Session</h2>
+              <p>Current operator context and active execution route.</p>
+            </div>
+            <div className="inspector-grid">
+              <div>
+                <span>Job</span>
+                <strong>{session.jobId}</strong>
+              </div>
+              <div>
+                <span>Requested</span>
+                <strong>{formatSavedAt(session.requestedAt)}</strong>
+              </div>
+              <div>
+                <span>Template</span>
+                <strong>{templateOptionLabel}</strong>
+              </div>
+              <div>
+                <span>Execution</span>
+                <strong>{executionModeLabel}</strong>
+              </div>
+            </div>
+          </section>
+
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Bridge</h2>
+              <p>Desktop backend readiness and route blocking status.</p>
+            </div>
+            <div className="inspector-grid">
+              <div>
+                <span>Status</span>
+                <strong>
+                  {bridgeStatus.phase === "ready"
+                    ? "Ready"
+                    : bridgeStatus.phase === "loading"
+                      ? "Checking"
+                      : bridgeStatus.phase === "error"
+                        ? "Error"
+                        : "Unavailable"}
+                </strong>
+              </div>
+              <div>
+                <span>Adapter</span>
+                <strong>
+                  {bridgeStatusAvailable ? bridgeStatus.status?.printAdapterKind : "n/a"}
+                </strong>
+              </div>
+              <div>
+                <span>Warnings</span>
+                <strong>{bridgeWarnings.length}</strong>
+              </div>
+              <div>
+                <span>Submit gate</span>
+                <strong>{isBridgeSubmitBlocked ? "Blocked" : "Open"}</strong>
+              </div>
+            </div>
+            <p className="data-summary">{bridgeStatus.message}</p>
+            {bridgeStatusAvailable && bridgeStatus.status ? (
+              <p className="data-summary">
+                proof {bridgeStatus.status.proofOutputDir} / print{" "}
+                {bridgeStatus.status.printOutputDir}
+              </p>
+            ) : null}
             {bridgeWarnings.length > 0 ? (
-              <ul className="card-list">
-                {bridgeWarnings.map((warning) => (
+              <ul className="inspector-list">
+                {bridgeWarnings.slice(0, 4).map((warning) => (
                   <li
                     key={`${warning.code}-${warning.message}`}
                     className={
@@ -3929,7 +5927,7 @@ export function App() {
                         ? "status-fail"
                         : warning.severity === "warning"
                           ? "status-pending"
-                          : undefined
+                          : ""
                     }
                   >
                     <strong>{warning.code}</strong>: {warning.message}
@@ -3937,1578 +5935,88 @@ export function App() {
                 ))}
               </ul>
             ) : (
-              <p className="status-ok">No warnings.</p>
+              <p className="status-ok">No bridge warnings.</p>
             )}
-          </div>
-        ) : null}
-        {bridgeStatusAvailable && hasBlockingBridgeWarnings ? (
-          <p className="status-fail">
-            High-risk warnings detected. Submit actions are disabled until the warning list is
-            cleared.
-          </p>
-        ) : null}
-        {!bridgeStatusAvailable && bridgeStatus.phase === "unavailable" ? (
-          <p className="notice-text">Browser preview mode / desktop bridge unavailable.</p>
-        ) : null}
-        {bridgeStatus.phase === "error" ? (
-          <p className="status-fail">{bridgeStatus.message}</p>
-        ) : null}
-        <div className="toolbar">
-          <button className="button-secondary" type="button" onClick={refreshBridgeStatus}>
-            Refresh bridge status
-          </button>
-        </div>
-      </section>
+          </section>
 
-      {hasPersistedState ? (
-        <section className="panel">
-          <div className="section-heading">
-            <h2>Recovered operator state</h2>
-            <p>
-              Saved operator context can be restored from browser local storage and resumed after
-              reload.
-            </p>
-          </div>
-          <p className="data-summary">
-            Template draft: {formatSavedAt(templatePersistedState.savedAt)} /{" "}
-            {templatePersistedState.status}
-            {templatePersistedState.message ? ` (${templatePersistedState.message})` : ""}
-          </p>
-          {templateValidation.status === "invalid" ? (
-            <p className="status-fail">{templateValidation.message}</p>
-          ) : null}
-          {templateValidation.status === "stale" ? (
-            <p className="notice-text">
-              Template is not at current schema and may be stale; operator review is required before
-              print.
-            </p>
-          ) : null}
-          <p className="data-summary">
-            Source review: {formatSavedAt(sourcePersistedState.savedAt)} /{" "}
-            {sourcePersistedState.status}
-            {sourcePersistedState.message ? ` (${sourcePersistedState.message})` : ""}
-          </p>
-          <p className="data-summary">
-            Column mapping: {formatSavedAt(mappingPersistedState.savedAt)} /{" "}
-            {mappingPersistedState.status}
-            {mappingPersistedState.message ? ` (${mappingPersistedState.message})` : ""}
-          </p>
-          {restoreStateNotice ? <p className="notice-text">{restoreStateNotice}</p> : null}
-          <div className="toolbar">
-            <button type="button" className="button-secondary" onClick={restorePersistedState}>
-              Restore saved state
-            </button>
-            <button type="button" className="button-secondary" onClick={clearPersistedState}>
-              Clear saved state
-            </button>
-          </div>
-        </section>
-      ) : null}
-
-      <section className="workspace">
-        <form className="panel form-panel" noValidate onSubmit={handleSubmit}>
-          <div className="section-heading">
-            <h2>Create manual draft</h2>
-            <p>Keep minimum operator fields and keep payloads aligned with @label/job-schema.</p>
-          </div>
-
-          <div className="form-grid">
-            <label className="field">
-              <span>Parent SKU</span>
-              <input
-                value={form.parentSku}
-                onChange={(event) => updateField("parentSku", event.target.value)}
-              />
-              {visibleErrors.parentSku ? (
-                <small className="error-text">{visibleErrors.parentSku}</small>
-              ) : null}
-            </label>
-
-            <label className="field">
-              <span>SKU</span>
-              <input
-                value={form.sku}
-                onChange={(event) => updateField("sku", event.target.value)}
-              />
-              {visibleErrors.sku ? <small className="error-text">{visibleErrors.sku}</small> : null}
-            </label>
-
-            <label className="field field-wide">
-              <span>JAN</span>
-              <input
-                inputMode="numeric"
-                value={form.jan}
-                onChange={(event) => updateField("jan", event.target.value)}
-                placeholder="4006381333931"
-              />
-              <small className="hint-text">
-                Rust-side normalization accepts 12-digit input; 13-digit checksum is preferred.
-              </small>
-              {visibleErrors.jan ? <small className="error-text">{visibleErrors.jan}</small> : null}
-            </label>
-
-            <label className="field">
-              <span>Quantity</span>
-              <input
-                inputMode="numeric"
-                value={form.qty}
-                onChange={(event) => updateField("qty", event.target.value)}
-              />
-              {visibleErrors.qty ? <small className="error-text">{visibleErrors.qty}</small> : null}
-            </label>
-
-            <label className="field">
-              <span>Brand</span>
-              <input
-                value={form.brand}
-                onChange={(event) => updateField("brand", event.target.value)}
-              />
-              {visibleErrors.brand ? (
-                <small className="error-text">{visibleErrors.brand}</small>
-              ) : null}
-            </label>
-
-            <label className="field">
-              <span>Template</span>
-              <select
-                value={templateReference ? "template-from-spec" : form.templateId}
-                onChange={(event) => {
-                  if (event.target.value === "template-from-spec") return;
-                  updateField("templateId", event.target.value);
-                }}
-              >
-                {templateReference ? (
-                  <option value="template-from-spec">
-                    Template from spec ({templateReference.id}@{templateReference.version})
-                  </option>
-                ) : null}
-                {availableTemplateOptions.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label} ({option.catalogSource ?? "unknown"})
-                  </option>
-                ))}
-              </select>
-              {visibleErrors.templateId ? (
-                <small className="error-text">{visibleErrors.templateId}</small>
-              ) : null}
-              {templateCatalogState.phase !== "ready" ? (
-                <small className="hint-text">{templateCatalogState.message}</small>
-              ) : null}
-              {templateReference ? (
-                <small className="hint-text">
-                  Template route {templateVersionOf(templateReference)} is sourced as{" "}
-                  {templateReferenceCatalogSource}.
-                </small>
-              ) : null}
-              <small className="hint-text">Desktop catalog: {templateCatalogSummary}.</small>
-            </label>
-
-            <label className="field">
-              <span>Printer profile</span>
-              <select
-                value={form.printerProfileId}
-                onChange={(event) => updateField("printerProfileId", event.target.value)}
-              >
-                {printerProfiles.map((option) => (
-                  <option key={option.id} value={option.id}>
-                    {option.label}
-                  </option>
-                ))}
-              </select>
-              {visibleErrors.printerProfileId ? (
-                <small className="error-text">{visibleErrors.printerProfileId}</small>
-              ) : null}
-            </label>
-
-            <label className="field field-wide">
-              <span>Actor</span>
-              <input
-                value={form.actor}
-                onChange={(event) => updateField("actor", event.target.value)}
-              />
-              {visibleErrors.actor ? (
-                <small className="error-text">{visibleErrors.actor}</small>
-              ) : null}
-            </label>
-
-            <label className="field field-wide">
-              <span>Execution intent</span>
-              <select
-                value={form.executionMode}
-                onChange={(event) =>
-                  updateField("executionMode", event.target.value as ExecutionMode)
-                }
-              >
-                <option value="proof">Proof-only (safe default)</option>
-                <option value="print">Print-ready</option>
-              </select>
-              <small className="hint-text">
-                Proof mode is the safe default and includes explicit intent in every draft payload.
-              </small>
-            </label>
-
-            {form.executionMode === "proof" ? (
-              <>
-                <label className="field field-wide">
-                  <span>Requested by</span>
-                  <input
-                    value={form.executionRequestedBy}
-                    onChange={(event) => updateField("executionRequestedBy", event.target.value)}
-                    placeholder="Proof requestor"
-                  />
-                </label>
-                <label className="field field-wide">
-                  <span>Notes</span>
-                  <textarea
-                    className="batch-text"
-                    rows={4}
-                    value={form.executionNotes}
-                    onChange={(event) => updateField("executionNotes", event.target.value)}
-                    placeholder="Use this for print review context (optional)."
-                  />
-                </label>
-              </>
-            ) : (
-              <>
-                <label className="field">
-                  <span>Approved by</span>
-                  <input
-                    value={form.executionApprovedBy}
-                    onChange={(event) => updateField("executionApprovedBy", event.target.value)}
-                  />
-                  {visibleErrors.executionApprovedBy ? (
-                    <small className="error-text">{visibleErrors.executionApprovedBy}</small>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>Approved at</span>
-                  <input
-                    type="datetime-local"
-                    value={form.executionApprovedAt}
-                    onChange={(event) => updateField("executionApprovedAt", event.target.value)}
-                  />
-                  {visibleErrors.executionApprovedAt ? (
-                    <small className="error-text">{visibleErrors.executionApprovedAt}</small>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>Source proof job ID</span>
-                  <input
-                    value={form.executionSourceProofJobId}
-                    onChange={(event) =>
-                      updateField("executionSourceProofJobId", event.target.value)
-                    }
-                  />
-                  {visibleErrors.executionSourceProofJobId ? (
-                    <small className="error-text">{visibleErrors.executionSourceProofJobId}</small>
-                  ) : null}
-                  {approvedProofEntries.length > 0 ? (
-                    <div className="proof-picker">
-                      <small className="hint-text">
-                        Approved proofs from the local audit ledger can be pinned into print
-                        execution.
-                      </small>
-                      <div className="job-actions">
-                        {approvedProofEntries.slice(0, 4).map((entry) => (
-                          <button
-                            key={entry.dispatch.audit.jobId}
-                            className="button-secondary proof-chip"
-                            type="button"
-                            onClick={() => applyApprovedProofToForm(entry)}
-                          >
-                            {entry.proof?.proofJobId}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                </label>
-                <label className="field">
-                  <span>Allow without proof</span>
-                  <input
-                    type="checkbox"
-                    checked={form.executionAllowWithoutProof}
-                    disabled={!allowWithoutProofEnabled}
-                    onChange={(event) =>
-                      updateField("executionAllowWithoutProof", event.target.checked)
-                    }
-                  />
-                  <small className="hint-text">
-                    Print without linked proof job stays disabled until proof approval workflow is
-                    implemented.
-                  </small>
-                </label>
-              </>
-            )}
-          </div>
-
-          <div className="toolbar">
-            <button className="button-primary" type="submit">
-              Create manual draft snapshot
-            </button>
-            <button
-              className="button-secondary"
-              type="button"
-              onClick={submitManualDraft}
-              disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
-            >
-              Submit manual draft
-            </button>
-            <button className="button-secondary" onClick={resetForm} type="button">
-              Reset session
-            </button>
-          </div>
-          {manualSubmit.phase === "submitting" ? (
-            <p className="notice-text">Submitting manual draft via Tauri invoke...</p>
-          ) : null}
-          {manualSubmit.phase === "error" ? (
-            <p className="status-fail">{manualSubmit.message}</p>
-          ) : null}
-          {bridgeSubmitBlockMessage ? (
-            <p className="status-fail">{bridgeSubmitBlockMessage}</p>
-          ) : null}
-        </form>
-
-        <aside className="panel preview-panel">
-          <div className="section-heading">
-            <h2>Manual draft preview</h2>
-            <p>Preview stays aligned with print job schema and output adapters.</p>
-          </div>
-          <div className="preview-summary">
-            <div>
-              <span>Template route</span>
-              <strong>{templateOptionLabel}</strong>
-              <small>
-                {selectedTemplateOption ? selectedTemplateOption.size : "template route inferred"}
-              </small>
-            </div>
-            <div>
-              <span>Output route</span>
-              <strong>{selectedPrinterProfile ? selectedPrinterProfile.label : "Missing"}</strong>
-              <small>
-                {selectedPrinterProfile
-                  ? `${selectedPrinterProfile.adapter} / ${selectedPrinterProfile.paperSize} / ${selectedPrinterProfile.dpi} dpi`
-                  : "Select printer profile"}
-              </small>
-            </div>
-            <div>
-              <span>Execution</span>
-              <strong>{executionMeta}</strong>
-              <small>{executionModeLabel}</small>
-            </div>
-          </div>
-
-          {previewJson ? (
-            <>
-              <pre className="json-block">{previewJson}</pre>
-              {draftIsStale ? (
-                <p className="notice-text">
-                  Live input changed after last snapshot. Click create again to refresh the payload.
-                </p>
-              ) : null}
-              {manualSubmit.phase === "error" ? (
-                <p className="status-fail">{manualSubmit.message}</p>
-              ) : null}
-              {manualSubmit.phase === "success" ? (
-                <>
-                  <p className="status-ok">{manualSubmit.message}</p>
-                  <pre className="json-block">{JSON.stringify(manualSubmit.result, null, 2)}</pre>
-                </>
-              ) : null}
-            </>
-          ) : (
-            <div className="empty-state">
-              <strong>No draft yet</strong>
-              <p>Fill required fields and create snapshot.</p>
-            </div>
-          )}
-        </aside>
-      </section>
-
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Template editor</h2>
-          <p>
-            Edit page settings and text fields in a structured authoring view, while keeping the
-            underlying template-spec JSON available for low-level changes.
-          </p>
-        </div>
-        <div className="proof-note">
-          <strong>Current release boundary</strong>
-          <p>
-            Rust preview below renders the live JSON draft, and template JSON can now be written to
-            the desktop local catalog via Tauri. Keep template_version explicit so catalog
-            resolution stays aligned with dispatch gates.
-          </p>
-        </div>
-        <div className="template-workbench">
-          <div className="template-editor-column">
-            {templateEditorModel ? (
-              <>
-                <div className="template-control-grid">
-                  <label className="field">
-                    <span>Label name</span>
-                    <input
-                      value={templateEditorModel.labelName}
-                      onChange={(event) =>
-                        updateTemplateMetaField("label_name", event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Template version</span>
-                    <input
-                      value={templateEditorModel.templateVersion}
-                      onChange={(event) =>
-                        updateTemplateMetaField("template_version", event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className="field field-wide">
-                    <span>Description</span>
-                    <input
-                      value={templateEditorModel.description}
-                      onChange={(event) =>
-                        updateTemplateMetaField("description", event.target.value)
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Width (mm)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.1"
-                      value={templateEditorModel.page.widthMm}
-                      onChange={(event) =>
-                        updateTemplatePageField(
-                          "width_mm",
-                          Number.parseFloat(event.target.value || "0"),
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Height (mm)</span>
-                    <input
-                      type="number"
-                      min="1"
-                      step="0.1"
-                      value={templateEditorModel.page.heightMm}
-                      onChange={(event) =>
-                        updateTemplatePageField(
-                          "height_mm",
-                          Number.parseFloat(event.target.value || "0"),
-                        )
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>Background</span>
-                    <div className="color-row">
-                      <input
-                        type="color"
-                        value={templateEditorModel.page.backgroundFill}
-                        onChange={(event) =>
-                          updateTemplatePageField("background_fill", event.target.value)
-                        }
-                      />
-                      <input
-                        value={templateEditorModel.page.backgroundFill}
-                        onChange={(event) =>
-                          updateTemplatePageField("background_fill", event.target.value)
-                        }
-                      />
-                    </div>
-                  </label>
-                  <div className="field checkbox-field">
-                    <span>Border</span>
-                    <label className="checkbox-row">
-                      <input
-                        type="checkbox"
-                        checked={templateEditorModel.border.visible}
-                        onChange={(event) =>
-                          updateTemplateBorderField("visible", event.target.checked)
-                        }
-                      />
-                      <span>Show border in render and preview</span>
-                    </label>
-                  </div>
-                  <label className="field">
-                    <span>Border color</span>
-                    <div className="color-row">
-                      <input
-                        type="color"
-                        value={templateEditorModel.border.color}
-                        onChange={(event) => updateTemplateBorderField("color", event.target.value)}
-                      />
-                      <input
-                        value={templateEditorModel.border.color}
-                        onChange={(event) => updateTemplateBorderField("color", event.target.value)}
-                      />
-                    </div>
-                  </label>
-                  <label className="field">
-                    <span>Border width (mm)</span>
-                    <input
-                      type="number"
-                      min="0"
-                      step="0.1"
-                      value={templateEditorModel.border.widthMm}
-                      onChange={(event) =>
-                        updateTemplateBorderField(
-                          "width_mm",
-                          Number.parseFloat(event.target.value || "0"),
-                        )
-                      }
-                    />
-                  </label>
-                </div>
-
-                <div className="template-fields-panel">
-                  <div className="data-grid-header">
-                    <strong>Template fields</strong>
-                    <span>{templateEditorModel.fields.length} fields</span>
-                  </div>
-                  <div className="template-field-list">
-                    {templateEditorModel.fields.map((field, index) => (
-                      <article className="template-field-card" key={`${field.name}-${index}`}>
-                        <div className="template-field-header">
-                          <div>
-                            <strong>{field.name || `field_${index + 1}`}</strong>
-                            <small>
-                              {field.xMm.toFixed(1)}mm / {field.yMm.toFixed(1)}mm /{" "}
-                              {field.fontSizeMm.toFixed(1)}mm
-                            </small>
-                          </div>
-                          <div className="template-field-actions">
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              onClick={() => moveTemplateField(index, -1)}
-                              disabled={index === 0}
-                            >
-                              Up
-                            </button>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              onClick={() => moveTemplateField(index, 1)}
-                              disabled={index === templateEditorModel.fields.length - 1}
-                            >
-                              Down
-                            </button>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              onClick={() => duplicateTemplateField(index)}
-                            >
-                              Duplicate
-                            </button>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              onClick={() => removeTemplateField(index)}
-                              disabled={templateEditorModel.fields.length <= 1}
-                            >
-                              Delete
-                            </button>
-                          </div>
-                        </div>
-                        <div className="template-control-grid">
-                          <label className="field">
-                            <span>Name</span>
-                            <input
-                              value={field.name}
-                              onChange={(event) =>
-                                updateTemplateFieldRow(index, "name", event.target.value)
-                              }
-                            />
-                          </label>
-                          <label className="field field-wide">
-                            <span>Text template</span>
-                            <input
-                              value={field.template}
-                              onChange={(event) =>
-                                updateTemplateFieldRow(index, "template", event.target.value)
-                              }
-                            />
-                            <small className="hint-text">
-                              Rust render: {RUST_RENDER_PLACEHOLDERS.join(", ")}. Local
-                              preview-only: {LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS.join(", ")}.
-                            </small>
-                          </label>
-                          <label className="field">
-                            <span>X (mm)</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={field.xMm}
-                              onChange={(event) =>
-                                updateTemplateFieldRow(
-                                  index,
-                                  "xMm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Y (mm)</span>
-                            <input
-                              type="number"
-                              min="0"
-                              step="0.1"
-                              value={field.yMm}
-                              onChange={(event) =>
-                                updateTemplateFieldRow(
-                                  index,
-                                  "yMm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Font size (mm)</span>
-                            <input
-                              type="number"
-                              min="0.1"
-                              step="0.1"
-                              value={field.fontSizeMm}
-                              onChange={(event) =>
-                                updateTemplateFieldRow(
-                                  index,
-                                  "fontSizeMm",
-                                  Number.parseFloat(event.target.value || "0"),
-                                )
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>Color</span>
-                            <div className="color-row">
-                              <input
-                                type="color"
-                                value={field.color}
-                                onChange={(event) =>
-                                  updateTemplateFieldRow(index, "color", event.target.value)
-                                }
-                              />
-                              <input
-                                value={field.color}
-                                onChange={(event) =>
-                                  updateTemplateFieldRow(index, "color", event.target.value)
-                                }
-                              />
-                            </div>
-                          </label>
-                        </div>
-                      </article>
-                    ))}
-                  </div>
-                  <div className="toolbar">
-                    <button className="button-primary" type="button" onClick={addTemplateField}>
-                      Add text field
-                    </button>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="empty-state">
-                <strong>Structured editor unavailable</strong>
-                <p>Fix template JSON first. The form-based editor only works against valid JSON.</p>
-              </div>
-            )}
-
-            <label className="field field-wide">
-              <span>Template spec JSON</span>
-              <textarea
-                className="batch-text"
-                value={templateSource}
-                onChange={(event) => updateTemplateSource(event.target.value)}
-                onBlur={validateTemplateText}
-              />
-              {templateParseError ? (
-                <small className="error-text">{templateParseError}</small>
-              ) : null}
-              {templateImportError ? (
-                <small className="error-text">{templateImportError}</small>
-              ) : null}
-              {templateMetaInfo ? (
-                <small className="hint-text">
-                  schema_version: {templateMetaInfo.schemaVersion} / template_version:{" "}
-                  {templateMetaInfo.templateVersion} / label_name: {templateMetaInfo.labelName}
-                </small>
-              ) : null}
-            </label>
-          </div>
-
-          <aside className="template-preview-column">
+          <section className="inspector-section">
             <div className="section-heading">
-              <h3>Visual template preview</h3>
-              <p>
-                Approximate label layout preview from the current template spec and live form
-                values.
-              </p>
+              <h2>Workspace snapshot</h2>
+              <p>Live counters for queue, proofs, templates, and draft state.</p>
             </div>
-            {templateEditorModel ? (
-              <>
-                <div className="preview-summary">
-                  <div>
-                    <span>Label size</span>
-                    <strong>
-                      {templateEditorModel.page.widthMm.toFixed(1)} x{" "}
-                      {templateEditorModel.page.heightMm.toFixed(1)} mm
-                    </strong>
-                    <small>{templateEditorModel.fields.length} fields</small>
-                  </div>
-                  <div>
-                    <span>Template state</span>
-                    <strong>{templateValidation.status}</strong>
-                    <small>{templateValidation.message ?? "Schema route looks aligned."}</small>
-                  </div>
-                </div>
-                {templateCatalogIssue ? (
-                  <div className="proof-note">
-                    <strong>Catalog mismatch</strong>
-                    <p>{templateCatalogIssue}</p>
-                  </div>
-                ) : null}
-                {templateReference ? (
-                  <div className="proof-note">
-                    <strong>Catalog source</strong>
-                    <p>
-                      {templateReferenceVersion} is tracked as {templateReferenceCatalogSource}.
-                    </p>
-                  </div>
-                ) : null}
-                {templateUsesPreviewOnlyPlaceholder ? (
-                  <div className="proof-note">
-                    <strong>Preview-only placeholder detected</strong>
-                    <p>
-                      <code>{LOCAL_TEMPLATE_PREVIEW_ONLY_PLACEHOLDERS[0]}</code> renders in the
-                      local canvas only. Rust proof/PDF output does not substitute it.
-                    </p>
-                  </div>
-                ) : null}
-                <div className="template-canvas-shell">
-                  <div className="template-canvas" style={templateCanvasStyle}>
-                    {templateEditorModel.border.visible ? (
-                      <div className="template-canvas-border" />
-                    ) : null}
-                    {templateEditorModel.fields.map((field, index) => (
-                      <div
-                        className="template-canvas-field"
-                        key={`${field.name}-${index}-preview`}
-                        style={{
-                          left: `${(field.xMm / Math.max(templateEditorModel.page.widthMm, 1)) * 100}%`,
-                          top: `${(field.yMm / Math.max(templateEditorModel.page.heightMm, 1)) * 100}%`,
-                          fontSize: `${Math.max(field.fontSizeMm * 3.2, 10)}px`,
-                          color: field.color,
-                        }}
-                      >
-                        {renderTemplatePreviewText(field.template, templatePreviewBindings)}
-                      </div>
-                    ))}
-                  </div>
-                </div>
-                <div className="proof-note">
-                  <strong>Local binding sample</strong>
-                  <p>
-                    job_id: {templatePreviewBindings.job_id} / sku: {templatePreviewBindings.sku} /
-                    jan: {templatePreviewBindings.jan}
-                  </p>
-                </div>
-                <div className="template-render-preview">
-                  <div className="data-grid-header">
-                    <strong>Rust renderer preview</strong>
-                    <button
-                      className="button-secondary"
-                      type="button"
-                      onClick={() => void refreshTemplateRenderPreview()}
-                      disabled={templateRenderPreview.phase === "rendering"}
-                    >
-                      {templateRenderPreview.phase === "rendering"
-                        ? "Rendering..."
-                        : "Refresh Rust preview"}
-                    </button>
-                  </div>
-                  <p className="hint-text">{templateRenderPreview.message}</p>
-                  {templateRenderPreview.phase === "ready" &&
-                  templateRenderPreview.result &&
-                  templateRenderPreviewSvgDataUrl ? (
-                    <>
-                      <div className="preview-summary">
-                        <div>
-                          <span>Renderer output</span>
-                          <strong>{templateRenderPreview.result.labelName}</strong>
-                          <small>
-                            {templateRenderPreview.result.pageWidthMm.toFixed(1)} x{" "}
-                            {templateRenderPreview.result.pageHeightMm.toFixed(1)} mm / JAN{" "}
-                            {templateRenderPreview.result.normalizedJan}
-                          </small>
-                        </div>
-                      </div>
-                      <div className="template-render-preview-frame">
-                        <img
-                          className="template-render-preview-image"
-                          src={templateRenderPreviewSvgDataUrl}
-                          alt="Rust renderer SVG preview"
-                        />
-                      </div>
-                    </>
-                  ) : null}
-                </div>
-              </>
+            <div className="inspector-grid">
+              <div>
+                <span>Manual draft</span>
+                <strong>{draft ? "ready" : "incomplete"}</strong>
+              </div>
+              <div>
+                <span>Queue rows</span>
+                <strong>{queuedRows.length}</strong>
+              </div>
+              <div>
+                <span>Approved proofs</span>
+                <strong>{approvedProofEntries.length}</strong>
+              </div>
+              <div>
+                <span>Catalog</span>
+                <strong>{templateCatalogState.templates.length}</strong>
+              </div>
+            </div>
+            {templateCatalogIssue ? <p className="status-fail">{templateCatalogIssue}</p> : null}
+            {draftIsStale ? (
+              <p className="notice-text">
+                Draft snapshot is stale against the current form. The live preview already reflects
+                the current payload.
+              </p>
+            ) : null}
+          </section>
+
+          <section className="inspector-section">
+            <div className="section-heading">
+              <h2>Activity</h2>
+              <p>Latest operational messages across compose, queue, template, and audit flows.</p>
+            </div>
+            {activityFeed.length > 0 ? (
+              <ul className="inspector-list">
+                {activityFeed.map((entry) => (
+                  <li key={entry.id} className={`activity-item ${entry.tone}`}>
+                    <strong>{entry.label}</strong>
+                    <span>{entry.message}</span>
+                  </li>
+                ))}
+              </ul>
             ) : (
-              <div className="empty-state">
-                <strong>No visual preview</strong>
-                <p>Template JSON must be valid before the preview canvas can be rendered.</p>
+              <div className="empty-state compact">
+                <strong>No recent activity</strong>
+                <p>Run a workspace action to populate the operational log.</p>
               </div>
             )}
-          </aside>
-        </div>
-        <div className="toolbar">
-          <button
-            className="button-secondary"
-            type="button"
-            onClick={() => void runTemplateCatalogSave()}
-            disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
-          >
-            {templateCatalogWriteState.phase === "submitting"
-              ? "Saving..."
-              : "Save template to local catalog"}
-          </button>
-          <label className="button-secondary fake-button">
-            Import template JSON / asset
-            <input type="file" accept=".json,application/json" onChange={handleTemplateImport} />
-          </label>
-          <button className="button-secondary" type="button" onClick={handleTemplateExport}>
-            Export template JSON
-          </button>
-          <button className="button-secondary" type="button" onClick={handleTemplateAssetExport}>
-            Export template asset
-          </button>
-          <button className="button-secondary" type="button" onClick={resetTemplateToDefaults}>
-            Reset template
-          </button>
-          <button className="button-primary" type="button" onClick={validateTemplateText}>
-            Validate JSON
-          </button>
-        </div>
-        {templateCatalogWriteState.message ? (
-          <p
-            className={
-              templateCatalogWriteState.phase === "success"
-                ? "status-ok"
-                : templateCatalogWriteState.phase === "error"
-                  ? "status-fail"
-                  : "notice-text"
-            }
-          >
-            {templateCatalogWriteState.message}
-          </p>
-        ) : null}
-      </section>
+          </section>
+        </aside>
+      </div>
 
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Data source (Excel / CSV)</h2>
-          <p>
-            Upload print data and map source columns to required draft fields without strict DB
-            schema alignment.
-          </p>
+      <footer className="status-bar">
+        <div className="status-bar-item">
+          <span>Bridge</span>
+          <strong>{bridgeStatus.phase === "ready" ? "ready" : bridgeStatus.phase}</strong>
         </div>
-        <div className="toolbar">
-          <label className="button-secondary fake-button">
-            Upload CSV/XLSX
-            <input type="file" accept=".csv,.xlsx,.xls,text/csv" onChange={handleDataUpload} />
-          </label>
-          {sourceData ? (
-            <>
-              <button className="button-secondary" type="button" onClick={autoDetectMapping}>
-                Auto detect mapping
-              </button>
-              <button className="button-secondary" type="button" onClick={resetDataSource}>
-                Clear source
-              </button>
-            </>
-          ) : null}
-          <button
-            className="button-primary"
-            type="button"
-            onClick={buildQueueSnapshot}
-            disabled={!isQueueReady}
-          >
-            Snapshot valid rows
-          </button>
+        <div className="status-bar-item">
+          <span>Draft</span>
+          <strong>{draft ? "live" : "missing"}</strong>
         </div>
-
-        <p className="data-summary">{sourceError ? sourceError : sourceSummary}</p>
-
-        {sourceData ? (
-          <>
-            <div className="mapping-grid">
-              {requiredFieldList.map((entry) => (
-                <label className="field" key={entry.key}>
-                  <span>Map {entry.label}</span>
-                  <select
-                    value={fieldMapping[entry.key]}
-                    onChange={(event) => updateFieldMapping(entry.key, event.target.value)}
-                  >
-                    <option value="">-- Select column --</option>
-                    {sourceData.headers.map((header) => (
-                      <option key={header} value={header}>
-                        {header}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-              ))}
-            </div>
-
-            <div className="data-grid">
-              <div className="data-grid-header">
-                <strong>Source preview (first 8 rows)</strong>
-                <span>
-                  {readyRowsCount} ready / {pendingRowsCount} pending / {errorRowsCount} invalid /{" "}
-                  {preparedRows.length} rows
-                </span>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Row</th>
-                    <th>Parent SKU</th>
-                    <th>SKU</th>
-                    <th>JAN</th>
-                    <th>Qty</th>
-                    <th>Brand</th>
-                    <th>Template</th>
-                    <th>Printer</th>
-                    <th>Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedTemplateRows.map((entry) => (
-                    <tr key={entry.rowIndex}>
-                      <td>{entry.rowIndex + 1}</td>
-                      <td>{entry.sourceRow[fieldMapping.parentSku] ?? "-"}</td>
-                      <td>{entry.sourceRow[fieldMapping.sku] ?? "-"}</td>
-                      <td>{entry.sourceRow[fieldMapping.jan] ?? "-"}</td>
-                      <td>{entry.sourceRow[fieldMapping.qty] ?? "-"}</td>
-                      <td>{entry.sourceRow[fieldMapping.brand] ?? "-"}</td>
-                      <td>
-                        {readSourceValue(entry.sourceRow, TEMPLATE_SOURCE_ALIASES) ||
-                          (entry.draft
-                            ? `${entry.draft.template.id}@${entry.draft.template.version}`
-                            : "default")}
-                      </td>
-                      <td>
-                        {readSourceValue(entry.sourceRow, PRINTER_SOURCE_ALIASES) ||
-                          (entry.draft ? entry.draft.printerProfile.id : "default")}
-                      </td>
-                      <td
-                        className={
-                          entry.status === "ready"
-                            ? "status-ok"
-                            : entry.status === "error"
-                              ? "status-fail"
-                              : "status-pending"
-                        }
-                      >
-                        {entry.status === "pending"
-                          ? `pending: ${entry.pendingReason ?? "requires operator review"}`
-                          : entry.errors.join(" / ") ||
-                            (entry.warnings.length > 0
-                              ? `ready: ${entry.warnings.join(" / ")}`
-                              : "ready")}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </>
-        ) : null}
-      </section>
-
-      {queuedRows.length > 0 ? (
-        <section className="panel">
-          <div className="section-heading">
-            <h2>Batch draft preview</h2>
-            <p>
-              Schema-aligned payload for queued rows (first row shown) including execution intent.
-            </p>
-          </div>
-          <pre className="json-block">{previewBatchJson}</pre>
-          <p className="notice-text">
-            {queuedRows.length} rows captured. ready: {queuedReadyRowsCount}, submitting:{" "}
-            {queuedSubmittingRowsCount}, submitted: {queuedSubmittedRowsCount}, failed:{" "}
-            {queuedFailedRowsCount}.
-          </p>
-          <div className="data-grid">
-            <div className="data-grid-header">
-              <strong>Queue progress</strong>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Row</th>
-                  <th>Job ID</th>
-                  <th>Status</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {queuedRows.map((entry, index) => (
-                  <tr key={entry.draft?.jobId ?? `${entry.rowIndex}-${index}`}>
-                    <td>{index + 1}</td>
-                    <td>{entry.draft ? entry.draft.jobId : "-"}</td>
-                    <td className={queuedRowStatusClass(entry.submissionStatus)}>
-                      {entry.submissionStatus}
-                    </td>
-                    <td>{formatQueuedRowResult(entry)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <button
-            className="button-primary"
-            type="button"
-            onClick={submitQueuedRows}
-            disabled={
-              !canSubmitQueuedRows || batchSubmit.phase === "submitting" || isBridgeSubmitBlocked
-            }
-          >
-            Submit queued rows
-          </button>
-          <button
-            className="button-secondary"
-            type="button"
-            onClick={() => {
-              setQueuedRows([]);
-            }}
-          >
-            Clear batch snapshot
-          </button>
-          {batchSubmit.phase === "submitting" ? (
-            <p className="notice-text">{batchSubmit.message}</p>
-          ) : null}
-          {bridgeSubmitBlockMessage ? (
-            <p className="status-fail">{bridgeSubmitBlockMessage}</p>
-          ) : null}
-          {batchSubmit.phase === "error" ? (
-            <p className="status-fail">{batchSubmit.message}</p>
-          ) : null}
-          {batchSubmit.phase === "success" ? (
-            <p className="status-ok">{batchSubmit.message}</p>
-          ) : null}
-          {batchSubmit.results.length > 0 ? (
-            <pre className="json-block">{JSON.stringify(batchSubmit.results, null, 2)}</pre>
-          ) : null}
-        </section>
-      ) : null}
-
-      <section className="panel">
-        <div className="section-heading">
-          <h2>Proof inbox / audit search</h2>
-          <p>
-            Review pending proofs, pin approved proof IDs into print execution, and inspect recent
-            dispatch history from the desktop ledger.
-          </p>
+        <div className="status-bar-item">
+          <span>Queue</span>
+          <strong>
+            {queuedReadyRowsCount} ready / {queuedFailedRowsCount} failed
+          </strong>
         </div>
-        <div className="form-grid">
-          <label className="field field-wide">
-            <span>Search ledger</span>
-            <input
-              value={auditQuery}
-              onChange={(event) => setAuditQuery(event.target.value)}
-              placeholder="job id, lineage, actor, template, adapter"
-            />
-          </label>
-          <label className="field field-wide">
-            <span>Review note</span>
-            <textarea
-              className="batch-text"
-              rows={3}
-              value={proofReviewNotes}
-              onChange={(event) => setProofReviewNotes(event.target.value)}
-              placeholder="Optional approval or rejection note for the proof ledger."
-            />
-          </label>
+        <div className="status-bar-item">
+          <span>Audit</span>
+          <strong>
+            {pendingProofCount} pending / {approvedProofEntries.length} approved
+          </strong>
         </div>
-        <div className="proof-note">
-          <strong>Audit maintenance</strong>
-          <p>
-            Export the current desktop ledger as JSON, then dry-run or apply retention with a backup
-            bundle written under the desktop audit backup directory.
-          </p>
-          <small>
-            {bridgeStatusAvailable && bridgeStatus.status
-              ? `audit log dir: ${bridgeStatus.status.auditLogDir} / backup dir: ${bridgeStatus.status.auditBackupDir}`
-              : "Desktop bridge unavailable. Audit maintenance needs desktop-shell."}
-          </small>
-          <div className="form-grid">
-            <label className="field">
-              <span>Scope</span>
-              <select
-                value={auditScope}
-                onChange={(event) => setAuditScope(event.target.value as AuditLedgerScope)}
-              >
-                <option value="all">All ledgers</option>
-                <option value="dispatch">Dispatch only</option>
-                <option value="proof">Proof only</option>
-              </select>
-            </label>
-            <label className="field">
-              <span>Max age days</span>
-              <input
-                value={auditMaxAgeDays}
-                onChange={(event) => setAuditMaxAgeDays(event.target.value)}
-                placeholder="30"
-              />
-            </label>
-            <label className="field">
-              <span>Max entries</span>
-              <input
-                value={auditMaxEntries}
-                onChange={(event) => setAuditMaxEntries(event.target.value)}
-                placeholder="500"
-              />
-            </label>
-            <label className="field checkbox-field">
-              <span>Retention mode</span>
-              <div className="checkbox-row">
-                <input
-                  id="audit-dry-run"
-                  type="checkbox"
-                  checked={auditDryRun}
-                  onChange={(event) => setAuditDryRun(event.target.checked)}
-                />
-                <label htmlFor="audit-dry-run">Dry run first</label>
-              </div>
-            </label>
-          </div>
-          <div className="toolbar">
-            <button
-              className="button-secondary"
-              type="button"
-              onClick={() => {
-                void runAuditExport();
-              }}
-              disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
-            >
-              Export audit JSON
-            </button>
-            <button
-              className={auditDryRun ? "button-secondary" : "button-primary"}
-              type="button"
-              onClick={() => {
-                void runAuditTrim();
-              }}
-              disabled={!bridgeStatusAvailable || auditTrimState.phase === "submitting"}
-            >
-              {auditDryRun ? "Run retention dry run" : "Apply retention trim"}
-            </button>
-          </div>
-          {auditExportState.phase === "submitting" ? (
-            <p className="notice-text">{auditExportState.message}</p>
-          ) : null}
-          {auditExportState.phase === "error" ? (
-            <p className="status-fail">{auditExportState.message}</p>
-          ) : null}
-          {auditExportState.phase === "success" ? (
-            <p className="status-ok">{auditExportState.message}</p>
-          ) : null}
-          {auditExportState.detail ? (
-            <p className="data-summary">{auditExportState.detail}</p>
-          ) : null}
-          {auditTrimState.phase === "submitting" ? (
-            <p className="notice-text">{auditTrimState.message}</p>
-          ) : null}
-          {auditTrimState.phase === "error" ? (
-            <p className="status-fail">{auditTrimState.message}</p>
-          ) : null}
-          {auditTrimState.phase === "success" ? (
-            <p className="status-ok">{auditTrimState.message}</p>
-          ) : null}
-          {auditTrimState.detail ? <p className="data-summary">{auditTrimState.detail}</p> : null}
-        </div>
-        <div className="proof-note">
-          <strong>Audit backup bundles</strong>
-          <p>
-            List backup JSON bundles written by retention runs from the desktop audit backup
-            directory.
-          </p>
-          <div className="toolbar">
-            <button
-              className="button-secondary"
-              type="button"
-              onClick={() => {
-                void refreshAuditBackupBundles();
-              }}
-              disabled={
-                auditBackupBundles.phase === "loading" ||
-                auditBackupBundles.phase === "unavailable" ||
-                !isTauriConnected()
-              }
-            >
-              {auditBackupBundles.phase === "loading"
-                ? "Loading backups..."
-                : "Refresh backup bundles"}
-            </button>
-          </div>
-          {auditBackupBundles.message ? (
-            <p
-              className={
-                auditBackupBundles.phase === "error"
-                  ? "status-fail"
-                  : auditBackupBundles.phase === "success" || auditBackupBundles.phase === "ready"
-                    ? "status-ok"
-                    : "notice-text"
-              }
-            >
-              {auditBackupBundles.message}
-            </p>
-          ) : null}
-          {auditBackupBundles.phase === "ready" ? (
-            auditBackupBundles.bundles.length > 0 ? (
-              <div className="data-grid">
-                <div className="data-grid-header">
-                  <strong>Backup bundle list</strong>
-                  <span>{auditBackupBundles.bundles.length}</span>
-                </div>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>File</th>
-                      <th>Created</th>
-                      <th>Size</th>
-                      <th>Path</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {auditBackupBundles.bundles.map((bundle) => (
-                      <tr key={bundle.filePath}>
-                        <td>{bundle.fileName}</td>
-                        <td>{formatSavedAt(bundle.createdAtUtc)}</td>
-                        <td>{formatAuditBundleSize(bundle.sizeBytes)}</td>
-                        <td className="data-summary">{bundle.filePath}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            ) : (
-              <p className="data-summary">No backup bundles found.</p>
-            )
-          ) : null}
-        </div>
-        <div className="proof-note">
-          <strong>Legacy proof seed</strong>
-          <p>
-            Import proof PDFs created before the approval ledger existed. Seeded rows stay pending
-            until they are approved in this inbox.
-          </p>
-          <small>
-            Required columns: {LEGACY_PROOF_SEED_REQUIRED_COLUMNS.join(", ")}
-            {bridgeStatusAvailable && bridgeStatus.status
-              ? ` / proof output dir: ${bridgeStatus.status.proofOutputDir}`
-              : ""}
-          </small>
-          <div className="toolbar">
-            <label className="button-secondary fake-button">
-              Upload legacy proof CSV/XLSX
-              <input
-                type="file"
-                accept=".csv,.xlsx,.xls,text/csv"
-                onChange={handleLegacyProofSeedUpload}
-              />
-            </label>
-            {legacyProofSeedSource ? (
-              <button
-                className="button-secondary"
-                type="button"
-                onClick={() => {
-                  setLegacyProofSeedSource(null);
-                  setLegacyProofSeedError(null);
-                  setLegacyProofSeedState({
-                    phase: "idle",
-                    message: "",
-                    result: null,
-                  });
-                }}
-              >
-                Clear legacy proof file
-              </button>
-            ) : null}
-            <button
-              className="button-secondary"
-              type="button"
-              onClick={() => {
-                void runLegacyProofSeed("validating");
-              }}
-              disabled={
-                !legacyProofSeedSource ||
-                legacyProofSeedState.phase === "validating" ||
-                legacyProofSeedState.phase === "seeding" ||
-                !bridgeStatusAvailable
-              }
-            >
-              Validate legacy rows
-            </button>
-            <button
-              className="button-primary"
-              type="button"
-              onClick={() => {
-                void runLegacyProofSeed("seeding");
-              }}
-              disabled={
-                !legacyProofSeedSource ||
-                legacyProofSeedState.phase === "validating" ||
-                legacyProofSeedState.phase === "seeding" ||
-                !bridgeStatusAvailable
-              }
-            >
-              Seed pending proofs
-            </button>
-          </div>
-          <p className="data-summary">
-            {legacyProofSeedError ? legacyProofSeedError : legacyProofSeedSummary}
-          </p>
-          {legacyProofSeedState.phase === "validating" ||
-          legacyProofSeedState.phase === "seeding" ? (
-            <p className="notice-text">{legacyProofSeedState.message}</p>
-          ) : null}
-          {legacyProofSeedState.phase === "error" ? (
-            <p className="status-fail">{legacyProofSeedState.message}</p>
-          ) : null}
-          {legacyProofSeedState.phase === "success" ? (
-            <p className="status-ok">{legacyProofSeedState.message}</p>
-          ) : null}
-          {legacyProofSeedPreviewRows.length > 0 ? (
-            <div className="data-grid">
-              <div className="data-grid-header">
-                <strong>Legacy proof preview</strong>
-                <span>{legacyProofSeedRequest?.rows.length ?? 0} rows</span>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Proof job</th>
-                    <th>Template</th>
-                    <th>JAN</th>
-                    <th>Qty</th>
-                    <th>Requested by</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {legacyProofSeedPreviewRows.map((row) => (
-                    <tr key={`${row.proofJobId}-${row.artifactPath}`}>
-                      <td>{row.proofJobId || "-"}</td>
-                      <td>{row.templateVersion || "-"}</td>
-                      <td>{row.matchSubject.jan || "-"}</td>
-                      <td>{row.matchSubject.qty || "-"}</td>
-                      <td>{row.requestedBy.displayName || row.requestedBy.userId || "-"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-          {legacyProofSeedState.result?.rows.length ? (
-            <div className="data-grid">
-              <div className="data-grid-header">
-                <strong>Legacy proof validation</strong>
-                <span>{legacyProofSeedState.result.rows.length} rows</span>
-              </div>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Row</th>
-                    <th>Proof job</th>
-                    <th>Status</th>
-                    <th>Result</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {legacyProofSeedState.result.rows.map((row) => (
-                    <tr key={`${row.rowIndex}-${row.proofJobId}`}>
-                      <td>{row.rowIndex + 1}</td>
-                      <td>{row.proofJobId || "-"}</td>
-                      <td className={row.status === "ok" ? "status-ok" : "status-fail"}>
-                        {row.status}
-                      </td>
-                      <td>{row.message}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          ) : null}
-        </div>
-        <div className="toolbar">
-          <button
-            className="button-secondary"
-            type="button"
-            onClick={() => {
-              void refreshAuditSearch(auditQuery);
-            }}
-          >
-            Refresh proof inbox
-          </button>
-          <button
-            className="button-secondary"
-            type="button"
-            onClick={() => {
-              setAuditQuery("");
-              void refreshAuditSearch("");
-            }}
-          >
-            Clear search
-          </button>
-        </div>
-        <p className="data-summary">
-          {auditSearch.message}
-          {auditSearch.lastUpdatedAt
-            ? ` Last updated: ${formatSavedAt(auditSearch.lastUpdatedAt)}.`
-            : ""}
-        </p>
-        {proofReview.phase === "submitting" ? (
-          <p className="notice-text">{proofReview.message}</p>
-        ) : null}
-        {proofReview.phase === "error" ? (
-          <p className="status-fail">{proofReview.message}</p>
-        ) : null}
-        {proofReview.phase === "success" ? (
-          <p className="status-ok">{proofReview.message}</p>
-        ) : null}
-        {auditSearch.phase === "error" ? (
-          <p className="status-fail">{auditSearch.message}</p>
-        ) : null}
-        {auditSearch.entries.length > 0 ? (
-          <div className="data-grid">
-            <div className="data-grid-header">
-              <strong>Recent dispatches</strong>
-              <span>{auditSearch.entries.length} entries</span>
-            </div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Occurred</th>
-                  <th>Job</th>
-                  <th>Mode</th>
-                  <th>Actor</th>
-                  <th>Proof</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {auditSearch.entries.map((entry) => (
-                  <tr key={entry.dispatch.audit.jobId}>
-                    <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
-                    <td>
-                      <strong>{entry.dispatch.audit.jobId}</strong>
-                      <br />
-                      <small>{entry.dispatch.templateVersion}</small>
-                    </td>
-                    <td>
-                      <span
-                        className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
-                      >
-                        {entry.dispatch.mode}
-                      </span>
-                    </td>
-                    <td>
-                      {entry.dispatch.audit.actor.displayName}
-                      <br />
-                      <small>{entry.dispatch.audit.actor.userId}</small>
-                    </td>
-                    <td className={proofStatusClass(entry.proof?.status)}>
-                      {entry.proof ? (
-                        <>
-                          <strong>{entry.proof.status}</strong>
-                          <br />
-                          <small>{entry.proof.proofJobId}</small>
-                        </>
-                      ) : (
-                        <span>not a proof record</span>
-                      )}
-                    </td>
-                    <td>
-                      <div className="audit-actions">
-                        {entry.proof?.status === "pending" ? (
-                          <>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              disabled={proofReview.phase === "submitting"}
-                              onClick={() => {
-                                void submitProofReview(entry, "approve");
-                              }}
-                            >
-                              Approve
-                            </button>
-                            <button
-                              className="button-secondary"
-                              type="button"
-                              disabled={proofReview.phase === "submitting"}
-                              onClick={() => {
-                                void submitProofReview(entry, "reject");
-                              }}
-                            >
-                              Reject
-                            </button>
-                          </>
-                        ) : null}
-                        {entry.proof?.status === "approved" ? (
-                          <button
-                            className="button-secondary"
-                            type="button"
-                            onClick={() => applyApprovedProofToForm(entry)}
-                          >
-                            Use for print
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <strong>No audit entries</strong>
-            <p>Submit a proof job from desktop shell or refresh the search after bridge startup.</p>
-          </div>
-        )}
-      </section>
-
-      <section className="grid">
-        <article className="card">
-          <span>Guardrails</span>
-          <strong>Core-first rules</strong>
-          <ul className="card-list">
-            {corePillars.map((pillar) => (
-              <li key={pillar}>{pillar}</li>
-            ))}
-          </ul>
-        </article>
-        <article className="card">
-          <span>Operator notes</span>
-          <strong>Why this version is practical</strong>
-          <ul className="card-list">
-            {operatorNotes.map((note) => (
-              <li key={note}>{note}</li>
-            ))}
-          </ul>
-        </article>
-      </section>
+      </footer>
     </main>
   );
 }

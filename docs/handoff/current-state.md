@@ -3,6 +3,7 @@
 - Updated: 2026-04-15
 - Branch: `codex/release-bridge-proof-hardening`
 - Release base: `v0.1.2` (`881e92b`)
+- Release target: `v0.1.3`
 - Active PR: `#25`
 - Branch relation to `origin/main` on 2026-04-15 after `v0.1.2`: `0 behind / 17 ahead`
 
@@ -22,6 +23,7 @@
   - audit backup bundle listing
   - structured template editor, local canvas preview, and Rust renderer preview
   - desktop template catalog sync, source display, and save-to-local-catalog action
+  - desktop-style shell reset with navigation rail, workspace pane, inspector, and status bar
 - `apps/desktop-shell`
   - `dispatch_print_job`
   - `print_bridge_status`
@@ -37,17 +39,21 @@
 
 ## Landed In This Batch
 
-- Local template catalog write-back is live through `desktop-shell`.
-- Catalog responses now report `packaged` vs `local` source to `admin-web`.
-- The save-to-catalog Tauri contract was aligned end to end:
-  - command name
-  - response shape
-  - UI success/error messaging
-- Proof/print dispatch now uses the same local overlay manifest that validation uses.
-- Added regression coverage for:
-  - overlay catalog merge behavior in `render`
-  - local overlay render path in `print-agent`
-  - catalog source reporting and local save flow in `desktop-shell`
+- `admin-web` no longer renders as a single landing-page-like vertical form stack.
+- The app shell now uses a desktop layout:
+  - left navigation rail
+  - center workspace
+  - right inspector
+  - bottom status bar
+- Work is split into four operator lanes:
+  - draft
+  - template
+  - queue
+  - audit
+- Compose actions were tightened:
+  - submit now uses the current live draft
+  - preview shows the live payload instead of a stale staged payload
+- Queue clear is now explicit through a dedicated command instead of inline ad-hoc state mutation.
 
 ## Release Boundary
 
@@ -88,6 +94,8 @@ Operational note:
 
 ## Release Status
 
+- `v0.1.3` is the next PDF-only patch release target from this branch.
+- Tag is ready once version bump, validation, and release note commit are pushed.
 - `v0.1.2` was tagged and published on `2026-04-15`.
 - GitHub `Release` workflow run `24449920688` succeeded and published the Windows installer asset.
 - Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.1.2`
@@ -97,10 +105,10 @@ Operational note:
 
 ## Next Main Tasks
 
-1. `T-028f-restore`: audit backup restore flow
-2. `T-016`: release notes / packaging hardening
-3. `T-043`: release checklist automation
-4. `T-012`: self-hosted runner / webhook operations
+1. `T-046`: desktop UX follow-up for queue/audit tables
+2. `T-047`: template authoring interaction hardening
+3. `T-028f-restore`: audit backup restore flow
+4. `T-016`: release notes / packaging hardening
 
 ## External Deferrals
 

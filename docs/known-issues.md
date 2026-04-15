@@ -83,3 +83,13 @@
 - status: watch
 - impact: `v0.1.2` released successfully, but GitHub Actions emitted deprecation warnings because the action is being forced onto Node 24 compatibility mode
 - response: upgrade or replace the action before the next workflow break turns the warning into a release blocker
+
+## K-028 desktop shell reset is in place, but queue/audit tables are still basic
+- status: open
+- impact: the app now has a desktop application shell, but queue/audit lanes still rely on simple HTML tables without sort/filter/virtualized navigation for larger operator workloads
+- response: harden the queue and audit grids under `T-046`
+
+## K-029 template authoring is denser than desired even after the shell reset
+- status: open
+- impact: the shell is desktop-oriented now, but the template lane still mixes structured properties, JSON editing, and preview into a dense workbench that needs clearer sub-modes
+- response: split the template lane into clearer authoring sub-flows under `T-047`
