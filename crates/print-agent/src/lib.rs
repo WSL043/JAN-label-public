@@ -326,19 +326,21 @@ fn validate_execution(
             Ok(())
         }
         ExecutionIntent::Print(print) => {
-            if let Some(approved_by) = &print.approved_by {
-                require_non_empty("execution.approved_by", approved_by)?;
-            }
-
             if print.approved_by.is_none() && print.approved_at.is_some() {
                 return Err(
                     "execution.approved_at cannot be set without execution.approved_by".to_string(),
                 );
             }
 
-            if let Some(approved_at) = &print.approved_at {
-                require_non_empty("execution.approved_at", approved_at)?;
-            }
+            let approved_by = print.approved_by.as_ref().ok_or_else(|| {
+                "execution.approvedBy is required for print execution".to_string()
+            })?;
+            require_non_empty("execution.approved_by", approved_by)?;
+
+            let approved_at = print.approved_at.as_ref().ok_or_else(|| {
+                "execution.approvedAt is required for print execution".to_string()
+            })?;
+            require_non_empty("execution.approved_at", approved_at)?;
 
             if print.allow_without_proof && !policy.allow_print_without_proof {
                 return Err(
@@ -784,7 +786,7 @@ mod tests {
 
         assert_eq!(
             err,
-            "execution.sourceProofJobId is required when source proof gate is enforced"
+            "execution.approvedBy is required for print execution"
         );
     }
 
@@ -796,7 +798,7 @@ mod tests {
         let request = DispatchRequest {
             execution: Some(ExecutionIntent::Print(PrintExecution {
                 approved_by: Some("manager.user".to_string()),
-                approved_at: None,
+                approved_at: Some("2026-04-15T09:05:00Z".to_string()),
                 source_proof_job_id: None,
                 allow_without_proof: false,
             })),
@@ -821,7 +823,7 @@ mod tests {
         let request = DispatchRequest {
             execution: Some(ExecutionIntent::Print(PrintExecution {
                 approved_by: Some("manager.user".to_string()),
-                approved_at: None,
+                approved_at: Some("2026-04-15T09:05:00Z".to_string()),
                 source_proof_job_id: None,
                 allow_without_proof: true,
             })),
@@ -848,7 +850,7 @@ mod tests {
         let request = DispatchRequest {
             execution: Some(ExecutionIntent::Print(PrintExecution {
                 approved_by: Some("manager.user".to_string()),
-                approved_at: None,
+                approved_at: Some("2026-04-15T09:05:00Z".to_string()),
                 source_proof_job_id: None,
                 allow_without_proof: true,
             })),
@@ -870,7 +872,7 @@ mod tests {
         let request = DispatchRequest {
             execution: Some(ExecutionIntent::Print(PrintExecution {
                 approved_by: Some("manager.user".to_string()),
-                approved_at: None,
+                approved_at: Some("2026-04-15T09:05:00Z".to_string()),
                 source_proof_job_id: Some("proof/../../job".to_string()),
                 allow_without_proof: false,
             })),
@@ -1073,8 +1075,8 @@ mod tests {
                 adapter: "pdf".to_string(),
             }),
             execution: Some(ExecutionIntent::Print(PrintExecution {
-                approved_by: None,
-                approved_at: None,
+                approved_by: Some("manager.user".to_string()),
+                approved_at: Some("2026-04-15T09:00:00Z".to_string()),
                 source_proof_job_id: Some("JOB-20260415-PROOF".to_string()),
                 allow_without_proof: false,
             })),

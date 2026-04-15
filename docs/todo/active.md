@@ -30,7 +30,7 @@
 | T-035 | `-` | P1 | done | Codex + Sub-Agent | admin-web に template asset export / import と submit 導線を追加 | template asset を再読込でき、manual / batch draft を desktop-shell bridge へ送れる |
 | T-036 | `-` | P1 | done | Codex + Sub-Agent | importer の business alias と業務 fixture を追加 | 日本語業務ヘッダを検証でき、曖昧ヘッダ fixture で reject を固定化できる |
 | T-037 | `-` | P1 | done | Codex + Sub-Agent | dispatch 契約と desktop-shell Tauri bridge を追加 | request / result schema、proof gate、`dispatch_print_job` / `print_bridge_status` が揃う |
-| T-038 | `-` | P1 | done | Codex + Sub-Agent | printerProfile ごとの route と proof gate hardening を追加 | job ごとの adapter が desktop-shell へ届き、`sourceProofJobId` は実在 proof PDF と policy で検証される |
+| T-038 | `-` | P1 | done | Codex + Sub-Agent | printerProfile ごとの route と proof gate hardening を追加 | job ごとの adapter が desktop-shell へ届き、`sourceProofJobId` は実在 proof PDF で検証される。`allowWithoutProof` は proof 承認ワークフロー完了まで無効化し、承認メモ/却下状態の永続化は別途 `T-027` / `T-028` で扱う |
 | T-039 | `-` | P1 | done | Codex + Sub-Agent | admin-web の import / retry / batch 実行を実運用向けに固める | `enabled` を厳格化し、XLSX を lazy-load し、failed retry は新 jobId / lineage 付きで直列再送できる |
 | T-040 | `-` | P1 | done | Codex + Sub-Agent | render の SVG 安全化と template color 制約を追加 | SVG attribute 注入を避け、template schema で color を hex に固定できる |
 
@@ -38,10 +38,12 @@
 
 | id | issue | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- | --- |
-| T-026 | `-` | P1 | in_progress | Codex + Sub-Agent | admin-web と print-agent の実行経路を desktop-shell bridge 経由で仕上げる | manual / batch submit、bridge status 表示、browser preview-only 境界、row 状態遷移、再試行 UX が揃う |
+| T-026 | `-` | P1 | in_progress | Codex + Sub-Agent | admin-web と print-agent の実行経路を desktop-shell bridge 経由で仕上げる | manual / batch submit、browser preview-only 境界、row 状態遷移、再試行 UX に加え、監査検索連携と bridge warning 構造化まで揃う |
 | T-026a | `-` | P1 | done | Codex + Sub-Agent | submit payload 契約を固定する | template/version、execution、actor、lineage、reason、printerProfile の送信条件が docs と UI で一致する |
 | T-026b | `-` | P1 | pending | Codex + Sub-Agent | manual / batch / import の submit 条件を揃える | Ready→Submitted→Completed/Failed の状態遷移と 12/13 桁 JAN submit 条件を共通化できる |
 | T-026c | `-` | P1 | done | Codex + Sub-Agent | bridge status と失敗時再試行 UX を仕上げる | `print_bridge_status` の high-risk warning を UI で block でき、failed row は新 jobId / lineage で再送できる |
+| T-026d | `-` | P1 | pending | Codex + Sub-Agent | bridge warning を構造化する | warning が `code` / `severity` / `message` を持ち、UI 側の block 条件を文字列依存から外せる |
+| T-026e | `-` | P1 | pending | Codex + Sub-Agent | XLSX の型付き JAN 取り込みを厳格化する | 数値セルの JAN を text 前提で reject または型付きに扱い、先頭ゼロ喪失や表示形式崩れを運用前に検知できる |
 | T-027 | `-` | P1 | in_progress | Codex + Sub-Agent | proof 承認ワークフローを実装 | pdf 保存・承認メモ・却下/再作成・承認なし本印刷のブロックを実装 |
 | T-027a | `-` | P1 | pending | Codex + Sub-Agent | proof route を PDF 専用として固定する | proof-only で非 PDF adapter を拒否し、proof submit 結果を UI で確認できる |
 | T-028 | `-` | P1 | pending | Codex + Sub-Agent | 監査ログの永続化と検索 UI を実装 | 検索・再印刷履歴・理由付き再印刷を監査可能にする |

@@ -133,7 +133,7 @@ impl PrintBridgeConfig {
             windows_printer_name: resolve_optional_env(ENV_WINDOWS_PRINTER_NAME)
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_WINDOWS_PRINTER_NAME.to_string()),
-            allow_print_without_proof: resolve_bool_env(ENV_ALLOW_PRINT_WITHOUT_PROOF),
+            allow_print_without_proof: false,
         }
     }
 
@@ -276,7 +276,7 @@ impl PrintBridgeStatus {
             DEFAULT_WINDOWS_PRINTER_NAME,
         );
         let is_fallback_printer_name = printer_warning.is_some();
-        let allow_print_without_proof = resolve_bool_env(ENV_ALLOW_PRINT_WITHOUT_PROOF);
+        let allow_print_without_proof_requested = resolve_bool_env(ENV_ALLOW_PRINT_WITHOUT_PROOF);
         if print_adapter == BridgePrintAdapter::WindowsSpooler {
             if let Some(message) = printer_warning {
                 warnings.push(message);
@@ -287,9 +287,9 @@ impl PrintBridgeStatus {
                 );
             }
         }
-        if allow_print_without_proof {
+        if allow_print_without_proof_requested {
             warnings.push(
-                "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF is enabled; print requests may bypass proof linkage".to_string(),
+                "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF is set, but allowWithoutProof stays disabled until proof approval workflow is implemented".to_string(),
             );
         }
 
@@ -301,7 +301,7 @@ impl PrintBridgeStatus {
             spool_output_dir: spool_output_dir.to_string_lossy().into_owned(),
             print_adapter_kind: print_adapter.kind().to_string(),
             windows_printer_name,
-            allow_without_proof_enabled: allow_print_without_proof,
+            allow_without_proof_enabled: false,
             warnings,
         }
     }
@@ -776,18 +776,18 @@ mod tests {
     }
 
     #[test]
-    fn print_bridge_status_reports_when_allow_without_proof_is_enabled() {
+    fn print_bridge_status_warns_when_allow_without_proof_is_requested() {
         let _guard = TEST_MUTEX.lock().unwrap();
         let backup = backup_env_vars(&[ENV_ALLOW_PRINT_WITHOUT_PROOF]);
 
         env::set_var(ENV_ALLOW_PRINT_WITHOUT_PROOF, "true");
 
         let status = PrintBridgeStatus::from_environment();
-        assert!(status.allow_without_proof_enabled);
+        assert!(!status.allow_without_proof_enabled);
         assert!(status
             .warnings
             .iter()
-            .any(|warning| warning.contains("ALLOW_PRINT_WITHOUT_PROOF")));
+            .any(|warning| warning.contains("approval workflow is implemented")));
 
         restore_env_vars(backup);
     }

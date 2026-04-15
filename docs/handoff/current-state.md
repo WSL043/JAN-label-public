@@ -28,7 +28,7 @@
   `dispatch_print_job`, `print_bridge_status`
   と安全な環境変数 fallback
 - `apps/desktop-shell` の proof gate hardening
-  `printerProfile` ごとの adapter 解決、source proof PDF 実在確認、`JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF` ポリシー
+  `printerProfile` ごとの adapter 解決、source proof PDF 実在確認、`allowWithoutProof` の実運用無効化
 - `desktop-shell-windows` CI と tag release 時の Windows installer build 経路
 - `crates/audit-log` / `crates/print-agent` の lineage / reprint モデル
 - `crates/printer-adapters` の PDF proof adapter と Windows spooler skeleton
@@ -73,7 +73,7 @@ GitHub Actions の最新成功 run:
 ## 3. 未完了
 
 - `admin-web` の submit は `desktop-shell` 経由の Tauri invoke を前提に接続済みだが、browser 単体では preview-only のまま
-- bridge status / warning は UI で高リスク時に submit block できるが、warning code / severity の構造化は未実装
+- bridge status / warning は UI で高リスク時に submit block できるが、warning code / severity の構造化と監査検索との連携は未実装
 - proof 承認フロー（proof 保存、承認メモ、却下/再作成、承認なし本印刷の運用状態遷移）は未実装
 - 監査ログの永続化、検索 UI、再印刷 UI は未接続
 - ラベルソフトの基本価値に必要な「ラベル製作コア（テンプレート仕様、要素配置、データ紐付け、版管理）」が未実装
@@ -111,7 +111,8 @@ GitHub Actions の最新成功 run:
 - `admin-web` は desktop-shell 経由なら submit できるが、browser 単体では preview-only であり、監査永続化と proof 運用は未完成
 - `admin-web` は 12/13 桁 JAN を digits-only で submit し、最終正規化は Rust 前提とする。proof 承認と監査永続化が未完成のため運用制約は残る
 - ラベルテンプレート作成は schema / asset の基礎まで進んだが、フィールドベースの本格的な label design、データソース binding、proof 承認は未完成
-- `allowWithoutProof` は desktop-shell policy が有効な場合のみ使用可能。現状の `sourceProofJobId` 検証は proof PDF 実在確認までで、承認メモ/却下状態の永続化は未実装
+- `allowWithoutProof` は proof 承認ワークフローが実装されるまで無効化している。現状の `sourceProofJobId` 検証は proof PDF 実在確認までで、承認メモ/却下状態の永続化は未実装
+- XLSX 取り込みは lazy-load 化済みだが、JAN を数値セルで持つ Excel は先頭ゼロや表示形式の崩れを招くため、現時点では text 化前提で運用する
 - `print-agent` は `Pdf` と `WindowsSpooler` のみ接続済みで、`Zpl` / `Tspl` / `Qz` は現状 reject する
 - 一部のローカル Windows 環境では `link.exe` 不在により `cargo test --workspace` が失敗する
 - ローカル Windows に Build Tools がなくても、`desktop-shell-windows` と `Release` workflow は GitHub-hosted `windows-latest` を正とする

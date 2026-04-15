@@ -63,7 +63,7 @@ cargo test --workspace
 - Codex が本体責任者（主担当）として、計画、優先度、依存関係、最終統合、衝突解消、コミット前レビューを担当する
 - Sub-Agent は必要領域ごとに起動し、`worker` 単位で単一責務を持つ（UI、pipeline、printer、テスト、ドキュメント、CI）
 - Sub-Agent 起動条件は「同一モジュールの大きな変更」「大きな回帰試験が必要」「同時進行で独立領域を加速」または「緊急デバッグの局所対処」
-- Sub-Agent のモデルは `gpt-5.3-codex-spark` を第一優先、利用不可時のみ `gpt-5.3-codex` `gpt-5.4-mini`にフォールバック。両モデルを常にログ化
+- Sub-Agent のモデルは `gpt-5.3-codex-spark` を第一優先、利用不可時のみ `gpt-5.3-codex` にフォールバック。使用モデルは常にログ化
 - Sub-Agent 間の役割境界は対象ファイルの重複を避ける。原則同一ファイルの同時編集は禁止
 - 実装変更を行う Sub-Agent は差分要点と検証結果を短く報告。状態変更は `docs/handoff/current-state.md`、優先順位変更は `docs/todo/active.md`、罠は `docs/known-issues.md`、新判断は `docs/adr/` へ反映
 - Sub-Agent の数に固定上限は置かない。足りない場合は Codex が即時追加

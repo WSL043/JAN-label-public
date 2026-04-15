@@ -21,7 +21,7 @@
 ## K-004 PDF proof ベースラインの網羅不足
 
 - 状態: open
-- 影響: `v0.1.1` の baseline では 100% 比較と scan 目視までは進んだが、機種・環境ごとの差分再現が不足している。
+- 影響: `v0.1.1` の baseline は PDF proof 比較までで、物理プリンタ実測と barcode scan は未完了のため、機種・環境ごとの差分再現が不足している。
 - 対策: `docs/printer-matrix/` に機種追加時の定例実機サンプルと再測定結果を積み上げる。
 
 ## K-005 local Windows で `cargo test --workspace` が不安定
@@ -72,3 +72,9 @@
 - 状態: open
 - 影響: `sourceProofJobId` は desktop-shell で proof PDF の実在確認まで行うが、承認メモ、却下状態、失効、再作成履歴はまだ永続化されていない。
 - 対策: `T-027` / `T-028` で proof 承認メタデータと監査永続化を導入し、`sourceProofJobId` を audit-log と結びつける。
+
+## K-013 XLSX の数値セル JAN は text 前提
+
+- 状態: open
+- 影響: Excel 側で JAN を数値セルとして保存すると、先頭ゼロ喪失や表示形式依存の崩れを招きうる。現状の admin-web は digits-only で弾くが、誤った 12/13 桁として見えてしまう値までは区別できない。
+- 対策: `T-026e` で XLSX の型付きセル情報を保持し、JAN 列の数値セルを reject するか text 前提で明示警告する。

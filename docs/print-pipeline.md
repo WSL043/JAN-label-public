@@ -11,7 +11,7 @@
 6. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
 
 現時点で submit は `desktop-shell` 経由なら接続済みです。  
-一方で browser 単体は preview-only のままで、proof 承認、audit-log 永続化、bridge warning 可視化は未完成です。
+一方で browser 単体は preview-only のままで、proof 承認、audit-log 永続化、bridge warning の構造化は未完成です。
 
 ## 2. 接続後の目標フロー
 
@@ -63,7 +63,7 @@ audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 - `admin-web` は review queue と snapshot を持つ
 - PDF proof route は UI 上で明示される
 - `admin-web` と `print-agent` は `sourceProofJobId` / `allowWithoutProof` の gate を共有する
-- `desktop-shell` は print 時に source proof PDF の実在を確認し、`JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF` が無効なら bypass を拒否する
+- `desktop-shell` は print 時に source proof PDF の実在を確認し、`allowWithoutProof` は proof 承認ワークフロー実装まで拒否する
 - まだ未実装のもの:
   - proof ファイル保存
   - 承認メモ

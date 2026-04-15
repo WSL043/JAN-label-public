@@ -1335,6 +1335,9 @@ function buildDraftFromRow(input: {
     if (!input.execution.approvedBy?.trim()) {
       errors.push("Print requires approvedBy for each queued row.");
     }
+    if (!input.execution.approvedAt?.trim()) {
+      errors.push("Print requires approvedAt for each queued row.");
+    }
     if (!input.execution.allowWithoutProof && !input.execution.sourceProofJobId?.trim()) {
       errors.push("Print requires sourceProofJobId unless allowWithoutProof is enabled.");
     }
@@ -1416,6 +1419,9 @@ function validateDraft(
   if (execution.mode === "print") {
     if (!execution.approvedBy?.trim()) {
       errors.executionApprovedBy = "Print requires an approvedBy user.";
+    }
+    if (!execution.approvedAt?.trim()) {
+      errors.executionApprovedAt = "Print requires an approvedAt datetime.";
     }
     if (!execution.allowWithoutProof && !execution.sourceProofJobId?.trim()) {
       errors.executionSourceProofJobId =
@@ -2562,8 +2568,8 @@ export function App() {
                     }
                   />
                   <small className="hint-text">
-                    Print without linked proof job is disabled unless desktop bridge policy enables
-                    it.
+                    Print without linked proof job stays disabled until proof approval workflow is
+                    implemented.
                   </small>
                 </label>
               </>
