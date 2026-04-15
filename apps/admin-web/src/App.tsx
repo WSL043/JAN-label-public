@@ -1797,6 +1797,15 @@ export function App() {
       right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt),
     );
   }, [auditSearch.entries]);
+  const approvedProofEntryByJobId = useMemo(() => {
+    const index = new Map<string, AuditSearchEntry>();
+    for (const entry of approvedProofEntries) {
+      if (entry.proof) {
+        index.set(entry.proof.proofJobId, entry);
+      }
+    }
+    return index;
+  }, [approvedProofEntries]);
 
   const templateValidation = validateTemplateSource(templateSource);
 
@@ -2036,6 +2045,30 @@ export function App() {
     return dispatchPrintJob(request);
   }
 
+  function buildProofLinkedDispatchOptions(
+    draft: PrintJobDraft,
+    options: DispatchRequestOptions = {},
+  ): DispatchRequestOptions {
+    if (options.jobLineageId) {
+      return options;
+    }
+    if (draft.execution?.mode !== "print") {
+      return options;
+    }
+    const sourceProofJobId = draft.execution.sourceProofJobId?.trim();
+    if (!sourceProofJobId) {
+      return options;
+    }
+    const proofEntry = approvedProofEntryByJobId.get(sourceProofJobId);
+    if (!proofEntry?.proof) {
+      return options;
+    }
+    return {
+      ...options,
+      jobLineageId: proofEntry.proof.jobLineageId,
+    };
+  }
+
   function applyApprovedProofToForm(entry: AuditSearchEntry) {
     const proof = entry.proof;
     if (proof?.status !== "approved") {
@@ -2043,6 +2076,10 @@ export function App() {
     }
     setForm((current) => ({
       ...current,
+      sku: entry.dispatch.matchSubject.sku,
+      brand: entry.dispatch.matchSubject.brand,
+      jan: entry.dispatch.matchSubject.janNormalized,
+      qty: String(entry.dispatch.matchSubject.qty),
       executionMode: "print",
       executionApprovedBy:
         proof.decision?.actor.displayName ||
@@ -2125,7 +2162,7 @@ export function App() {
       result: null,
     });
     try {
-      const result = await dispatchDraft(draft);
+      const result = await dispatchDraft(draft, buildProofLinkedDispatchOptions(draft));
       setManualSubmit({
         phase: "success",
         message: `Manual draft submitted for ${result.audit.jobId} (${result.mode}).`,
@@ -2189,6 +2226,7 @@ export function App() {
       if (retryContext?.retryReason) {
         dispatchOptions.reason = retryContext.retryReason;
       }
+      const linkedDispatchOptions = buildProofLinkedDispatchOptions(activeDraft, dispatchOptions);
 
       setQueuedRows((current) =>
         current.map((row, queueIndex) =>
@@ -2211,7 +2249,7 @@ export function App() {
       });
 
       try {
-        const result = await dispatchDraft(activeDraft, dispatchOptions);
+        const result = await dispatchDraft(activeDraft, linkedDispatchOptions);
         results.push(result);
         setQueuedRows((current) =>
           current.map((row, queueIndex) =>

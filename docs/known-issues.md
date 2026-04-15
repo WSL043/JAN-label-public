@@ -91,8 +91,8 @@
 - 影響: ledger 導入前に生成した proof PDF は承認レコードを持たないため、現仕様では `sourceProofJobId` に指定しても本印刷できない。
 - 対策: `T-028c` で legacy proof seed / migration 手順を追加し、運用移行時の差分を埋める。
 
-## K-016 approved proof と print 対象の厳密照合が未完成
+## K-016 approved proof と print 対象の厳密照合
 
-- 状態: open
-- 影響: 現状の print gate は approved proof の存在確認が中心で、lineage / template / 対象一致まで強制していないため、別案件 proof の流用余地が残る。
-- 対策: `T-027c` で print request と approved proof の結合条件を強化し、proof 由来の対象一致を必須化する。
+- 状態: resolved
+- 影響: `T-027c` 以前は approved proof の存在確認が中心で、別案件 proof の流用余地があった。
+- 対策: desktop-shell の print gate で `templateVersion + sku + brand + jan(normalized) + qty` と lineage 整合を比較し、不一致なら dispatch を拒否するように更新済み。

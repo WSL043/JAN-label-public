@@ -11,6 +11,7 @@ tauri-build = { version = "2.5.6" }
 tauri = { version = "2.10.3" }
 audit-log = { path = "../../../crates/audit-log" }
 barcode = { path = "../../../crates/barcode" }
+domain = { path = "../../../crates/domain" }
 printer-adapters = { path = "../../../crates/printer-adapters" }
 print-agent = { path = "../../../crates/print-agent" }
 serde = { version = "1.0", features = ["derive"] }

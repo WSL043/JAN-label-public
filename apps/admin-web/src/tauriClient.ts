@@ -56,6 +56,12 @@ export type PersistedDispatchRecord = {
   };
   mode: "proof" | "print";
   templateVersion: string;
+  matchSubject: {
+    sku: string;
+    brand: string;
+    janNormalized: string;
+    qty: number;
+  };
   artifactMediaType: string;
   artifactByteSize: number;
   submissionAdapterKind: string;

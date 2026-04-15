@@ -7,7 +7,7 @@
    `admin-web` は 12 桁と 13 桁の JAN を受け取り、最終正規化と検証は Rust 側へ委譲する
 3. CSV / XLSX は厳格 alias match で列マッピングされ、業務ヘッダ揺れ、`enabled=true/false`、行ごとの `template` / `printer_profile` 上書きを扱う
 4. snapshot を作り、proof route / live route を明示した payload preview を確認する
-5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認と approved proof ledger 照合を行う
+5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認、approved proof ledger 照合、`templateVersion + sku + brand + jan(normalized) + qty` 一致確認を行う
 6. `desktop-shell` は local audit store に `dispatch-ledger.json` と `proof-ledger.json` を保持し、proof status を `pending / approved / rejected / superseded` で管理する
 7. `admin-web` は proof inbox / audit search から pending proof の approve / reject と、approved proof の `sourceProofJobId` 反映を行える
 8. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
@@ -65,11 +65,10 @@ audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 - `admin-web` は review queue と snapshot を持つ
 - PDF proof route は UI 上で明示される
 - `admin-web` と `print-agent` は `sourceProofJobId` / `allowWithoutProof` の gate を共有する
-- `desktop-shell` は proof dispatch 成功時に pending proof を ledger 登録し、print 時は source proof PDF の実在と approved proof ledger 記録を確認する
+- `desktop-shell` は proof dispatch 成功時に pending proof を ledger 登録し、print 時は source proof PDF の実在、approved proof ledger 記録、proof dispatch payload 一致を確認する
 - `admin-web` は proof inbox から pending proof の approve / reject、approved proof の print form 反映を行える
 - `allowWithoutProof` は proof 承認ワークフロー完了まで拒否する
 - まだ未実装のもの:
-  - print 対象と approved proof の lineage / template / 対象整合の強制
   - 承認履歴の多段保持
   - legacy proof PDF の ledger 移行
   - 却下 / 再作成専用 UI と再印刷 UI

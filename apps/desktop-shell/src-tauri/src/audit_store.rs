@@ -1,6 +1,6 @@
 use audit_log::{
-    AuditActor, AuditQuery, AuditSearchEntry, AuditSearchResult, PersistedDispatchRecord,
-    ProofRecord, ProofStatus,
+    AuditActor, AuditQuery, AuditSearchEntry, AuditSearchResult, DispatchMatchSubject,
+    PersistedDispatchRecord, ProofRecord, ProofStatus,
 };
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
@@ -82,29 +82,49 @@ impl AuditStore {
 
     pub fn ensure_approved_proof(&self, proof_job_id: &str) -> Result<ProofRecord, String> {
         self.with_lock(|| {
-            let record = self
-                .load_proof_records()?
+            let records = self.load_proof_records()?;
+            approved_proof_from_records(&records, proof_job_id)
+        })
+    }
+
+    pub fn ensure_approved_proof_matches(
+        &self,
+        proof_job_id: &str,
+        expected_template_version: &str,
+        expected_subject: &DispatchMatchSubject,
+    ) -> Result<ProofRecord, String> {
+        self.with_lock(|| {
+            let proof_records = self.load_proof_records()?;
+            let proof = approved_proof_from_records(&proof_records, proof_job_id)?;
+            let dispatches = self.load_dispatch_records()?;
+            let proof_dispatch = dispatches
                 .into_iter()
-                .find(|record| record.proof_job_id.0 == proof_job_id)
+                .find(|record| record.mode == "proof" && record.audit.job_id.0 == proof_job_id)
                 .ok_or_else(|| {
-                    format!("proof job '{}' was not found in approval ledger", proof_job_id)
+                    format!(
+                        "approved proof job '{}' has no persisted proof dispatch record",
+                        proof_job_id
+                    )
                 })?;
 
-            match record.status {
-                ProofStatus::Approved => Ok(record),
-                ProofStatus::Pending => Err(format!(
-                    "proof job '{}' exists but is still pending approval",
+            if proof.job_lineage_id != proof_dispatch.audit.job_lineage_id {
+                return Err(format!(
+                    "approved proof job '{}' has inconsistent lineage between proof ledger and dispatch ledger",
                     proof_job_id
-                )),
-                ProofStatus::Rejected => Err(format!(
-                    "proof job '{}' was rejected and cannot be used for print",
-                    proof_job_id
-                )),
-                ProofStatus::Superseded => Err(format!(
-                    "proof job '{}' was superseded by a newer proof",
-                    proof_job_id
-                )),
+                ));
             }
+
+            let mismatches =
+                collect_dispatch_mismatches(&proof_dispatch, expected_template_version, expected_subject);
+            if !mismatches.is_empty() {
+                return Err(format!(
+                    "approved proof job '{}' does not match print payload: {}",
+                    proof_job_id,
+                    mismatches.join(", ")
+                ));
+            }
+
+            Ok(proof)
         })
     }
 
@@ -262,8 +282,60 @@ fn matches_search(entry: &AuditSearchEntry, search_text: Option<&str>) -> bool {
         haystacks.push(proof.requested_by.user_id.to_ascii_lowercase());
         haystacks.push(proof.requested_by.display_name.to_ascii_lowercase());
     }
+    haystacks.push(entry.dispatch.match_subject.sku.to_ascii_lowercase());
+    haystacks.push(entry.dispatch.match_subject.brand.to_ascii_lowercase());
+    haystacks.push(entry.dispatch.match_subject.jan_normalized.to_ascii_lowercase());
+    haystacks.push(entry.dispatch.match_subject.qty.to_string());
 
     haystacks.into_iter().any(|value| value.contains(search_text))
+}
+
+fn approved_proof_from_records(records: &[ProofRecord], proof_job_id: &str) -> Result<ProofRecord, String> {
+    let record = records
+        .iter()
+        .find(|record| record.proof_job_id.0 == proof_job_id)
+        .cloned()
+        .ok_or_else(|| format!("proof job '{}' was not found in approval ledger", proof_job_id))?;
+
+    match record.status {
+        ProofStatus::Approved => Ok(record),
+        ProofStatus::Pending => Err(format!(
+            "proof job '{}' exists but is still pending approval",
+            proof_job_id
+        )),
+        ProofStatus::Rejected => Err(format!(
+            "proof job '{}' was rejected and cannot be used for print",
+            proof_job_id
+        )),
+        ProofStatus::Superseded => Err(format!(
+            "proof job '{}' was superseded by a newer proof",
+            proof_job_id
+        )),
+    }
+}
+
+fn collect_dispatch_mismatches(
+    record: &PersistedDispatchRecord,
+    expected_template_version: &str,
+    expected_subject: &DispatchMatchSubject,
+) -> Vec<&'static str> {
+    let mut mismatches = Vec::new();
+    if record.template_version != expected_template_version {
+        mismatches.push("templateVersion");
+    }
+    if record.match_subject.sku != expected_subject.sku {
+        mismatches.push("sku");
+    }
+    if record.match_subject.brand != expected_subject.brand {
+        mismatches.push("brand");
+    }
+    if record.match_subject.jan_normalized != expected_subject.jan_normalized {
+        mismatches.push("jan");
+    }
+    if record.match_subject.qty != expected_subject.qty {
+        mismatches.push("qty");
+    }
+    mismatches
 }
 
 fn optional_trimmed_non_empty(value: Option<String>) -> Option<String> {
@@ -411,8 +483,8 @@ impl ProofStatusLabel for ProofRecord {
 mod tests {
     use super::{AuditStore, ProofReviewRequest};
     use audit_log::{
-        AuditActor, AuditQuery, PersistedDispatchRecord, PrintAuditRecord, PrintJobId,
-        PrintJobLineageId, ProofRecord, ProofStatus,
+        AuditActor, AuditQuery, DispatchMatchSubject, PersistedDispatchRecord, PrintAuditRecord,
+        PrintJobId, PrintJobLineageId, ProofRecord, ProofStatus,
     };
     use std::env;
     use std::fs;
@@ -475,6 +547,7 @@ mod tests {
                 ),
                 mode: "proof".to_string(),
                 template_version: "basic-50x30@v1".to_string(),
+                match_subject: sample_match_subject(),
                 artifact_media_type: "application/pdf".to_string(),
                 artifact_byte_size: 128,
                 submission_adapter_kind: "pdf".to_string(),
@@ -500,6 +573,57 @@ mod tests {
         );
     }
 
+    #[test]
+    fn approved_proof_must_match_dispatch_subject() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-0004");
+        store
+            .register_pending_proof(proof.clone())
+            .expect("pending proof should persist");
+        store
+            .record_dispatch(PersistedDispatchRecord {
+                audit: PrintAuditRecord::dispatch(
+                    proof.proof_job_id.clone(),
+                    proof.job_lineage_id.clone(),
+                    None,
+                    proof.requested_by.clone(),
+                    proof.requested_at.clone(),
+                    None,
+                ),
+                mode: "proof".to_string(),
+                template_version: "basic-50x30@v1".to_string(),
+                match_subject: sample_match_subject(),
+                artifact_media_type: "application/pdf".to_string(),
+                artifact_byte_size: 128,
+                submission_adapter_kind: "pdf".to_string(),
+                submission_external_job_id: "proof-0001".to_string(),
+            })
+            .expect("dispatch should persist");
+        store
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-PROOF-0004".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T12:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let err = store
+            .ensure_approved_proof_matches(
+                "JOB-PROOF-0004",
+                "basic-50x30@v1",
+                &DispatchMatchSubject {
+                    qty: 2,
+                    ..sample_match_subject()
+                },
+            )
+            .expect_err("qty mismatch should reject print");
+
+        assert!(err.contains("qty"));
+    }
+
     fn sample_proof(job_id: &str) -> ProofRecord {
         ProofRecord::pending(
             PrintJobId(job_id.to_string()),
@@ -512,6 +636,15 @@ mod tests {
             format!("proofs/{job_id}-proof.pdf"),
             Some("review".to_string()),
         )
+    }
+
+    fn sample_match_subject() -> DispatchMatchSubject {
+        DispatchMatchSubject {
+            sku: "SKU-0001".to_string(),
+            brand: "Acme".to_string(),
+            jan_normalized: "4006381333931".to_string(),
+            qty: 1,
+        }
     }
 
     struct TestDir {

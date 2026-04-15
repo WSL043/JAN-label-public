@@ -136,10 +136,20 @@ impl ProofRecord {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
+pub struct DispatchMatchSubject {
+    pub sku: String,
+    pub brand: String,
+    pub jan_normalized: String,
+    pub qty: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PersistedDispatchRecord {
     pub audit: PrintAuditRecord,
     pub mode: String,
     pub template_version: String,
+    pub match_subject: DispatchMatchSubject,
     pub artifact_media_type: String,
     pub artifact_byte_size: usize,
     pub submission_adapter_kind: String,
@@ -172,8 +182,8 @@ pub struct AuditSearchResult {
 #[cfg(test)]
 mod tests {
     use super::{
-        AuditActor, AuditEventKind, AuditQuery, PersistedDispatchRecord, PrintAuditRecord,
-        PrintJobId, PrintJobLineageId, ProofRecord, ProofStatus,
+        AuditActor, AuditEventKind, AuditQuery, DispatchMatchSubject, PersistedDispatchRecord,
+        PrintAuditRecord, PrintJobId, PrintJobLineageId, ProofRecord, ProofStatus,
     };
 
     #[test]
@@ -277,6 +287,12 @@ mod tests {
             ),
             mode: "proof".to_string(),
             template_version: "basic-50x30@v1".to_string(),
+            match_subject: DispatchMatchSubject {
+                sku: "SKU-001".to_string(),
+                brand: "Brand".to_string(),
+                jan_normalized: "4006381333931".to_string(),
+                qty: 1,
+            },
             artifact_media_type: "application/pdf".to_string(),
             artifact_byte_size: 128,
             submission_adapter_kind: "pdf".to_string(),
@@ -284,6 +300,7 @@ mod tests {
         };
 
         assert_eq!(record.mode, "proof");
+        assert_eq!(record.match_subject.jan_normalized, "4006381333931");
         assert_eq!(record.submission_adapter_kind, "pdf");
     }
 }

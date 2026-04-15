@@ -6,11 +6,12 @@ use std::env;
 use std::path::{Path, PathBuf};
 
 use audit_log::{
-    AuditActor, AuditQuery, AuditSearchResult, PersistedDispatchRecord, ProofRecord, PrintJobId,
-    PrintJobLineageId,
+    AuditActor, AuditQuery, AuditSearchResult, DispatchMatchSubject, PersistedDispatchRecord,
+    ProofRecord, PrintJobId, PrintJobLineageId,
 };
 use audit_store::{AuditStore, ProofReviewRequest};
 use barcode::ZintCli;
+use domain::{Jan, JanError};
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
 use printer_adapters::{PdfFileAdapter, WindowsSpoolerAdapter};
 use serde::Serialize;
@@ -262,7 +263,13 @@ impl PrintBridgeConfig {
                 proof_output_path.display()
             ));
         }
-        self.audit_store().ensure_approved_proof(source_proof_job_id)?;
+        let expected_template_version = resolve_template_version_for_request(request)?;
+        let expected_subject = build_dispatch_match_subject(request)?;
+        self.audit_store().ensure_approved_proof_matches(
+            source_proof_job_id,
+            &expected_template_version,
+            &expected_subject,
+        )?;
 
         Ok(())
     }
@@ -294,6 +301,7 @@ impl PrintBridgeConfig {
             },
             mode: result.mode.clone(),
             template_version: result.template_version.clone(),
+            match_subject: build_dispatch_match_subject(request)?,
             artifact_media_type: result.artifact.media_type.clone(),
             artifact_byte_size: result.artifact.byte_size,
             submission_adapter_kind: result.submission.adapter_kind.clone(),
@@ -517,6 +525,75 @@ fn resolve_bool_env(key: &str) -> bool {
             "1" | "true" | "yes" | "on"
         )
     })
+}
+
+fn resolve_template_version_for_request(request: &DispatchRequest) -> Result<String, String> {
+    let template_version = request
+        .template_version
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let template_version_from_ref = request.template.as_ref().map(|template| {
+        let id = template.id.trim();
+        let version = template.version.trim();
+        if id.is_empty() || version.is_empty() {
+            Err("template id/version must not be empty".to_string())
+        } else {
+            Ok(format!("{id}@{version}"))
+        }
+    }).transpose()?;
+
+    match (template_version, template_version_from_ref) {
+        (Some(value), Some(resolved)) if value != resolved => Err(
+            "templateVersion and template.id/template.version must resolve to the same value"
+                .to_string(),
+        ),
+        (Some(value), Some(_)) => Ok(value),
+        (Some(value), None) => Ok(value),
+        (None, Some(resolved)) => Ok(resolved),
+        (None, None) => Err("templateVersion or template.id/template.version is required".to_string()),
+    }
+}
+
+fn build_dispatch_match_subject(request: &DispatchRequest) -> Result<DispatchMatchSubject, String> {
+    let sku = require_trimmed_non_empty("sku", &request.sku)?;
+    let brand = require_trimmed_non_empty("brand", &request.brand)?;
+    let jan_normalized = Jan::parse(&request.jan)
+        .map(|value| value.as_str().to_string())
+        .map_err(jan_error_message)?;
+    if request.qty == 0 {
+        return Err("qty must be greater than or equal to 1".to_string());
+    }
+
+    Ok(DispatchMatchSubject {
+        sku,
+        brand,
+        jan_normalized,
+        qty: request.qty,
+    })
+}
+
+fn require_trimmed_non_empty(field_name: &str, value: &str) -> Result<String, String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        Err(format!("{field_name} must not be empty"))
+    } else {
+        Ok(trimmed.to_string())
+    }
+}
+
+fn jan_error_message(error: JanError) -> String {
+    match error {
+        JanError::Empty => "jan must not be empty".to_string(),
+        JanError::NonDigit => "jan must contain only digits".to_string(),
+        JanError::InvalidLength { actual } => {
+            format!("jan must contain 12 or 13 digits, got {actual}")
+        }
+        JanError::InvalidChecksum { expected, actual } => {
+            format!("jan checksum is invalid: expected {expected}, got {actual}")
+        }
+    }
 }
 
 fn log_non_fatal_audit_error(context: &str, job_id: &str, error: &str) {
@@ -943,6 +1020,9 @@ mod tests {
         let request = sample_dispatch_request(Some(DispatchPrinterProfile {
             id: "line-1".to_string(),
             adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
         }));
 
         let adapter = config
@@ -968,6 +1048,9 @@ mod tests {
         let request = sample_dispatch_request(Some(DispatchPrinterProfile {
             id: "pdf-a4-proof".to_string(),
             adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
         }));
 
         let err = config
@@ -997,7 +1080,16 @@ mod tests {
         let request = sample_dispatch_request(Some(DispatchPrinterProfile {
             id: "pdf-a4-proof".to_string(),
             adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
         }));
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
         config
             .audit_store()
             .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
@@ -1016,6 +1108,60 @@ mod tests {
         config
             .validate_request(&request)
             .expect("existing proof artifact should allow print");
+    }
+
+    #[test]
+    fn print_bridge_config_rejects_when_approved_proof_payload_differs() {
+        let temp_root = env::temp_dir().join("jan-label-proof-check-mismatch");
+        let _ = fs::remove_dir_all(&temp_root);
+        let proof_dir = temp_root.join("proofs");
+        fs::create_dir_all(&proof_dir).expect("create proof dir");
+        let proof_path = proof_dir.join("JOB-20260415-PROOF-proof.pdf");
+        fs::write(&proof_path, b"%PDF-1.4\nproof\n").expect("write proof fixture");
+        let config = PrintBridgeConfig {
+            print_output_dir: proof_dir,
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        config
+            .record_dispatch(
+                &sample_proof_dispatch_request(),
+                &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+            )
+            .expect("proof dispatch record should persist");
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
+
+        let mut request = sample_dispatch_request(Some(DispatchPrinterProfile {
+            id: "pdf-a4-proof".to_string(),
+            adapter: "pdf".to_string(),
+            paper_size: "A4".to_string(),
+            dpi: 300,
+            scale_policy: "fixed-100".to_string(),
+        }));
+        request.qty = 2;
+
+        let err = config
+            .validate_request(&request)
+            .expect_err("mismatched payload should block print");
+
+        assert!(err.contains("qty"));
     }
 
     #[test]
@@ -1046,6 +1192,9 @@ mod tests {
             printer_profile: Some(DispatchPrinterProfile {
                 id: "pdf-a4-proof".to_string(),
                 adapter: "pdf".to_string(),
+                paper_size: "A4".to_string(),
+                dpi: 300,
+                scale_policy: "fixed-100".to_string(),
             }),
             execution: Some(ExecutionIntent::Proof(print_agent::ProofExecution {
                 requested_by: Some("proof.user".to_string()),
@@ -1163,5 +1312,58 @@ mod tests {
             proof_path.to_string_lossy().into_owned(),
             Some("review".to_string()),
         )
+    }
+
+    fn sample_proof_dispatch_request() -> DispatchRequest {
+        DispatchRequest {
+            job_id: "JOB-20260415-PROOF".to_string(),
+            sku: "SKU-0001".to_string(),
+            brand: "Acme".to_string(),
+            jan: "4006381333931".to_string(),
+            qty: 1,
+            template_version: Some("basic-50x30@v1".to_string()),
+            template: None,
+            printer_profile: Some(DispatchPrinterProfile {
+                id: "pdf-a4-proof".to_string(),
+                adapter: "pdf".to_string(),
+                paper_size: "A4".to_string(),
+                dpi: 300,
+                scale_policy: "fixed-100".to_string(),
+            }),
+            execution: Some(ExecutionIntent::Proof(print_agent::ProofExecution {
+                requested_by: Some("proof.user".to_string()),
+                notes: Some("review".to_string()),
+                expires_at: None,
+            })),
+            actor_user_id: "ops.user".to_string(),
+            actor_display_name: "Ops User".to_string(),
+            requested_at: "2026-04-15T09:00:00Z".to_string(),
+            job_lineage_id: None,
+            reprint_of_job_id: None,
+            reason: None,
+        }
+    }
+
+    fn sample_proof_dispatch_result(job_id: &str) -> print_agent::PrintDispatchResult {
+        print_agent::PrintDispatchResult {
+            mode: "proof".to_string(),
+            template_version: "basic-50x30@v1".to_string(),
+            artifact: print_agent::PrintDispatchArtifactReport {
+                media_type: "application/pdf".to_string(),
+                byte_size: 128,
+            },
+            submission: print_agent::PrintDispatchSubmission {
+                adapter_kind: "pdf".to_string(),
+                external_job_id: format!("{job_id}-submission"),
+            },
+            audit: print_agent::PrintDispatchAudit {
+                event: print_agent::PrintDispatchAuditEvent::Submitted,
+                occurred_at: "2026-04-15T09:00:00Z".to_string(),
+                job_id: job_id.to_string(),
+                job_lineage_id: job_id.to_string(),
+                parent_job_id: None,
+                reason: None,
+            },
+        }
     }
 }

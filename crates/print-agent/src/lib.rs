@@ -61,6 +61,9 @@ impl LabelTemplateRef {
 pub struct DispatchPrinterProfile {
     pub id: String,
     pub adapter: String,
+    pub paper_size: String,
+    pub dpi: u32,
+    pub scale_policy: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -543,6 +546,9 @@ mod tests {
             printer_profile: Some(DispatchPrinterProfile {
                 id: "pdf-a4-proof".to_string(),
                 adapter: "pdf".to_string(),
+                paper_size: "A4".to_string(),
+                dpi: 300,
+                scale_policy: "fixed-100".to_string(),
             }),
             execution: Some(ExecutionIntent::Proof(ProofExecution {
                 requested_by: Some("proof.user".to_string()),
@@ -588,7 +594,10 @@ mod tests {
             "templateVersion": "basic-50x30@v1",
             "printerProfile": {
                 "id": "pdf-a4-proof",
-                "adapter": "pdf"
+                "adapter": "pdf",
+                "paperSize": "A4",
+                "dpi": 300,
+                "scalePolicy": "fixed-100"
             },
             "execution": {
                 "mode": "print",
@@ -618,6 +627,9 @@ mod tests {
             Some(DispatchPrinterProfile {
                 id: "pdf-a4-proof".to_string(),
                 adapter: "pdf".to_string(),
+                paper_size: "A4".to_string(),
+                dpi: 300,
+                scale_policy: "fixed-100".to_string(),
             })
         );
     }
@@ -1070,6 +1082,9 @@ mod tests {
             printer_profile: Some(DispatchPrinterProfile {
                 id: "pdf-a4-proof".to_string(),
                 adapter: "pdf".to_string(),
+                paper_size: "A4".to_string(),
+                dpi: 300,
+                scale_policy: "fixed-100".to_string(),
             }),
             execution: Some(ExecutionIntent::Print(PrintExecution {
                 approved_by: Some("manager.user".to_string()),

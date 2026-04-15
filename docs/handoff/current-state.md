@@ -34,6 +34,8 @@
 - `apps/desktop-shell` の local audit store
   `dispatch-ledger.json`, `proof-ledger.json`, `search_audit_log`, `approve_proof`, `reject_proof`
 - `apps/desktop-shell` の audit store 排他ロックと、print 後の audit 失敗を二重印刷へ直結させない非致命処理
+- `apps/desktop-shell` の strict proof-to-print gate
+  approved proof と `templateVersion + sku + brand + jan(normalized) + qty`、lineage 整合を比較し、不一致 print を拒否
 - `apps/admin-web` の proof inbox / audit search UI
   local ledger 検索、pending proof の approve / reject、approved proof の `sourceProofJobId` への反映
 - `desktop-shell-windows` CI と tag release 時の Windows installer build 経路
@@ -55,6 +57,9 @@
   `JAN-Label_0.1.1_windows_x64-setup.exe`
   を添付済み
 - GitHub-side Codex との協働運用（クラウド側実行との役割分担）を前提に、`T-030` 以降の運用を進行中
+- proof と print 対象の厳密一致 blocker
+  `T-027c`
+  を解消済み
 
 ## 2. 直近で使っている確認セット
 
@@ -82,7 +87,7 @@ GitHub Actions の最新成功 run:
 - `admin-web` の submit は `desktop-shell` 経由の Tauri invoke を前提に接続済みだが、browser 単体では preview-only のまま
 - bridge status / warning は UI で高リスク時に submit block できるが、warning code / severity の構造化は未実装
 - proof 承認フローは backend と UI の最小導線まで接続済みだが、承認履歴の多段保持、legacy proof の ledger 移行、再印刷 UI は未実装
-- print 時の `sourceProofJobId` 検証は「proof PDF 実在 + 承認済み ledger 記録」までは接続済みだが、proof と print 対象の lineage / template 整合強制は未実装
+- print 時の `sourceProofJobId` 検証は「proof PDF 実在 + 承認済み ledger 記録 + approved proof と print payload の厳密一致」まで接続済み
 - 監査ログは local JSON ledger と検索 UI まで接続済みだが、長期保持、ローテーション、multi-host / multi-instance 前提の運用は未実装
 - ラベルソフトの基本価値に必要な「ラベル製作コア（テンプレート仕様、要素配置、データ紐付け、版管理）」は途中段階
   `packages` / `render` 主導の label design / template workflow 最小セットとして扱う
@@ -94,14 +99,13 @@ GitHub Actions の最新成功 run:
 
 ## 4. 次の安全な一手
 
-1. proof ledger と print 対象の整合検証を追加し、別案件の approved proof を流用できないようにする
-2. proof ワークフローを仕上げ、承認履歴、legacy proof 移行、却下/再作成の運用状態遷移を固める
-3. template schema / template asset を基準に、ラベル製作コアのデータ紐付け・版管理・要素配置を `packages` / `render` 主導で拡張する
-4. 3 の成果を活用して、テンプレート編集画面からのプレビュー / proof 生成・差分比較を実装する
-5. local audit ledger のローテーション、バックアップ、再印刷 trace 表示を追加する
-6. 現場安全ルールを実装する（承認必須、重複ジョブ防止、エラー時停止、再試行制御）
-7. repository secret に `OPENAI_API_KEY` を設定し、`Codex PR Review` / `Codex Maintenance` / `Codex CI Autofix` を cloud 実行へ切り替える
-8. 実機プリンタ + スキャナで 1 件測定し、`docs/printer-matrix/` に物理実測を追記する
+1. proof ワークフローを仕上げ、承認履歴、legacy proof 移行、却下/再作成の運用状態遷移を固める
+2. template schema / template asset を基準に、ラベル製作コアのデータ紐付け・版管理・要素配置を `packages` / `render` 主導で拡張する
+3. 2 の成果を活用して、テンプレート編集画面からのプレビュー / proof 生成・差分比較を実装する
+4. local audit ledger のローテーション、バックアップ、再印刷 trace 表示を追加する
+5. 現場安全ルールを実装する（承認必須、重複ジョブ防止、エラー時停止、再試行制御）
+6. repository secret に `OPENAI_API_KEY` を設定し、`Codex PR Review` / `Codex Maintenance` / `Codex CI Autofix` を cloud 実行へ切り替える
+7. 実機プリンタ + スキャナで 1 件測定し、`docs/printer-matrix/` に物理実測を追記する
 
 ## 5. 触る時の注意
 
@@ -119,7 +123,7 @@ GitHub Actions の最新成功 run:
 - `admin-web` は desktop-shell 経由なら submit と proof 承認操作ができるが、browser 単体では preview-only
 - `admin-web` は 12/13 桁 JAN を digits-only で submit し、最終正規化は Rust 前提とする。proof 承認と監査永続化が未完成のため運用制約は残る
 - ラベルテンプレート作成は schema / asset の基礎まで進んだが、フィールドベースの本格的な label design、データソース binding、proof 承認は未完成
-- `allowWithoutProof` は proof 承認ワークフローが実装されるまで無効化している。`sourceProofJobId` は proof PDF 実在と承認済み ledger 記録で検証するが、proof と print 対象の完全一致検証は未実装
+- `allowWithoutProof` は proof 承認ワークフローが実装されるまで無効化している。`sourceProofJobId` は proof PDF 実在、承認済み ledger、approved proof と print payload の厳密一致で検証する
 - XLSX 取り込みは lazy-load 化済みだが、JAN を数値セルで持つ Excel は先頭ゼロや表示形式の崩れを招くため、現時点では text 化前提で運用する
 - `print-agent` は `Pdf` と `WindowsSpooler` のみ接続済みで、`Zpl` / `Tspl` / `Qz` は現状 reject する
 - local audit ledger は desktop-shell ローカル JSON であり、ローテーション、バックアップ、複数インスタンス常時運用の設計は未完成
