@@ -1,8 +1,15 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod audit_store;
+
 use std::env;
 use std::path::{Path, PathBuf};
 
+use audit_log::{
+    AuditActor, AuditQuery, AuditSearchResult, PersistedDispatchRecord, ProofRecord, PrintJobId,
+    PrintJobLineageId,
+};
+use audit_store::{AuditStore, ProofReviewRequest};
 use barcode::ZintCli;
 use print_agent::{DispatchRequest, ExecutionIntent, PrintAgent, PrintAgentPolicy, PrintDispatchResult};
 use printer_adapters::{PdfFileAdapter, WindowsSpoolerAdapter};
@@ -15,6 +22,7 @@ const ENV_ZINT_BINARY_PATH: &str = "JAN_LABEL_ZINT_BINARY_PATH";
 const ENV_PRINT_ADAPTER: &str = "JAN_LABEL_PRINT_ADAPTER";
 const ENV_WINDOWS_PRINTER_NAME: &str = "JAN_LABEL_WINDOWS_PRINTER_NAME";
 const ENV_ALLOW_PRINT_WITHOUT_PROOF: &str = "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF";
+const ENV_AUDIT_LOG_DIR: &str = "JAN_LABEL_AUDIT_LOG_DIR";
 
 const DEFAULT_ZINT_BINARY_PATH: &str = "zint";
 const DEFAULT_WINDOWS_PRINTER_NAME: &str = "Default Printer";
@@ -25,19 +33,21 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
     let is_proof = matches!(request.execution.as_ref(), Some(ExecutionIntent::Proof(_)));
     let job_id = request.job_id.clone();
     config.validate_request(&request)?;
+    let request_for_audit = request.clone();
 
     if is_proof {
+        let proof_output_path = config.proof_output_path(&job_id);
         let barcode_engine = ZintCli {
             binary_path: config.zint_binary_path.clone(),
         };
         let adapter = PdfFileAdapter {
-            output_path: config
-                .proof_output_path(&job_id)
-                .to_string_lossy()
-                .into_owned(),
+            output_path: proof_output_path.to_string_lossy().into_owned(),
         };
         let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
-        return agent.dispatch(request);
+        let result = agent.dispatch(request)?;
+        config.record_dispatch(&request_for_audit, &result)?;
+        config.register_pending_proof(&request_for_audit, &proof_output_path)?;
+        return Ok(result);
     }
 
     let barcode_engine = ZintCli {
@@ -53,7 +63,11 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
                     .into_owned(),
             };
             let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
-            agent.dispatch(request)
+            let result = agent.dispatch(request)?;
+            if let Err(error) = config.record_dispatch(&request_for_audit, &result) {
+                log_non_fatal_audit_error("print dispatch", &result.audit.job_id, &error);
+            }
+            Ok(result)
         }
         BridgePrintAdapter::WindowsSpooler => {
             let adapter = WindowsSpoolerAdapter {
@@ -64,7 +78,11 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
                     .into_owned(),
             };
             let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
-            agent.dispatch(request)
+            let result = agent.dispatch(request)?;
+            if let Err(error) = config.record_dispatch(&request_for_audit, &result) {
+                log_non_fatal_audit_error("print dispatch", &result.audit.job_id, &error);
+            }
+            Ok(result)
         }
     }
 }
@@ -74,10 +92,29 @@ fn print_bridge_status() -> PrintBridgeStatus {
     PrintBridgeStatus::from_environment()
 }
 
+#[command]
+fn search_audit_log(query: Option<AuditQuery>) -> Result<AuditSearchResult, String> {
+    let config = PrintBridgeConfig::load();
+    config.audit_store().search(query.unwrap_or_default())
+}
+
+#[command]
+fn approve_proof(request: ProofReviewRequest) -> Result<ProofRecord, String> {
+    let config = PrintBridgeConfig::load();
+    config.audit_store().approve_proof(request)
+}
+
+#[command]
+fn reject_proof(request: ProofReviewRequest) -> Result<ProofRecord, String> {
+    let config = PrintBridgeConfig::load();
+    config.audit_store().reject_proof(request)
+}
+
 #[derive(Debug, Clone)]
 struct PrintBridgeConfig {
     print_output_dir: PathBuf,
     spool_output_dir: PathBuf,
+    audit_log_dir: PathBuf,
     zint_binary_path: String,
     print_adapter: BridgePrintAdapter,
     windows_printer_name: String,
@@ -126,6 +163,10 @@ impl PrintBridgeConfig {
                 ENV_SPOOL_OUTPUT_DIR,
                 env::temp_dir().join("jan-label").join("spool"),
             ),
+            audit_log_dir: resolve_output_dir(
+                ENV_AUDIT_LOG_DIR,
+                env::temp_dir().join("jan-label").join("audit"),
+            ),
             zint_binary_path: resolve_optional_env(ENV_ZINT_BINARY_PATH)
                 .filter(|value| !value.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_ZINT_BINARY_PATH.to_string()),
@@ -141,6 +182,10 @@ impl PrintBridgeConfig {
         PrintAgentPolicy {
             allow_print_without_proof: self.allow_print_without_proof,
         }
+    }
+
+    fn audit_store(&self) -> AuditStore {
+        AuditStore::new(self.audit_log_dir.clone())
     }
 
     fn proof_output_path(&self, job_id: &str) -> PathBuf {
@@ -217,8 +262,75 @@ impl PrintBridgeConfig {
                 proof_output_path.display()
             ));
         }
+        self.audit_store().ensure_approved_proof(source_proof_job_id)?;
 
         Ok(())
+    }
+
+    fn record_dispatch(
+        &self,
+        request: &DispatchRequest,
+        result: &PrintDispatchResult,
+    ) -> Result<(), String> {
+        let reason = request
+            .reason
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string)
+            .or_else(|| result.audit.reason.clone());
+        self.audit_store().record_dispatch(PersistedDispatchRecord {
+            audit: audit_log::PrintAuditRecord {
+                job_id: PrintJobId(result.audit.job_id.clone()),
+                job_lineage_id: PrintJobLineageId(result.audit.job_lineage_id.clone()),
+                parent_job_id: result.audit.parent_job_id.clone().map(PrintJobId),
+                actor: AuditActor {
+                    user_id: request.actor_user_id.clone(),
+                    display_name: request.actor_display_name.clone(),
+                },
+                event: map_event_kind(&result.audit.event),
+                occurred_at: result.audit.occurred_at.clone(),
+                reason,
+            },
+            mode: result.mode.clone(),
+            template_version: result.template_version.clone(),
+            artifact_media_type: result.artifact.media_type.clone(),
+            artifact_byte_size: result.artifact.byte_size,
+            submission_adapter_kind: result.submission.adapter_kind.clone(),
+            submission_external_job_id: result.submission.external_job_id.clone(),
+        })
+    }
+
+    fn register_pending_proof(
+        &self,
+        request: &DispatchRequest,
+        artifact_path: &Path,
+    ) -> Result<(), String> {
+        let Some(ExecutionIntent::Proof(execution)) = request.execution.as_ref() else {
+            return Ok(());
+        };
+
+        let actor = AuditActor {
+            user_id: execution
+                .requested_by
+                .clone()
+                .unwrap_or_else(|| request.actor_user_id.clone()),
+            display_name: request.actor_display_name.clone(),
+        };
+        let job_lineage_id = request
+            .job_lineage_id
+            .clone()
+            .or_else(|| request.reprint_of_job_id.clone())
+            .unwrap_or_else(|| request.job_id.clone());
+
+        self.audit_store().register_pending_proof(ProofRecord::pending(
+            PrintJobId(request.job_id.clone()),
+            PrintJobLineageId(job_lineage_id),
+            actor,
+            request.requested_at.clone(),
+            artifact_path.to_string_lossy().into_owned(),
+            execution.notes.clone(),
+        ))
     }
 }
 
@@ -407,6 +519,20 @@ fn resolve_bool_env(key: &str) -> bool {
     })
 }
 
+fn log_non_fatal_audit_error(context: &str, job_id: &str, error: &str) {
+    eprintln!("warning: {context} for job '{job_id}' completed, but audit persistence failed: {error}");
+}
+
+fn map_event_kind(event: &print_agent::PrintDispatchAuditEvent) -> audit_log::AuditEventKind {
+    match event {
+        print_agent::PrintDispatchAuditEvent::Submitted => audit_log::AuditEventKind::Submitted,
+        print_agent::PrintDispatchAuditEvent::Reprinted => audit_log::AuditEventKind::Reprinted,
+        print_agent::PrintDispatchAuditEvent::Created => audit_log::AuditEventKind::Created,
+        print_agent::PrintDispatchAuditEvent::Completed => audit_log::AuditEventKind::Completed,
+        print_agent::PrintDispatchAuditEvent::Failed => audit_log::AuditEventKind::Failed,
+    }
+}
+
 fn resolve_zint_binary_path_with_warning(
     env_key: &str,
     fallback: &str,
@@ -478,7 +604,10 @@ fn main() {
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             dispatch_print_job,
-            print_bridge_status
+            print_bridge_status,
+            search_audit_log,
+            approve_proof,
+            reject_proof
         ])
         .run(tauri::generate_context!())
         .expect("failed to run desktop shell");
@@ -490,9 +619,11 @@ mod tests {
         available_adapters_for_host, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus,
-        ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_PRINT_ADAPTER, ENV_PRINT_OUTPUT_DIR,
+        ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER, ENV_PRINT_OUTPUT_DIR,
         ENV_SPOOL_OUTPUT_DIR, ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
     };
+    use crate::audit_store::ProofReviewRequest;
+    use audit_log::{AuditQuery, ProofRecord, PrintJobId, PrintJobLineageId};
     use print_agent::{DispatchPrinterProfile, DispatchRequest, ExecutionIntent, PrintExecution};
     use std::{env, fs, path::PathBuf, sync::Mutex};
 
@@ -560,6 +691,7 @@ mod tests {
         let _guard = TEST_MUTEX.lock().unwrap();
         let backup = backup_env_vars(&[
             ENV_ALLOW_PRINT_WITHOUT_PROOF,
+            ENV_AUDIT_LOG_DIR,
             ENV_PRINT_OUTPUT_DIR,
             ENV_SPOOL_OUTPUT_DIR,
             ENV_ZINT_BINARY_PATH,
@@ -568,6 +700,7 @@ mod tests {
         ]);
 
         env::remove_var(ENV_ALLOW_PRINT_WITHOUT_PROOF);
+        env::remove_var(ENV_AUDIT_LOG_DIR);
         env::remove_var(ENV_PRINT_OUTPUT_DIR);
         env::remove_var(ENV_SPOOL_OUTPUT_DIR);
         env::remove_var(ENV_ZINT_BINARY_PATH);
@@ -603,6 +736,7 @@ mod tests {
         let _guard = TEST_MUTEX.lock().unwrap();
         let backup = backup_env_vars(&[
             ENV_ALLOW_PRINT_WITHOUT_PROOF,
+            ENV_AUDIT_LOG_DIR,
             ENV_PRINT_OUTPUT_DIR,
             ENV_SPOOL_OUTPUT_DIR,
             ENV_ZINT_BINARY_PATH,
@@ -611,6 +745,7 @@ mod tests {
         ]);
 
         env::remove_var(ENV_ALLOW_PRINT_WITHOUT_PROOF);
+        env::remove_var(ENV_AUDIT_LOG_DIR);
         env::remove_var(ENV_PRINT_OUTPUT_DIR);
         env::remove_var(ENV_SPOOL_OUTPUT_DIR);
         env::remove_var(ENV_ZINT_BINARY_PATH);
@@ -659,6 +794,7 @@ mod tests {
         let _guard = TEST_MUTEX.lock().unwrap();
         let backup = backup_env_vars(&[
             ENV_ALLOW_PRINT_WITHOUT_PROOF,
+            ENV_AUDIT_LOG_DIR,
             ENV_PRINT_OUTPUT_DIR,
             ENV_SPOOL_OUTPUT_DIR,
             ENV_ZINT_BINARY_PATH,
@@ -672,6 +808,7 @@ mod tests {
         fs::create_dir_all(&spool_output_dir).expect("create spool output dir for test");
         env::set_var(ENV_PRINT_OUTPUT_DIR, &print_output_dir);
         env::set_var(ENV_SPOOL_OUTPUT_DIR, &spool_output_dir);
+        env::set_var(ENV_AUDIT_LOG_DIR, env::temp_dir().join("jan-label-env-audit-output"));
         env::set_var(ENV_ZINT_BINARY_PATH, "zint");
         env::set_var(ENV_PRINT_ADAPTER, "pdf");
         env::set_var(ENV_WINDOWS_PRINTER_NAME, "Main Office Printer");
@@ -797,6 +934,7 @@ mod tests {
         let config = PrintBridgeConfig {
             print_output_dir: PathBuf::from("proofs"),
             spool_output_dir: PathBuf::from("spool"),
+            audit_log_dir: PathBuf::from("audit"),
             zint_binary_path: "zint".to_string(),
             print_adapter: BridgePrintAdapter::Pdf,
             windows_printer_name: "Default Printer".to_string(),
@@ -821,6 +959,7 @@ mod tests {
         let config = PrintBridgeConfig {
             print_output_dir: temp_root.join("proofs"),
             spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
             zint_binary_path: "zint".to_string(),
             print_adapter: BridgePrintAdapter::Pdf,
             windows_printer_name: "Default Printer".to_string(),
@@ -849,6 +988,7 @@ mod tests {
         let config = PrintBridgeConfig {
             print_output_dir: proof_dir,
             spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
             zint_binary_path: "zint".to_string(),
             print_adapter: BridgePrintAdapter::Pdf,
             windows_printer_name: "Default Printer".to_string(),
@@ -858,10 +998,105 @@ mod tests {
             id: "pdf-a4-proof".to_string(),
             adapter: "pdf".to_string(),
         }));
+        config
+            .audit_store()
+            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
+            .expect("pending proof should persist");
+        config
+            .audit_store()
+            .approve_proof(ProofReviewRequest {
+                proof_job_id: "JOB-20260415-PROOF".to_string(),
+                actor_user_id: "manager.user".to_string(),
+                actor_display_name: "Manager".to_string(),
+                decided_at: "2026-04-15T10:00:00Z".to_string(),
+                notes: Some("approved".to_string()),
+            })
+            .expect("proof should be approved");
 
         config
             .validate_request(&request)
             .expect("existing proof artifact should allow print");
+    }
+
+    #[test]
+    fn audit_store_search_returns_proof_entries_for_session() {
+        let temp_root = env::temp_dir().join("jan-label-audit-search");
+        let _ = fs::remove_dir_all(&temp_root);
+        let config = PrintBridgeConfig {
+            print_output_dir: temp_root.join("proofs"),
+            spool_output_dir: temp_root.join("spool"),
+            audit_log_dir: temp_root.join("audit"),
+            zint_binary_path: "zint".to_string(),
+            print_adapter: BridgePrintAdapter::Pdf,
+            windows_printer_name: "Default Printer".to_string(),
+            allow_print_without_proof: false,
+        };
+        let proof_path = config.proof_output_path("JOB-20260415-PROOF");
+        fs::create_dir_all(proof_path.parent().expect("proof path parent should exist"))
+            .expect("create proof dir");
+        fs::write(&proof_path, b"%PDF-1.4\nproof\n").expect("write proof");
+        let request = DispatchRequest {
+            job_id: "JOB-20260415-PROOF".to_string(),
+            sku: "SKU-0001".to_string(),
+            brand: "Acme".to_string(),
+            jan: "4006381333931".to_string(),
+            qty: 1,
+            template_version: Some("basic-50x30@v1".to_string()),
+            template: None,
+            printer_profile: Some(DispatchPrinterProfile {
+                id: "pdf-a4-proof".to_string(),
+                adapter: "pdf".to_string(),
+            }),
+            execution: Some(ExecutionIntent::Proof(print_agent::ProofExecution {
+                requested_by: Some("proof.user".to_string()),
+                notes: Some("review".to_string()),
+                expires_at: None,
+            })),
+            actor_user_id: "ops.user".to_string(),
+            actor_display_name: "Ops User".to_string(),
+            requested_at: "2026-04-15T09:00:00Z".to_string(),
+            job_lineage_id: None,
+            reprint_of_job_id: None,
+            reason: None,
+        };
+        let result = print_agent::PrintDispatchResult {
+            mode: "proof".to_string(),
+            template_version: "basic-50x30@v1".to_string(),
+            artifact: print_agent::PrintDispatchArtifactReport {
+                media_type: "application/pdf".to_string(),
+                byte_size: 128,
+            },
+            submission: print_agent::PrintDispatchSubmission {
+                adapter_kind: "pdf".to_string(),
+                external_job_id: proof_path.to_string_lossy().into_owned(),
+            },
+            audit: print_agent::PrintDispatchAudit {
+                event: print_agent::PrintDispatchAuditEvent::Submitted,
+                occurred_at: "2026-04-15T09:00:00Z".to_string(),
+                job_id: "JOB-20260415-PROOF".to_string(),
+                job_lineage_id: "JOB-20260415-PROOF".to_string(),
+                parent_job_id: None,
+                reason: None,
+            },
+        };
+
+        config
+            .record_dispatch(&request, &result)
+            .expect("dispatch record should persist");
+        config
+            .register_pending_proof(&request, &proof_path)
+            .expect("proof record should persist");
+
+        let search = config
+            .audit_store()
+            .search(AuditQuery {
+                search_text: Some("JOB-20260415-PROOF".to_string()),
+                limit: Some(10),
+            })
+            .expect("search should work");
+
+        assert_eq!(search.entries.len(), 1);
+        assert!(search.entries[0].proof.is_some());
     }
 
     #[test]
@@ -914,5 +1149,19 @@ mod tests {
             reprint_of_job_id: None,
             reason: None,
         }
+    }
+
+    fn sample_pending_proof(job_id: &str, proof_path: &std::path::Path) -> ProofRecord {
+        ProofRecord::pending(
+            PrintJobId(job_id.to_string()),
+            PrintJobLineageId(job_id.to_string()),
+            audit_log::AuditActor {
+                user_id: "proof.user".to_string(),
+                display_name: "Proof User".to_string(),
+            },
+            "2026-04-15T09:00:00Z".to_string(),
+            proof_path.to_string_lossy().into_owned(),
+            Some("review".to_string()),
+        )
     }
 }

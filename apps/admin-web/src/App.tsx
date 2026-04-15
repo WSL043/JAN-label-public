@@ -15,10 +15,14 @@ import { toDispatchRequest } from "@label/job-schema";
 import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import type { ChangeEvent, FormEvent } from "react";
 import {
+  type AuditSearchEntry,
   type PrintBridgeStatus,
+  approveProof,
   dispatchPrintJob,
   fetchPrintBridgeStatus,
   isTauriConnected,
+  rejectProof,
+  searchAuditLog,
 } from "./tauriClient";
 
 const corePillars = [
@@ -34,7 +38,12 @@ const operatorNotes = [
 ];
 
 const templateOptions: Array<LabelTemplateRef & { label: string; size: string }> = [
-  { id: "basic-50x30", version: "v1", label: "Basic 50 x 30", size: "50mm x 30mm" },
+  {
+    id: "basic-50x30",
+    version: "v1",
+    label: "Basic 50 x 30",
+    size: "50mm x 30mm",
+  },
 ];
 
 const printerProfiles: Array<PrinterProfile & { label: string }> = [
@@ -110,6 +119,18 @@ type BridgeStatusState = {
   status: PrintBridgeStatus | null;
   message: string;
 };
+type AuditSearchPhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type AuditSearchState = {
+  phase: AuditSearchPhase;
+  entries: AuditSearchEntry[];
+  message: string;
+  lastUpdatedAt: string | null;
+};
+type ProofReviewAction = "approve" | "reject" | null;
+type ProofReviewState = SubmitState & {
+  proofJobId: string | null;
+  action: ProofReviewAction;
+};
 
 type FormState = {
   parentSku: string;
@@ -166,7 +187,12 @@ type FormErrorKey =
 type FormErrors = Partial<Record<FormErrorKey, string>>;
 type FieldKey = "parentSku" | "sku" | "jan" | "qty" | "brand";
 type TemplateSpec = Record<string, unknown>;
-type DataSource = { fileName: string; source: "csv" | "xlsx"; headers: string[]; rows: string[][] };
+type DataSource = {
+  fileName: string;
+  source: "csv" | "xlsx";
+  headers: string[];
+  rows: string[][];
+};
 type DataRow = Record<string, string>;
 type ColumnMapping = Record<FieldKey, string>;
 type PreparedRow = {
@@ -197,8 +223,20 @@ const defaultTemplateSpec: TemplateSpec = {
   description: "Editable template spec used by the operator-facing draft builder.",
   page: { width_mm: 50, height_mm: 30, background_fill: "#ffffff" },
   fields: [
-    { name: "job", x_mm: 2, y_mm: 5, font_size_mm: 3, template: "job:{job_id}" },
-    { name: "brand", x_mm: 2, y_mm: 10, font_size_mm: 4, template: "brand:{brand}" },
+    {
+      name: "job",
+      x_mm: 2,
+      y_mm: 5,
+      font_size_mm: 3,
+      template: "job:{job_id}",
+    },
+    {
+      name: "brand",
+      x_mm: 2,
+      y_mm: 10,
+      font_size_mm: 4,
+      template: "brand:{brand}",
+    },
     { name: "sku", x_mm: 2, y_mm: 15, font_size_mm: 4, template: "sku:{sku}" },
     { name: "jan", x_mm: 2, y_mm: 20, font_size_mm: 4, template: "jan:{jan}" },
     { name: "qty", x_mm: 2, y_mm: 25, font_size_mm: 4, template: "qty:{qty}" },
@@ -399,7 +437,10 @@ function parseTemplateAsset(rawText: string):
   }
 
   if (!isPlainObject(parsed)) {
-    return { ok: false, error: "Template import failed: expected a JSON object." };
+    return {
+      ok: false,
+      error: "Template import failed: expected a JSON object.",
+    };
   }
 
   const candidate = parsed;
@@ -507,7 +548,11 @@ function resolveEnabledSourceValue(row: DataRow): {
   }
 
   if (raw.toLowerCase() === "false") {
-    return { enabled: false, invalid: false, reason: "Row disabled by enabled column." };
+    return {
+      enabled: false,
+      invalid: false,
+      reason: "Row disabled by enabled column.",
+    };
   }
 
   return {
@@ -565,7 +610,10 @@ function resolveTemplateFromSourceValue(
     if (fallback) {
       return { template: fallback, reason: null };
     }
-    return { template: null, reason: "Template is missing and no fallback is selected." };
+    return {
+      template: null,
+      reason: "Template is missing and no fallback is selected.",
+    };
   }
 
   const at = value.lastIndexOf("@");
@@ -603,7 +651,10 @@ function resolvePrinterFromSourceValue(
     if (fallback) {
       return { printer: fallback, reason: null };
     }
-    return { printer: null, reason: "Printer profile is missing and no fallback is selected." };
+    return {
+      printer: null,
+      reason: "Printer profile is missing and no fallback is selected.",
+    };
   }
   const exact = printers.find((option) => option.id === value);
   if (exact) {
@@ -615,7 +666,10 @@ function resolvePrinterFromSourceValue(
   };
 }
 
-function parseTemplateSpec(raw: string): { spec: TemplateSpec | null; error: string | null } {
+function parseTemplateSpec(raw: string): {
+  spec: TemplateSpec | null;
+  error: string | null;
+} {
   try {
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
@@ -623,7 +677,10 @@ function parseTemplateSpec(raw: string): { spec: TemplateSpec | null; error: str
     }
     return { spec: parsed as TemplateSpec, error: null };
   } catch {
-    return { spec: null, error: "Invalid JSON. Please fix syntax before continuing." };
+    return {
+      spec: null,
+      error: "Invalid JSON. Please fix syntax before continuing.",
+    };
   }
 }
 
@@ -785,6 +842,32 @@ function formatSavedAt(value: string | null): string {
   return parsed.toLocaleString();
 }
 
+function toDateTimeLocalInput(value: string | null | undefined): string {
+  if (!value) {
+    return "";
+  }
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) {
+    return "";
+  }
+  const offset = parsed.getTimezoneOffset() * 60_000;
+  return new Date(parsed.getTime() - offset).toISOString().slice(0, 16);
+}
+
+function proofStatusClass(status: string | null | undefined): string {
+  switch (status) {
+    case "approved":
+      return "status-ok";
+    case "pending":
+      return "status-pending";
+    case "rejected":
+    case "superseded":
+      return "status-fail";
+    default:
+      return "";
+  }
+}
+
 function normalizeColumnMapping(raw: unknown): ColumnMapping {
   const empty: ColumnMapping = {
     parentSku: "",
@@ -901,7 +984,12 @@ function restoreSourceFromStorage(): {
   if (!stored) {
     return {
       source: null,
-      status: { savedAt: null, status: "none", message: null, rowsTruncated: false },
+      status: {
+        savedAt: null,
+        status: "none",
+        message: null,
+        rowsTruncated: false,
+      },
     };
   }
 
@@ -1043,7 +1131,9 @@ function parseUploadedData(file: File): Promise<DataSource> {
       reader.onload = async () => {
         try {
           const xlsx = await import("xlsx");
-          const workbook = xlsx.read(reader.result as ArrayBuffer, { type: "array" });
+          const workbook = xlsx.read(reader.result as ArrayBuffer, {
+            type: "array",
+          });
           const firstSheet = workbook.SheetNames[0];
           if (!firstSheet) {
             reject(new Error("Spreadsheet does not contain a sheet."));
@@ -1060,7 +1150,10 @@ function parseUploadedData(file: File): Promise<DataSource> {
           for (let rowIndex = range.s.r; rowIndex <= range.e.r; rowIndex += 1) {
             const row: string[] = [];
             for (let columnIndex = range.s.c; columnIndex <= range.e.c; columnIndex += 1) {
-              const cellAddress = xlsx.utils.encode_cell({ r: rowIndex, c: columnIndex });
+              const cellAddress = xlsx.utils.encode_cell({
+                r: rowIndex,
+                c: columnIndex,
+              });
               row.push(spreadsheetCellToString(sheet[cellAddress]));
             }
             table.push(row);
@@ -1532,6 +1625,20 @@ export function App() {
     status: null,
     message: "Checking desktop bridge availability...",
   });
+  const [auditQuery, setAuditQuery] = useState("");
+  const [auditSearch, setAuditSearch] = useState<AuditSearchState>({
+    phase: "idle",
+    entries: [],
+    message: "Audit ledger has not been loaded yet.",
+    lastUpdatedAt: null,
+  });
+  const [proofReviewNotes, setProofReviewNotes] = useState("");
+  const [proofReview, setProofReview] = useState<ProofReviewState>({
+    phase: "idle",
+    message: "",
+    proofJobId: null,
+    action: null,
+  });
 
   const [templateSource, setTemplateSource] = useState(initialTemplateState.templateSource);
   const [templateParseError, setTemplateParseError] = useState<string | null>(null);
@@ -1677,6 +1784,19 @@ export function App() {
           ? "Submit is blocked due to high-risk bridge warnings. Resolve warnings before dispatch."
           : null
     : null;
+  const reviewActorId = form.executionApprovedBy.trim() || form.actor.trim() || "ops.user";
+  const approvedProofEntries = useMemo(() => {
+    const deduped = new Map<string, AuditSearchEntry>();
+    for (const entry of auditSearch.entries) {
+      if (entry.proof?.status !== "approved") {
+        continue;
+      }
+      deduped.set(entry.proof.proofJobId, entry);
+    }
+    return Array.from(deduped.values()).sort((left, right) =>
+      right.dispatch.audit.occurredAt.localeCompare(left.dispatch.audit.occurredAt),
+    );
+  }, [auditSearch.entries]);
 
   const templateValidation = validateTemplateSource(templateSource);
 
@@ -1821,6 +1941,45 @@ export function App() {
     );
   }
 
+  const refreshAuditSearch = useEffectEvent(async (searchText?: string) => {
+    if (!isTauriConnected()) {
+      setAuditSearch({
+        phase: "unavailable",
+        entries: [],
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        lastUpdatedAt: null,
+      });
+      return;
+    }
+
+    setAuditSearch((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Loading proof inbox and audit ledger...",
+    }));
+
+    try {
+      const result = await searchAuditLog({
+        searchText: searchText?.trim() || auditQuery.trim() || undefined,
+        limit: 40,
+      });
+      setAuditSearch({
+        phase: "ready",
+        entries: result.entries,
+        message: `Loaded ${result.entries.length} audit entr${result.entries.length === 1 ? "y" : "ies"}.`,
+        lastUpdatedAt: new Date().toISOString(),
+      });
+    } catch (error) {
+      setAuditSearch({
+        phase: "error",
+        entries: [],
+        message: `Audit search failed: ${formatErrorMessage(error)}`,
+        lastUpdatedAt: null,
+      });
+    }
+  });
+
   const refreshBridgeStatus = useEffectEvent(async () => {
     if (!isTauriConnected()) {
       setBridgeStatus({
@@ -1828,6 +1987,13 @@ export function App() {
         status: null,
         message:
           "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+      });
+      setAuditSearch({
+        phase: "unavailable",
+        entries: [],
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell.",
+        lastUpdatedAt: null,
       });
       return;
     }
@@ -1845,6 +2011,7 @@ export function App() {
         status,
         message: `Bridge ready. Active adapter: ${status.printAdapterKind}`,
       });
+      void refreshAuditSearch();
     } catch (error) {
       setBridgeStatus({
         phase: "error",
@@ -1868,6 +2035,71 @@ export function App() {
     const request = toDispatchRequestWithActor(draft, options);
     return dispatchPrintJob(request);
   }
+
+  function applyApprovedProofToForm(entry: AuditSearchEntry) {
+    const proof = entry.proof;
+    if (proof?.status !== "approved") {
+      return;
+    }
+    setForm((current) => ({
+      ...current,
+      executionMode: "print",
+      executionApprovedBy:
+        proof.decision?.actor.displayName ||
+        current.executionApprovedBy ||
+        current.actor ||
+        "ops.user",
+      executionApprovedAt:
+        toDateTimeLocalInput(proof.decision?.occurredAt) || current.executionApprovedAt,
+      executionSourceProofJobId: proof.proofJobId,
+      executionAllowWithoutProof: false,
+    }));
+  }
+
+  const submitProofReview = useEffectEvent(
+    async (entry: AuditSearchEntry, action: "approve" | "reject") => {
+      if (!entry.proof) {
+        return;
+      }
+
+      setProofReview({
+        phase: "submitting",
+        message: `${action === "approve" ? "Approving" : "Rejecting"} ${entry.proof.proofJobId}...`,
+        proofJobId: entry.proof.proofJobId,
+        action,
+      });
+
+      const request = {
+        proofJobId: entry.proof.proofJobId,
+        actorUserId: reviewActorId,
+        actorDisplayName: reviewActorId,
+        decidedAt: new Date().toISOString(),
+        notes: proofReviewNotes.trim() || undefined,
+      };
+
+      try {
+        const proof =
+          action === "approve" ? await approveProof(request) : await rejectProof(request);
+        setProofReview({
+          phase: "success",
+          message: `Proof ${proof.proofJobId} marked ${proof.status}.`,
+          proofJobId: proof.proofJobId,
+          action,
+        });
+        if (proof.status === "approved") {
+          applyApprovedProofToForm({ dispatch: entry.dispatch, proof });
+        }
+        void refreshAuditSearch();
+      } catch (error) {
+        setProofReview({
+          phase: "error",
+          message: `Proof review failed: ${formatErrorMessage(error)}`,
+          proofJobId: entry.proof.proofJobId,
+          action,
+        });
+      }
+    },
+  );
 
   async function submitManualDraft() {
     setShowErrors(true);
@@ -1901,6 +2133,7 @@ export function App() {
       });
       setDraftSnapshot(draft);
       setSession(createSession());
+      void refreshAuditSearch();
     } catch (error) {
       setManualSubmit({
         phase: "error",
@@ -2020,6 +2253,7 @@ export function App() {
         message: `Batch submit partially failed (${results.length}/${rows.length} succeeded): ${failures[0]}`,
         results,
       });
+      void refreshAuditSearch();
       return;
     }
     setBatchSubmit({
@@ -2028,6 +2262,7 @@ export function App() {
       results,
     });
     setSession(createSession());
+    void refreshAuditSearch();
   }
 
   function resetDataSource() {
@@ -2079,7 +2314,12 @@ export function App() {
     removeStorageItem(STORAGE_KEYS.source);
     setTemplatePersistedState({ savedAt: null, status: "none", message: null });
     setMappingPersistedState({ savedAt: null, status: "none", message: null });
-    setSourcePersistedState({ savedAt: null, status: "none", message: null, rowsTruncated: false });
+    setSourcePersistedState({
+      savedAt: null,
+      status: "none",
+      message: null,
+      rowsTruncated: false,
+    });
     setRestoreStateNotice(null);
   }
 
@@ -2556,6 +2796,26 @@ export function App() {
                   {visibleErrors.executionSourceProofJobId ? (
                     <small className="error-text">{visibleErrors.executionSourceProofJobId}</small>
                   ) : null}
+                  {approvedProofEntries.length > 0 ? (
+                    <div className="proof-picker">
+                      <small className="hint-text">
+                        Approved proofs from the local audit ledger can be pinned into print
+                        execution.
+                      </small>
+                      <div className="job-actions">
+                        {approvedProofEntries.slice(0, 4).map((entry) => (
+                          <button
+                            key={entry.dispatch.audit.jobId}
+                            className="button-secondary proof-chip"
+                            type="button"
+                            onClick={() => applyApprovedProofToForm(entry)}
+                          >
+                            {entry.proof?.proofJobId}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </label>
                 <label className="field">
                   <span>Allow without proof</span>
@@ -2899,6 +3159,172 @@ export function App() {
           ) : null}
         </section>
       ) : null}
+
+      <section className="panel">
+        <div className="section-heading">
+          <h2>Proof inbox / audit search</h2>
+          <p>
+            Review pending proofs, pin approved proof IDs into print execution, and inspect recent
+            dispatch history from the desktop ledger.
+          </p>
+        </div>
+        <div className="form-grid">
+          <label className="field field-wide">
+            <span>Search ledger</span>
+            <input
+              value={auditQuery}
+              onChange={(event) => setAuditQuery(event.target.value)}
+              placeholder="job id, lineage, actor, template, adapter"
+            />
+          </label>
+          <label className="field field-wide">
+            <span>Review note</span>
+            <textarea
+              className="batch-text"
+              rows={3}
+              value={proofReviewNotes}
+              onChange={(event) => setProofReviewNotes(event.target.value)}
+              placeholder="Optional approval or rejection note for the proof ledger."
+            />
+          </label>
+        </div>
+        <div className="toolbar">
+          <button
+            className="button-secondary"
+            type="button"
+            onClick={() => {
+              void refreshAuditSearch(auditQuery);
+            }}
+          >
+            Refresh proof inbox
+          </button>
+          <button
+            className="button-secondary"
+            type="button"
+            onClick={() => {
+              setAuditQuery("");
+              void refreshAuditSearch("");
+            }}
+          >
+            Clear search
+          </button>
+        </div>
+        <p className="data-summary">
+          {auditSearch.message}
+          {auditSearch.lastUpdatedAt
+            ? ` Last updated: ${formatSavedAt(auditSearch.lastUpdatedAt)}.`
+            : ""}
+        </p>
+        {proofReview.phase === "submitting" ? (
+          <p className="notice-text">{proofReview.message}</p>
+        ) : null}
+        {proofReview.phase === "error" ? (
+          <p className="status-fail">{proofReview.message}</p>
+        ) : null}
+        {proofReview.phase === "success" ? (
+          <p className="status-ok">{proofReview.message}</p>
+        ) : null}
+        {auditSearch.phase === "error" ? (
+          <p className="status-fail">{auditSearch.message}</p>
+        ) : null}
+        {auditSearch.entries.length > 0 ? (
+          <div className="data-grid">
+            <div className="data-grid-header">
+              <strong>Recent dispatches</strong>
+              <span>{auditSearch.entries.length} entries</span>
+            </div>
+            <table>
+              <thead>
+                <tr>
+                  <th>Occurred</th>
+                  <th>Job</th>
+                  <th>Mode</th>
+                  <th>Actor</th>
+                  <th>Proof</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {auditSearch.entries.map((entry) => (
+                  <tr key={entry.dispatch.audit.jobId}>
+                    <td>{formatSavedAt(entry.dispatch.audit.occurredAt)}</td>
+                    <td>
+                      <strong>{entry.dispatch.audit.jobId}</strong>
+                      <br />
+                      <small>{entry.dispatch.templateVersion}</small>
+                    </td>
+                    <td>
+                      <span
+                        className={`status-pill ${entry.dispatch.mode === "print" ? "print" : "proof"}`}
+                      >
+                        {entry.dispatch.mode}
+                      </span>
+                    </td>
+                    <td>
+                      {entry.dispatch.audit.actor.displayName}
+                      <br />
+                      <small>{entry.dispatch.audit.actor.userId}</small>
+                    </td>
+                    <td className={proofStatusClass(entry.proof?.status)}>
+                      {entry.proof ? (
+                        <>
+                          <strong>{entry.proof.status}</strong>
+                          <br />
+                          <small>{entry.proof.proofJobId}</small>
+                        </>
+                      ) : (
+                        <span>not a proof record</span>
+                      )}
+                    </td>
+                    <td>
+                      <div className="audit-actions">
+                        {entry.proof?.status === "pending" ? (
+                          <>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              disabled={proofReview.phase === "submitting"}
+                              onClick={() => {
+                                void submitProofReview(entry, "approve");
+                              }}
+                            >
+                              Approve
+                            </button>
+                            <button
+                              className="button-secondary"
+                              type="button"
+                              disabled={proofReview.phase === "submitting"}
+                              onClick={() => {
+                                void submitProofReview(entry, "reject");
+                              }}
+                            >
+                              Reject
+                            </button>
+                          </>
+                        ) : null}
+                        {entry.proof?.status === "approved" ? (
+                          <button
+                            className="button-secondary"
+                            type="button"
+                            onClick={() => applyApprovedProofToForm(entry)}
+                          >
+                            Use for print
+                          </button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : (
+          <div className="empty-state">
+            <strong>No audit entries</strong>
+            <p>Submit a proof job from desktop shell or refresh the search after bridge startup.</p>
+          </div>
+        )}
+      </section>
 
       <section className="grid">
         <article className="card">

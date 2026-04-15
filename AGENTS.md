@@ -32,6 +32,7 @@ pnpm typecheck
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace
+cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
 ```
 
 ## 4. 作業ルール
@@ -44,8 +45,10 @@ cargo test --workspace
 - `apps/admin-web` の submit 経路を触った場合は `packages/job-schema` と `apps/desktop-shell` の bridge を同時確認する
 - `packages/job-schema` の dispatch 契約を触った場合は `apps/admin-web` と `apps/desktop-shell` の request / warning / retry を同時確認する
 - `allowWithoutProof` / `sourceProofJobId` を触った場合は desktop-shell 側ポリシーと proof artifact 実在確認を同時確認する
+- `crates/audit-log` または `apps/desktop-shell` の proof / audit 経路を触った場合は `docs/print-pipeline.md`、`docs/known-issues.md`、`docs/handoff/current-state.md` を同時更新する
 - `packages/templates` を触った場合は `crates/render`、`scripts/validate-fixtures.mjs`、関連 docs を同時更新する
 - `apps/admin-web` または `apps/desktop-shell` の実行接続を触った場合は `pnpm --filter @label/admin-web build` と `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml` を確認する
+- desktop-shell 実運用前は `JAN_LABEL_AUDIT_LOG_DIR` を含む bridge / audit 出力先を確認する
 
 ## 5. 今の主戦場
 

@@ -784,10 +784,7 @@ mod tests {
             .dispatch(request)
             .expect_err("omitted execution should still enforce print gate");
 
-        assert_eq!(
-            err,
-            "execution.approvedBy is required for print execution"
-        );
+        assert_eq!(err, "execution.approvedBy is required for print execution");
     }
 
     #[test]

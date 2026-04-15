@@ -7,11 +7,13 @@
    `admin-web` は 12 桁と 13 桁の JAN を受け取り、最終正規化と検証は Rust 側へ委譲する
 3. CSV / XLSX は厳格 alias match で列マッピングされ、業務ヘッダ揺れ、`enabled=true/false`、行ごとの `template` / `printer_profile` 上書きを扱う
 4. snapshot を作り、proof route / live route を明示した payload preview を確認する
-5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認を行う
-6. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
+5. `desktop-shell` 上では Tauri invoke で `dispatch_print_job` を呼び、manual draft / queuedRows の submit 結果と bridge status を受け取れる。job ごとの `printerProfile` を優先し、print 時は source proof PDF 実在確認と approved proof ledger 照合を行う
+6. `desktop-shell` は local audit store に `dispatch-ledger.json` と `proof-ledger.json` を保持し、proof status を `pending / approved / rejected / superseded` で管理する
+7. `admin-web` は proof inbox / audit search から pending proof の approve / reject と、approved proof の `sourceProofJobId` 反映を行える
+8. `print-agent` / `render` / `printer-adapters` / `audit-log` は crate 単位で個別テストされている
 
 現時点で submit は `desktop-shell` 経由なら接続済みです。  
-一方で browser 単体は preview-only のままで、proof 承認、audit-log 永続化、bridge warning の構造化は未完成です。
+一方で browser 単体は preview-only のままで、proof と print 対象の厳密整合、audit ledger の長期運用、bridge warning の構造化は未完成です。
 
 ## 2. 接続後の目標フロー
 
@@ -63,15 +65,17 @@ audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 - `admin-web` は review queue と snapshot を持つ
 - PDF proof route は UI 上で明示される
 - `admin-web` と `print-agent` は `sourceProofJobId` / `allowWithoutProof` の gate を共有する
-- `desktop-shell` は print 時に source proof PDF の実在を確認し、`allowWithoutProof` は proof 承認ワークフロー実装まで拒否する
+- `desktop-shell` は proof dispatch 成功時に pending proof を ledger 登録し、print 時は source proof PDF の実在と approved proof ledger 記録を確認する
+- `admin-web` は proof inbox から pending proof の approve / reject、approved proof の print form 反映を行える
+- `allowWithoutProof` は proof 承認ワークフロー完了まで拒否する
 - まだ未実装のもの:
-  - proof ファイル保存
-  - 承認メモ
-  - 承認なし本印刷のブロック
-  - 却下 / 再作成の状態遷移
+  - print 対象と approved proof の lineage / template / 対象整合の強制
+  - 承認履歴の多段保持
+  - legacy proof PDF の ledger 移行
+  - 却下 / 再作成専用 UI と再印刷 UI
 
-そのため現在の運用前提は「proof 先行の UI を用意した段階」であり、  
-正式な承認付き印刷フローは次段で実装する。
+そのため現在の運用前提は「proof 承認の最小導線まで接続済み」だが、  
+本番向けの厳密照合と長期監査運用は次段で仕上げる。
 
 ## 6. ゴールデンテスト
 
@@ -95,8 +99,14 @@ audit.record(job_id, lineage_id, parent_job_id, actor, reason, timestamp)
 ## 8. 監査ログの現状
 
 - `print-agent` は lineage / parent job / reason を含む event record を生成できる
-- ただし保存先、検索 API、再印刷 UI は未接続
-- したがって監査モデルは実装済みだが、監査運用はまだ完成していない
+- `desktop-shell` は local JSON ledger として `dispatch-ledger.json` / `proof-ledger.json` を保持する
+- `search_audit_log` は `searchText` / `limit` で recent dispatch と proof 状態を返す
+- `admin-web` は proof inbox / audit search UI で local ledger を検索できる
+- 未実装:
+  - 再印刷 UI
+  - ledger のローテーション / バックアップ
+  - multi-host / shared storage 前提の同期
+  - approved proof と print 対象の厳密整合追跡
 
 ## 9. 将来の adapter 拡張原則
 

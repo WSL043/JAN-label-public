@@ -67,14 +67,32 @@
 - 影響: `xlsx` は lazy-load 化済みだが、Excel import を含む chunk 自体は依然として大きい。
 - 対策: spreadsheet 導線を維持したまま、将来リリースでは worker 化や更なる chunk 分割を検討する。現状は main chunk warning は解消済み。
 
-## K-012 proof 承認の実体は filesystem ベース
+## K-012 proof 承認は local filesystem ledger 前提
 
 - 状態: open
-- 影響: `sourceProofJobId` は desktop-shell で proof PDF の実在確認まで行うが、承認メモ、却下状態、失効、再作成履歴はまだ永続化されていない。
-- 対策: `T-027` / `T-028` で proof 承認メタデータと監査永続化を導入し、`sourceProofJobId` を audit-log と結びつける。
+- 影響: `sourceProofJobId` は desktop-shell で proof PDF 実在と approved ledger 記録まで確認するが、承認履歴の多段保持、legacy proof 移行、shared storage 前提の同期は未完成。
+- 対策: `T-027b` / `T-027c` / `T-028c` で proof UI、厳密整合、legacy proof seed を追加し、必要なら ledger 方式を再評価する。
 
 ## K-013 XLSX の数値セル JAN は text 前提
 
 - 状態: open
 - 影響: Excel 側で JAN を数値セルとして保存すると、先頭ゼロ喪失や表示形式依存の崩れを招きうる。現状の admin-web は digits-only で弾くが、誤った 12/13 桁として見えてしまう値までは区別できない。
 - 対策: `T-026e` で XLSX の型付きセル情報を保持し、JAN 列の数値セルを reject するか text 前提で明示警告する。
+
+## K-014 local audit ledger の運用限界
+
+- 状態: open
+- 影響: `dispatch-ledger.json` / `proof-ledger.json` は desktop-shell ローカル JSON で、長期運用時のローテーション、バックアップ、肥大化対策、shared storage 運用が未整備。
+- 対策: `T-028` と `T-029` で rotation / backup / archive 手順を定義し、必要なら storage backend を抽象化する。
+
+## K-015 ledger 導入前 proof は seed しないと本印刷できない
+
+- 状態: open
+- 影響: ledger 導入前に生成した proof PDF は承認レコードを持たないため、現仕様では `sourceProofJobId` に指定しても本印刷できない。
+- 対策: `T-028c` で legacy proof seed / migration 手順を追加し、運用移行時の差分を埋める。
+
+## K-016 approved proof と print 対象の厳密照合が未完成
+
+- 状態: open
+- 影響: 現状の print gate は approved proof の存在確認が中心で、lineage / template / 対象一致まで強制していないため、別案件 proof の流用余地が残る。
+- 対策: `T-027c` で print request と approved proof の結合条件を強化し、proof 由来の対象一致を必須化する。

@@ -223,6 +223,11 @@ button {
   margin: 0;
 }
 
+.proof-picker {
+  display: grid;
+  gap: 8px;
+}
+
 .toolbar {
   display: flex;
   gap: 12px;
@@ -447,6 +452,16 @@ button:disabled {
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.proof-chip {
+  padding: 8px 12px;
+}
+
+.audit-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
 }
 
 .card {

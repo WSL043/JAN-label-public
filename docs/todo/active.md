@@ -45,8 +45,13 @@
 | T-026d | `-` | P1 | pending | Codex + Sub-Agent | bridge warning を構造化する | warning が `code` / `severity` / `message` を持ち、UI 側の block 条件を文字列依存から外せる |
 | T-026e | `-` | P1 | pending | Codex + Sub-Agent | XLSX の型付き JAN 取り込みを厳格化する | 数値セルの JAN を text 前提で reject または型付きに扱い、先頭ゼロ喪失や表示形式崩れを運用前に検知できる |
 | T-027 | `-` | P1 | in_progress | Codex + Sub-Agent | proof 承認ワークフローを実装 | pdf 保存・承認メモ・却下/再作成・承認なし本印刷のブロックを実装 |
-| T-027a | `-` | P1 | pending | Codex + Sub-Agent | proof route を PDF 専用として固定する | proof-only で非 PDF adapter を拒否し、proof submit 結果を UI で確認できる |
-| T-028 | `-` | P1 | pending | Codex + Sub-Agent | 監査ログの永続化と検索 UI を実装 | 検索・再印刷履歴・理由付き再印刷を監査可能にする |
+| T-027a | `-` | P1 | done | Codex + Sub-Agent | proof ledger と承認 API を desktop-shell に追加する | local JSON ledger、`approve_proof` / `reject_proof` / `search_audit_log`、proof status 遷移が desktop-shell で動作する |
+| T-027b | `-` | P1 | in_progress | Codex + Sub-Agent | admin-web に proof inbox / approval UI を接続する | pending proof の approve / reject、approved proof の `sourceProofJobId` 反映、review note 入力が UI で完結する |
+| T-027c | `-` | P1 | pending | Codex + Sub-Agent | print 対象と approved proof の整合検証を追加する | `sourceProofJobId` が proof PDF 実在 + 承認済み だけでなく lineage / template / 対象整合まで満たさないと print できない |
+| T-028 | `-` | P1 | in_progress | Codex + Sub-Agent | 監査ログの永続化と検索 UI を実装 | 検索・再印刷履歴・理由付き再印刷を監査可能にする |
+| T-028a | `-` | P1 | done | Codex + Sub-Agent | dispatch / proof を local JSON ledger に永続化する | `dispatch-ledger.json` と `proof-ledger.json` に dispatch / proof 状態を保存し、desktop-shell から検索できる |
+| T-028b | `-` | P1 | in_progress | Codex + Sub-Agent | admin-web に監査検索 UI を接続する | local audit search、proof status 表示、print 直前の proof pinning が UI でできる |
+| T-028c | `-` | P2 | pending | Codex + Sub-Agent | ledger 導入前 proof の移行と seed 手順を用意する | legacy proof PDF を ledger へ取り込み、承認レコード欠落で本印刷できない状態を解消できる |
 | T-032 | `-` | P1 | in_progress | Codex + Sub-Agent | ラベル製作コア（Bartender 基礎）を実装 | template schema / asset、版管理、データソース紐付け、要素配置を一貫仕様で扱える |
 | T-032a | `-` | P1 | pending | Codex + Sub-Agent | template schema v1 と template asset の drift 検知を固める | stale / invalid 判定、再読込手順、`enabled` と business alias の境界が固まる |
 | T-033 | `-` | P1 | pending | Codex + Sub-Agent | ラベルテンプレートのプレビュー / proof 設計を実装 | `render` 駆動で SVG/PDF 即時プレビューとジョブ前 proof を作成し、軽量テンプレート編集 UI を接続 |
