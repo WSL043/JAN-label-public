@@ -76,16 +76,18 @@ jobs:
             "$PR_BASE_REF" \
             "+refs/pull/$PR_NUMBER/head"
 
-      - name: Set up pnpm
-        if: steps.meta.outputs.skip != 'true'
-        uses: pnpm/action-setup@v4
-
       - name: Set up Node.js
         if: steps.meta.outputs.skip != 'true'
         uses: actions/setup-node@v5
         with:
           cache: pnpm
           node-version: lts/*
+
+      - name: Enable Corepack
+        if: steps.meta.outputs.skip != 'true'
+        run: |
+          corepack enable
+          corepack install
 
       - name: Install pnpm dependencies
         if: steps.meta.outputs.skip != 'true'

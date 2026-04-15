@@ -79,9 +79,8 @@
 - response: keep this as an operational recovery case for the PDF-only release and harden it in a follow-up audit transaction task
 
 ## K-027 GitHub Release workflow still depends on Node 20-targeted `pnpm/action-setup@v4`
-- status: watch
-- impact: `v0.1.2` released successfully, but GitHub Actions emitted deprecation warnings because the action is being forced onto Node 24 compatibility mode
-- response: upgrade or replace the action before the next workflow break turns the warning into a release blocker
+- status: resolved
+- resolution: CI, Release, and Codex CI autofix workflows now bootstrap pnpm through `actions/setup-node` plus Corepack, and `docs-guard` no longer depends on `dorny/paths-filter@v3`
 
 ## K-028 desktop shell reset is in place, but queue/audit tables are still basic
 - status: resolved

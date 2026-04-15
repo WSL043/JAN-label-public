@@ -71,6 +71,10 @@
   - `release:notes` drafts `docs/release/<version>.md`
   - `release:readiness` emits `artifacts/release-readiness.{json,md}`
   - `Release` workflow now uploads both artifacts during tagged release execution
+- Workflow hygiene now avoids Node 20-targeted helper actions in the main release path:
+  - CI and Release install pnpm through `actions/setup-node` plus Corepack
+  - `docs-guard` now evaluates changed files through native `git diff`
+  - Codex CI autofix uses the same Corepack-based pnpm bootstrap as the main CI jobs
 
 ## Release Boundary
 

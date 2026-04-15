@@ -19,11 +19,14 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           node-version: lts/*
           cache: pnpm
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack install
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
       - name: Generate release notes draft
@@ -64,11 +67,14 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: pnpm/action-setup@v4
       - uses: actions/setup-node@v5
         with:
           cache: pnpm
           node-version: lts/*
+      - name: Enable Corepack
+        run: |
+          corepack enable
+          corepack install
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
       - name: Generate release notes draft
