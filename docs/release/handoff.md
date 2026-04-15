@@ -5,11 +5,15 @@
 - `CI` green
 - `docs/todo/active.md` matches release scope
 - Local baseline is documented in `docs/known-issues.md` and operator playbook is updated for PDF-only release
+- Latest published release is `v0.2.0`
+- GitHub `Release` workflow run `24474516998` succeeded and published the Windows installer asset
 
 ### Current release basis
 
 - Printer matrix baseline tasks remain in `docs/printer-matrix/`.
 - `docs/printer-matrix` is monitored for future physical-print work; this milestone ships PDF proof/print path only.
+- Latest release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
+- Latest Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
 
 ## 2. Tag policy
 
@@ -23,6 +27,7 @@
 - `v0.1.1` used bugfix hardening for proof/print gating and catalog logic.
 - `v0.1.2` is the PDF-first patch release for local catalog parity, audit backup listing, and release-scope reclassification.
 - `v0.1.3` is the desktop-shell UI reset patch release for the operator console.
+- `v0.2.0` is the operator workstation release with audit restore and release artifact automation.
 
 ## 3. Preflight checks and tag workflow
 

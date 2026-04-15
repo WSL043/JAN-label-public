@@ -120,7 +120,7 @@ jobs:
         with:
           projectPath: apps/desktop-shell
           args: --ci --no-sign
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: jan-label-windows-bundle
           path: apps/desktop-shell/src-tauri/target/release/bundle/**

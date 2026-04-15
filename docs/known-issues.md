@@ -80,7 +80,7 @@
 
 ## K-027 GitHub Release workflow still depends on Node 20-targeted `pnpm/action-setup@v4`
 - status: resolved
-- resolution: CI, Release, and Codex CI autofix workflows now bootstrap pnpm through `actions/setup-node` plus Corepack, and `docs-guard` no longer depends on `dorny/paths-filter@v3`
+- resolution: CI, Release, and Codex CI autofix workflows now bootstrap pnpm through `actions/setup-node` plus Corepack, `docs-guard` no longer depends on `dorny/paths-filter@v3`, and artifact uploads now use `actions/upload-artifact@v7`
 
 ## K-028 desktop shell reset is in place, but queue/audit tables are still basic
 - status: resolved

@@ -56,7 +56,7 @@ jobs:
             exit 1
           fi
       - name: Upload release notes draft
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-notes-draft
           path: docs/release/${{ github.ref_name }}.md
@@ -84,7 +84,7 @@ jobs:
       - name: Generate release readiness report
         run: pnpm release:readiness --version $env:GITHUB_REF_NAME
       - name: Upload release readiness artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-readiness
           path: |
