@@ -78,9 +78,9 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public string ActiveDocumentName => "JOB-20260416-001";
 
-    public string ActiveDocumentMeta => $"{SelectedModule?.Title ?? "Operator Workstation"} | basic-50x30@v1";
+    public string ActiveDocumentMeta => $"{SelectedModule?.Label ?? "Operator Workstation"} | basic-50x30@v1";
 
-    public string WindowTitle => $"JAN Label Operator Console - {SelectedModule?.Title ?? "Workstation"}";
+    public string WindowTitle => $"JAN Label Operator Console - {SelectedModule?.Label ?? "Workstation"}";
 
     private void SeedStaticState()
     {
