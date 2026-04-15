@@ -93,3 +93,13 @@
 - status: open
 - impact: the shell is desktop-oriented now, but the template lane still mixes structured properties, JSON editing, and preview into a dense workbench that needs clearer sub-modes
 - response: split the template lane into clearer authoring sub-flows under `T-047`
+
+## K-030 queue can be cleared while batch submit is still running
+- status: open
+- impact: operator-visible queue state can be emptied while background dispatch is still progressing, which makes later success/failure state difficult to trust
+- response: lock queue mutation during submit and add explicit submit-session guards under `T-046`
+
+## K-031 staged review and live dispatch semantics are still ambiguous
+- status: open
+- impact: the desktop shell now shows the live payload by default, but the difference between a staged snapshot and the payload that will actually dispatch is not yet explicit enough for high-trust operator review
+- response: make staged-vs-live review intent explicit in the compose and template flows under `T-047`

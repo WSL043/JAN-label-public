@@ -2,10 +2,9 @@
 
 - Updated: 2026-04-15
 - Branch: `codex/release-bridge-proof-hardening`
-- Release base: `v0.1.2` (`881e92b`)
-- Release target: `v0.1.3`
+- Release base: `v0.1.3` (`0e22216`)
 - Active PR: `#25`
-- Branch relation to `origin/main` on 2026-04-15 after `v0.1.2`: `0 behind / 17 ahead`
+- Branch relation to `origin/main` on 2026-04-15 after `v0.1.3`: `0 behind / 19 ahead`
 
 ## Shipping Now
 
@@ -94,19 +93,18 @@ Operational note:
 
 ## Release Status
 
-- `v0.1.3` is the next PDF-only patch release target from this branch.
-- Tag is ready once version bump, validation, and release note commit are pushed.
-- `v0.1.2` was tagged and published on `2026-04-15`.
-- GitHub `Release` workflow run `24449920688` succeeded and published the Windows installer asset.
-- Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.1.2`
+- `v0.1.3` was tagged and published on `2026-04-15`.
+- GitHub `Release` workflow run `24451489938` succeeded and published the Windows installer asset.
+- Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.1.3`
+- Windows installer asset: `JAN-Label_0.1.3_windows_x64-setup.exe`
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
 
 ## Next Main Tasks
 
-1. `T-046`: desktop UX follow-up for queue/audit tables
-2. `T-047`: template authoring interaction hardening
+1. `T-046`: desktop UX follow-up for queue/audit tables and submit-state locking
+2. `T-047`: template authoring interaction hardening and staged/live review clarity
 3. `T-028f-restore`: audit backup restore flow
 4. `T-016`: release notes / packaging hardening
 
