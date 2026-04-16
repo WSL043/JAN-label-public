@@ -1,10 +1,10 @@
 # current-state
 
 - Updated: 2026-04-16
-- Branch: `codex/t041-classic-workstation-governance`
+- Branch: `main`
 - Release base: `v0.2.0` (`0b6827e`)
-- Active PR: `#33`
-- Branch relation to `origin/main` on 2026-04-16: `codex/t041-classic-workstation-governance` is ahead of `origin/main` with local template catalog governance diagnostics, repair guidance, single-writer operating rules, a Windows-first shell language pass, and the first native WPF workstation prototype under `apps/windows-shell`
+- Active PR: `none`
+- Branch relation to `origin/main` on 2026-04-16: `main` includes the merged `T-041` governance batch from PR `#33`, including local template catalog diagnostics, repair guidance, single-writer operating rules, and the initial native WPF workstation shell baseline under `apps/windows-shell`
 
 ## Shipping Now
 
@@ -138,7 +138,7 @@ Operational note:
   - `pnpm release:readiness --version v0.2.0`
 - This host currently cannot complete native-shell verification because `dotnet` is not available:
   - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
-- GitHub Actions has already passed the Windows desktop build/test path for PR `#31`, so local MSVC toolchain absence is no longer a release blocker as long as the remote Windows runner remains green.
+- GitHub Actions has already passed the Windows desktop and native-shell validation path for PR `#33`, so local MSVC and `.NET` toolchain absence is no longer a blocker as long as the remote Windows runners remain green.
 - Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
 - `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
 
@@ -150,7 +150,7 @@ Operational note:
 - Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
 - Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
 - The operator workstation redesign, audit restore flow, and release automation artifacts are now in the published baseline.
-- The current branch adds local template catalog governance diagnostics on top of the `v0.2.0` baseline.
+- PR `#33` was merged on `2026-04-16`, adding local template catalog governance diagnostics and the first native shell baseline on top of the `v0.2.0` release state.
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
