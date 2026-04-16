@@ -73,10 +73,9 @@
 - impact: release tasks beyond PDF proof/print could be mistaken as blockers
 - response: use a `PDF-only` lane for this milestone and gate release on printed proofs, lineage-gated approval, and local audit controls only
 
-## K-026 proof dispatch and pending-proof registration are not transactional
-- status: open
-- impact: if the process crashes between persisted proof dispatch and pending proof registration, manual ledger reconciliation may be required
-- response: keep this as an operational recovery case for the PDF-only release and harden it in a follow-up audit transaction task
+## K-026 proof dispatch and pending-proof registration were not transactional
+- status: resolved
+- resolution: proof dispatch now commits through `proof-dispatch-transaction.json`, stale markers auto-recover on the next locked audit access, and unreadable/corrupt markers are quarantined with an explicit manual-reconcile error instead of blocking every later audit operation
 
 ## K-027 GitHub Release workflow still depends on Node 20-targeted `pnpm/action-setup@v4`
 - status: resolved

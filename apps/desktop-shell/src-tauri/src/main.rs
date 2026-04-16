@@ -62,8 +62,7 @@ fn dispatch_print_job(request: DispatchRequest) -> Result<PrintDispatchResult, S
         };
         let agent = PrintAgent::new(adapter, barcode_engine).with_policy(config.agent_policy());
         let result = agent.dispatch(request)?;
-        config.record_dispatch(&request_for_audit, &result)?;
-        config.register_pending_proof(&request_for_audit, &proof_output_path)?;
+        config.record_proof_dispatch(&request_for_audit, &result, &proof_output_path)?;
         return Ok(result);
     }
 
@@ -898,6 +897,29 @@ impl PrintBridgeConfig {
         request: &DispatchRequest,
         result: &PrintDispatchResult,
     ) -> Result<(), String> {
+        let dispatch = self.build_dispatch_record(request, result)?;
+        self.audit_store().record_dispatch(dispatch)
+    }
+
+    fn record_proof_dispatch(
+        &self,
+        request: &DispatchRequest,
+        result: &PrintDispatchResult,
+        artifact_path: &Path,
+    ) -> Result<(), String> {
+        let dispatch = self.build_dispatch_record(request, result)?;
+        let proof = self
+            .build_pending_proof_record(request, artifact_path)
+            .ok_or_else(|| "proof dispatch requires proof execution metadata".to_string())?;
+        self.audit_store()
+            .record_proof_dispatch_transaction(dispatch, proof)
+    }
+
+    fn build_dispatch_record(
+        &self,
+        request: &DispatchRequest,
+        result: &PrintDispatchResult,
+    ) -> Result<PersistedDispatchRecord, String> {
         let reason = request
             .reason
             .as_deref()
@@ -905,7 +927,7 @@ impl PrintBridgeConfig {
             .filter(|value| !value.is_empty())
             .map(str::to_string)
             .or_else(|| result.audit.reason.clone());
-        self.audit_store().record_dispatch(PersistedDispatchRecord {
+        Ok(PersistedDispatchRecord {
             audit: audit_log::PrintAuditRecord {
                 job_id: PrintJobId(result.audit.job_id.clone()),
                 job_lineage_id: PrintJobLineageId(result.audit.job_lineage_id.clone()),
@@ -928,13 +950,13 @@ impl PrintBridgeConfig {
         })
     }
 
-    fn register_pending_proof(
+    fn build_pending_proof_record(
         &self,
         request: &DispatchRequest,
         artifact_path: &Path,
-    ) -> Result<(), String> {
-        let Some(ExecutionIntent::Proof(execution)) = request.execution.as_ref() else {
-            return Ok(());
+    ) -> Option<ProofRecord> {
+        let ExecutionIntent::Proof(execution) = request.execution.as_ref()? else {
+            return None;
         };
 
         let actor = AuditActor {
@@ -950,7 +972,7 @@ impl PrintBridgeConfig {
             .or_else(|| request.reprint_of_job_id.clone())
             .unwrap_or_else(|| request.job_id.clone());
 
-        self.audit_store().register_pending_proof(ProofRecord::pending(
+        Some(ProofRecord::pending(
             PrintJobId(request.job_id.clone()),
             PrintJobLineageId(job_lineage_id),
             actor,
@@ -2177,11 +2199,11 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
+        available_adapters_for_host, dispatch_print_job, export_audit_ledger,
+        list_audit_backup_bundles, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
-        sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
-        save_template_to_local_catalog, template_catalog_governance_command,
-        TemplateCatalogWritebackRequest, list_audit_backup_bundles,
+        sanitize_path_component, save_template_to_local_catalog, template_catalog_command,
+        template_catalog_governance_command, trim_audit_ledger, TemplateCatalogWritebackRequest,
         BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
         TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
@@ -2195,6 +2217,8 @@ mod tests {
         PrintJobLineageId,
     };
     use print_agent::{DispatchPrinterProfile, DispatchRequest, ExecutionIntent, PrintExecution};
+    #[cfg(unix)]
+    use std::os::unix::fs::PermissionsExt;
     use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -3116,15 +3140,12 @@ mod tests {
             scale_policy: "fixed-100".to_string(),
         }));
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3168,15 +3189,12 @@ mod tests {
             scale_policy: "fixed-100".to_string(),
         }));
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3215,15 +3233,12 @@ mod tests {
             allow_print_without_proof: false,
         };
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3268,15 +3283,12 @@ mod tests {
             allow_print_without_proof: false,
         };
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3321,15 +3333,12 @@ mod tests {
             allow_print_without_proof: false,
         };
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3375,15 +3384,12 @@ mod tests {
             allow_print_without_proof: false,
         };
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3429,15 +3435,12 @@ mod tests {
             allow_print_without_proof: false,
         };
         config
-            .record_dispatch(
+            .record_proof_dispatch(
                 &sample_proof_dispatch_request(),
                 &sample_proof_dispatch_result("JOB-20260415-PROOF"),
+                &proof_path,
             )
             .expect("proof dispatch record should persist");
-        config
-            .audit_store()
-            .register_pending_proof(sample_pending_proof("JOB-20260415-PROOF", &proof_path))
-            .expect("pending proof should persist");
         config
             .audit_store()
             .approve_proof(ProofReviewRequest {
@@ -3487,6 +3490,52 @@ mod tests {
             .expect_err("audit preflight should fail when audit root is a file");
 
         assert!(err.contains("failed to create audit lock directory"));
+    }
+
+    #[test]
+    fn dispatch_print_job_persists_proof_audit_records_atomically() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+            ENV_ZINT_BINARY_PATH,
+        ]);
+        let temp_root = env::temp_dir().join("jan-label-proof-dispatch-command");
+        let _ = fs::remove_dir_all(&temp_root);
+        fs::create_dir_all(&temp_root).expect("create temp root");
+
+        let proof_dir = temp_root.join("proofs");
+        let audit_log_dir = temp_root.join("audit");
+        env::set_var(ENV_PRINT_OUTPUT_DIR, &proof_dir);
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, temp_root.join("spool"));
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_ZINT_BINARY_PATH, create_fake_zint(&temp_root));
+
+        let result = dispatch_print_job(sample_proof_dispatch_request())
+            .expect("proof dispatch command should succeed with fake zint");
+
+        assert_eq!(result.mode, "proof");
+        assert_eq!(result.audit.job_id, "JOB-20260415-PROOF");
+        assert!(
+            Path::new(&result.submission.external_job_id).exists(),
+            "proof artifact should be created"
+        );
+
+        let snapshot = AuditStore::new(audit_log_dir.clone())
+            .snapshot()
+            .expect("audit snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 1);
+        assert_eq!(snapshot.proofs.len(), 1);
+        assert_eq!(snapshot.proofs[0].proof_job_id.0, "JOB-20260415-PROOF");
+        assert!(
+            !audit_log_dir.join("proof-dispatch-transaction.json").exists(),
+            "transaction marker should be cleared after dispatch"
+        );
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all("tmp");
+        let _ = fs::remove_dir_all(&temp_root);
     }
 
     #[test]
@@ -3555,11 +3604,8 @@ mod tests {
         };
 
         config
-            .record_dispatch(&request, &result)
+            .record_proof_dispatch(&request, &result, &proof_path)
             .expect("dispatch record should persist");
-        config
-            .register_pending_proof(&request, &proof_path)
-            .expect("proof record should persist");
 
         let search = config
             .audit_store()
@@ -3633,6 +3679,59 @@ mod tests {
         )
     }
 
+    fn create_fake_zint(root: &Path) -> PathBuf {
+        #[cfg(windows)]
+        let path = root.join("fake-zint.cmd");
+        #[cfg(not(windows))]
+        let path = root.join("fake-zint.sh");
+
+        #[cfg(windows)]
+        let script = r#"@echo off
+setlocal
+:args_loop
+if "%~1"=="" goto done
+if /I "%~1"=="--output" goto write_output
+shift
+goto args_loop
+:write_output
+shift
+if "%~1"=="" exit /b 1
+for %%I in ("%~1") do if not exist "%%~dpI" mkdir "%%~dpI" >nul 2>nul
+type nul > "%~1"
+shift
+goto args_loop
+:done
+exit /b 0
+"#;
+        #[cfg(not(windows))]
+        let script = r#"#!/bin/sh
+while [ "$#" -gt 0 ]; do
+  if [ "$1" = "--output" ]; then
+    shift
+    if [ -z "${1:-}" ]; then
+      exit 1
+    fi
+    mkdir -p "$(dirname "$1")"
+    : > "$1"
+  fi
+  shift
+done
+exit 0
+"#;
+
+        fs::write(&path, script).expect("fake zint script should write");
+        #[cfg(unix)]
+        {
+            let mut permissions = fs::metadata(&path)
+                .expect("fake zint metadata should load")
+                .permissions();
+            permissions.set_mode(0o755);
+            fs::set_permissions(&path, permissions)
+                .expect("fake zint permissions should be executable");
+        }
+        path
+    }
+
     fn backup_env_vars(keys: &[&str]) -> Vec<(String, Option<String>)> {
         keys.iter()
             .map(|key| ((*key).to_string(), env::var(key).ok()))
@@ -3671,20 +3770,6 @@ mod tests {
             reprint_of_job_id: None,
             reason: None,
         }
-    }
-
-    fn sample_pending_proof(job_id: &str, proof_path: &std::path::Path) -> ProofRecord {
-        ProofRecord::pending(
-            PrintJobId(job_id.to_string()),
-            PrintJobLineageId(job_id.to_string()),
-            audit_log::AuditActor {
-                user_id: "proof.user".to_string(),
-                display_name: "Proof User".to_string(),
-            },
-            "2026-04-15T09:00:00Z".to_string(),
-            proof_path.to_string_lossy().into_owned(),
-            Some("review".to_string()),
-        )
     }
 
     fn sample_proof_dispatch_request() -> DispatchRequest {

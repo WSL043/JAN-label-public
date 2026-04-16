@@ -39,6 +39,7 @@
   - `save_template_to_local_catalog`
   - `preview_template_draft`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
+  - proof dispatch audit persistence now uses a recovery marker with stale-marker replay and corrupt-marker quarantine
 - `apps/windows-shell`
   - WPF operator workstation baseline with native menu / ribbon / docking layout
   - `Fluent.Ribbon` shell chrome for real ribbon, backstage, and quick-access behavior instead of hand-built ribbon lookalikes
@@ -101,6 +102,11 @@
   - `desktop-shell` exposes `template_catalog_governance_command`
   - Catalog lane surfaces manifest status, overlay file health, effective default resolution, and orphaned local JSON warnings
   - operators now get explicit backup/restore guidance, manifest repair guidance, and single-writer operating rules before manual catalog repair
+- Proof audit persistence is now recovery-backed instead of split across two best-effort writes:
+  - `dispatch_print_job` commits proof dispatch and pending-proof state through `proof-dispatch-transaction.json`
+  - stale markers auto-replay on the next locked audit access
+  - corrupt markers are quarantined with an explicit reconcile error instead of wedging later audit operations
+  - `desktop-shell` now has command-level proof dispatch coverage with a fake Zint path
 - The workstation chrome is no longer targeting an AI desktop look:
   - top-level shell now uses a titlebar plus toolbar layout
   - lane navigation, tables, and inspector panels are styled closer to traditional Windows label software
@@ -185,7 +191,7 @@ Operational note:
 - Minimum additional gate beyond the current baseline:
   - `T-049` materially closer to backend parity, with package-backed native shell surfaces replacing obvious hand-built mock chrome
   - `T-042` template library operator UX moved out of ambiguous mock status
-  - `T-044` recovery story explicit enough for operator release
+  - audit recovery expectations stay aligned between code, docs, and release readiness artifacts
   - native-shell build / publish / installer checks green on GitHub Windows release runners
   - sub-agent review pass logged before tag / GitHub Release publication
 
@@ -193,9 +199,8 @@ Operational note:
 
 1. `T-049`: Windows-native workstation shell migration
 2. `T-042`: template library operator UX
-3. `T-044`: audit transaction hardening
-4. `T-045d`: cut `v0.3.0` Windows-native workstation release
-5. `T-012`: self-hosted runner / webhook operations
+3. `T-045d`: cut `v0.3.0` Windows-native workstation release
+4. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 

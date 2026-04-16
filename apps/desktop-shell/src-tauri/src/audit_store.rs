@@ -15,6 +15,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const DISPATCH_LEDGER_FILE: &str = "dispatch-ledger.json";
 const PROOF_LEDGER_FILE: &str = "proof-ledger.json";
+const PROOF_TRANSACTION_FILE: &str = "proof-dispatch-transaction.json";
 const STORE_LOCK_FILE: &str = "audit-store.lock";
 const BACKUP_DIR: &str = "backups";
 const MAX_AUDIT_RESULT_LIMIT: usize = 200;
@@ -39,6 +40,13 @@ pub struct AuditBackupRestoreResult {
     pub restored_dispatch_count: usize,
     pub restored_proof_count: usize,
     pub bundle: AuditArtifactInfo,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct ProofDispatchTransaction {
+    dispatch: PersistedDispatchRecord,
+    proof: ProofRecord,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,41 +84,32 @@ impl AuditStore {
     pub fn record_dispatch(&self, record: PersistedDispatchRecord) -> Result<(), String> {
         self.with_lock(|| {
             let mut records = self.load_dispatch_records()?;
-            records.push(record);
-            self.save_dispatch_records(&records)
+            if !records.contains(&record) {
+                records.push(record);
+                self.save_dispatch_records(&records)?;
+            }
+            Ok(())
         })
     }
 
     pub fn register_pending_proof(&self, record: ProofRecord) -> Result<(), String> {
         self.with_lock(|| {
             let mut records = self.load_proof_records()?;
-            for existing in records.iter_mut() {
-                if existing.job_lineage_id == record.job_lineage_id
-                    && existing.proof_job_id != record.proof_job_id
-                    && matches!(existing.status, ProofStatus::Pending | ProofStatus::Approved)
-                {
-                    existing.decide(
-                        ProofStatus::Superseded,
-                        record.requested_by.clone(),
-                        record.requested_at.clone(),
-                        Some(format!(
-                            "superseded by newer proof {}",
-                            record.proof_job_id.0
-                        )),
-                    );
-                }
-            }
-
-            if let Some(index) = records
-                .iter()
-                .position(|existing| existing.proof_job_id == record.proof_job_id)
-            {
-                records[index] = record;
-            } else {
-                records.push(record);
-            }
-
+            upsert_pending_proof_record(&mut records, record);
             self.save_proof_records(&records)
+        })
+    }
+
+    pub fn record_proof_dispatch_transaction(
+        &self,
+        dispatch: PersistedDispatchRecord,
+        proof: ProofRecord,
+    ) -> Result<(), String> {
+        self.with_lock(|| {
+            let transaction = ProofDispatchTransaction { dispatch, proof };
+            self.write_proof_dispatch_transaction(&transaction)?;
+            self.apply_proof_dispatch_transaction(&transaction)?;
+            self.clear_proof_dispatch_transaction()
         })
     }
 
@@ -177,36 +176,38 @@ impl AuditStore {
     }
 
     pub fn search(&self, query: AuditQuery) -> Result<AuditSearchResult, String> {
-        let mut dispatches = self.load_dispatch_records()?;
-        dispatches.sort_by(|left, right| right.audit.occurred_at.cmp(&left.audit.occurred_at));
-        let proofs = self.load_proof_records()?;
-        let search_text = query
-            .search_text
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(|value| value.to_ascii_lowercase());
-        let limit = query
-            .limit
-            .unwrap_or(DEFAULT_AUDIT_RESULT_LIMIT)
-            .min(MAX_AUDIT_RESULT_LIMIT);
+        self.with_lock(|| {
+            let mut dispatches = self.load_dispatch_records()?;
+            dispatches.sort_by(|left, right| right.audit.occurred_at.cmp(&left.audit.occurred_at));
+            let proofs = self.load_proof_records()?;
+            let search_text = query
+                .search_text
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(|value| value.to_ascii_lowercase());
+            let limit = query
+                .limit
+                .unwrap_or(DEFAULT_AUDIT_RESULT_LIMIT)
+                .min(MAX_AUDIT_RESULT_LIMIT);
 
-        let mut entries = Vec::new();
-        for dispatch in dispatches.into_iter() {
-            let proof = proofs
-                .iter()
-                .find(|proof| proof.proof_job_id == dispatch.audit.job_id)
-                .cloned();
-            let entry = AuditSearchEntry { dispatch, proof };
-            if matches_search(&entry, search_text.as_deref()) {
-                entries.push(entry);
+            let mut entries = Vec::new();
+            for dispatch in dispatches.into_iter() {
+                let proof = proofs
+                    .iter()
+                    .find(|proof| proof.proof_job_id == dispatch.audit.job_id)
+                    .cloned();
+                let entry = AuditSearchEntry { dispatch, proof };
+                if matches_search(&entry, search_text.as_deref()) {
+                    entries.push(entry);
+                }
+                if entries.len() >= limit {
+                    break;
+                }
             }
-            if entries.len() >= limit {
-                break;
-            }
-        }
 
-        Ok(AuditSearchResult { entries })
+            Ok(AuditSearchResult { entries })
+        })
     }
 
     pub fn snapshot(&self) -> Result<AuditLedgerSnapshot, String> {
@@ -381,6 +382,10 @@ impl AuditStore {
         self.root.join(PROOF_LEDGER_FILE)
     }
 
+    fn proof_dispatch_transaction_path(&self) -> PathBuf {
+        self.root.join(PROOF_TRANSACTION_FILE)
+    }
+
     pub fn backup_dir(&self) -> PathBuf {
         self.root.join(BACKUP_DIR)
     }
@@ -397,8 +402,99 @@ impl AuditStore {
         Ok(())
     }
 
+    fn write_proof_dispatch_transaction(
+        &self,
+        transaction: &ProofDispatchTransaction,
+    ) -> Result<(), String> {
+        write_json_file(&self.proof_dispatch_transaction_path(), transaction).map(|_| ())
+    }
+
+    fn load_proof_dispatch_transaction(&self) -> Result<Option<ProofDispatchTransaction>, String> {
+        let path = self.proof_dispatch_transaction_path();
+        if !path.exists() {
+            return Ok(None);
+        }
+        let payload = fs::read_to_string(&path).map_err(|error| {
+            format!(
+                "failed to read proof dispatch transaction '{}': {error}",
+                path.display()
+            )
+        })?;
+        let transaction = serde_json::from_str(&payload).map_err(|error| {
+            format!(
+                "failed to parse proof dispatch transaction '{}': {error}",
+                path.display()
+            )
+        })?;
+        Ok(Some(transaction))
+    }
+
+    fn clear_proof_dispatch_transaction(&self) -> Result<(), String> {
+        let path = self.proof_dispatch_transaction_path();
+        match fs::remove_file(&path) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(format!(
+                "failed to clear proof dispatch transaction '{}': {error}",
+                path.display()
+            )),
+        }
+    }
+
+    fn apply_proof_dispatch_transaction(
+        &self,
+        transaction: &ProofDispatchTransaction,
+    ) -> Result<(), String> {
+        let mut dispatches = self.load_dispatch_records()?;
+        if !dispatches.contains(&transaction.dispatch) {
+            dispatches.push(transaction.dispatch.clone());
+            self.save_dispatch_records(&dispatches)?;
+        }
+
+        let mut proofs = self.load_proof_records()?;
+        let before = proofs.clone();
+        upsert_pending_proof_record(&mut proofs, transaction.proof.clone());
+        if proofs != before {
+            self.save_proof_records(&proofs)?;
+        }
+
+        Ok(())
+    }
+
+    fn recover_proof_dispatch_transaction(&self) -> Result<(), String> {
+        let transaction = match self.load_proof_dispatch_transaction() {
+            Ok(Some(transaction)) => transaction,
+            Ok(None) => return Ok(()),
+            Err(error) => {
+                let quarantined_path = self.quarantine_proof_dispatch_transaction()?;
+                return Err(format!(
+                    "proof dispatch transaction marker was unreadable or corrupt and was moved to '{}': {error}; reconcile dispatch-ledger.json and proof-ledger.json before retrying",
+                    quarantined_path.display()
+                ));
+            }
+        };
+        self.apply_proof_dispatch_transaction(&transaction)?;
+        self.clear_proof_dispatch_transaction()
+    }
+
+    fn quarantine_proof_dispatch_transaction(&self) -> Result<PathBuf, String> {
+        let path = self.proof_dispatch_transaction_path();
+        let quarantined_path = path.with_file_name(format!(
+            "proof-dispatch-transaction.corrupt.{}.json",
+            timestamp_nanos()
+        ));
+        fs::rename(&path, &quarantined_path).map_err(|error| {
+            format!(
+                "failed to quarantine proof dispatch transaction '{}': {error}",
+                path.display()
+            )
+        })?;
+        Ok(quarantined_path)
+    }
+
     fn with_lock<T>(&self, operation: impl FnOnce() -> Result<T, String>) -> Result<T, String> {
         let _guard = acquire_store_lock(&self.lock_path())?;
+        self.recover_proof_dispatch_transaction()?;
         operation()
     }
 }
@@ -434,6 +530,34 @@ fn scoped_snapshot(snapshot: AuditLedgerSnapshot, scope: AuditLedgerScope) -> Au
             dispatches: Vec::new(),
             proofs: snapshot.proofs,
         },
+    }
+}
+
+fn upsert_pending_proof_record(records: &mut Vec<ProofRecord>, record: ProofRecord) {
+    for existing in records.iter_mut() {
+        if existing.job_lineage_id == record.job_lineage_id
+            && existing.proof_job_id != record.proof_job_id
+            && matches!(existing.status, ProofStatus::Pending | ProofStatus::Approved)
+        {
+            existing.decide(
+                ProofStatus::Superseded,
+                record.requested_by.clone(),
+                record.requested_at.clone(),
+                Some(format!(
+                    "superseded by newer proof {}",
+                    record.proof_job_id.0
+                )),
+            );
+        }
+    }
+
+    if let Some(index) = records
+        .iter()
+        .position(|existing| existing.proof_job_id == record.proof_job_id)
+    {
+        records[index] = record;
+    } else {
+        records.push(record);
     }
 }
 
@@ -1255,7 +1379,7 @@ impl ProofStatusLabel for ProofRecord {
 
 #[cfg(test)]
 mod tests {
-    use super::{AuditStore, LegacyProofSeedRecord, ProofReviewRequest};
+    use super::{AuditStore, LegacyProofSeedRecord, ProofDispatchTransaction, ProofReviewRequest};
     use audit_log::{
         AuditActor, AuditExportRequest, AuditLedgerScope, AuditQuery, AuditRetentionRequest,
         DispatchMatchSubject, PersistedDispatchRecord, PrintAuditRecord, PrintJobId,
@@ -1349,6 +1473,106 @@ mod tests {
     }
 
     #[test]
+    fn proof_dispatch_transaction_persists_dispatch_and_proof_together() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-TXN-0001");
+        let dispatch = sample_proof_dispatch(&proof);
+
+        store
+            .record_proof_dispatch_transaction(dispatch, proof)
+            .expect("proof dispatch transaction should persist");
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 1);
+        assert_eq!(snapshot.proofs.len(), 1);
+        assert_eq!(snapshot.proofs[0].status, ProofStatus::Pending);
+        assert!(
+            !store.proof_dispatch_transaction_path().exists(),
+            "transaction marker should be cleared after commit"
+        );
+    }
+
+    #[test]
+    fn stale_proof_dispatch_transaction_recovers_on_read() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        let proof = sample_proof("JOB-PROOF-TXN-0002");
+        let dispatch = sample_proof_dispatch(&proof);
+
+        store
+            .write_proof_dispatch_transaction(&ProofDispatchTransaction {
+                dispatch: dispatch.clone(),
+                proof: proof.clone(),
+            })
+            .expect("transaction marker should persist");
+        store
+            .save_dispatch_records(&[dispatch])
+            .expect("partial dispatch write should persist");
+
+        let result = store
+            .search(AuditQuery {
+                search_text: Some("JOB-PROOF-TXN-0002".to_string()),
+                limit: Some(10),
+            })
+            .expect("search should auto-recover the pending proof transaction");
+
+        assert_eq!(result.entries.len(), 1);
+        assert_eq!(
+            result.entries[0]
+                .proof
+                .as_ref()
+                .expect("proof should be recovered")
+                .proof_job_id
+                .0,
+            "JOB-PROOF-TXN-0002"
+        );
+        assert!(
+            !store.proof_dispatch_transaction_path().exists(),
+            "transaction marker should clear after recovery"
+        );
+
+        let snapshot = store.snapshot().expect("snapshot should load");
+        assert_eq!(snapshot.dispatches.len(), 1);
+        assert_eq!(snapshot.proofs.len(), 1);
+    }
+
+    #[test]
+    fn corrupt_proof_dispatch_transaction_is_quarantined_for_manual_recovery() {
+        let temp_dir = TestDir::new();
+        let store = AuditStore::new(temp_dir.path().to_path_buf());
+        fs::write(
+            store.proof_dispatch_transaction_path(),
+            "{ not valid json",
+        )
+        .expect("corrupt transaction marker should write");
+
+        let err = store
+            .snapshot()
+            .expect_err("corrupt transaction marker should block the current operation");
+        assert!(err.contains("was unreadable or corrupt and was moved to"));
+        assert!(!store.proof_dispatch_transaction_path().exists());
+        assert!(
+            fs::read_dir(temp_dir.path())
+                .expect("temp dir should be readable")
+                .filter_map(Result::ok)
+                .any(|entry| {
+                    entry
+                        .file_name()
+                        .to_string_lossy()
+                        .starts_with("proof-dispatch-transaction.corrupt.")
+                }),
+            "corrupt marker should be quarantined for inspection"
+        );
+
+        let snapshot = store
+            .snapshot()
+            .expect("subsequent reads should proceed after quarantine");
+        assert!(snapshot.dispatches.is_empty());
+        assert!(snapshot.proofs.is_empty());
+    }
+
+    #[test]
     fn approved_proof_must_match_dispatch_subject() {
         let temp_dir = TestDir::new();
         let store = AuditStore::new(temp_dir.path().to_path_buf());
@@ -1404,15 +1628,13 @@ mod tests {
         let temp_dir = TestDir::new();
         let store = AuditStore::new(temp_dir.path().to_path_buf());
         let proof = sample_proof("JOB-PROOF-0005");
+        let dispatch = sample_proof_dispatch(&proof);
         store
             .register_pending_proof(proof.clone())
             .expect("pending proof should persist");
         store
-            .record_dispatch(sample_proof_dispatch(&proof))
-            .expect("dispatch should persist");
-        store
-            .record_dispatch(sample_proof_dispatch(&proof))
-            .expect("duplicate dispatch should persist for regression coverage");
+            .save_dispatch_records(&[dispatch.clone(), dispatch])
+            .expect("duplicate proof dispatch rows should be seedable for regression coverage");
         store
             .approve_proof(ProofReviewRequest {
                 proof_job_id: "JOB-PROOF-0005".to_string(),

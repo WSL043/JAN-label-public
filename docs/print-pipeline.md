@@ -42,8 +42,10 @@ Lineage rules:
 ## 3. Proof Flow
 
 - Proof submit is forced through the PDF route.
-- `desktop-shell` records proof dispatch in `dispatch-ledger.json`.
-- A matching proof record is created in `proof-ledger.json` with `pending` status.
+- `desktop-shell` writes `proof-dispatch-transaction.json` before committing proof audit state.
+- Proof dispatch in `dispatch-ledger.json` and the matching `pending` proof record in `proof-ledger.json` are applied as one recovery-aware transaction.
+- Stale proof transaction markers are replayed automatically on the next locked audit access.
+- Unreadable or corrupt proof transaction markers are quarantined and the current audit operation returns an explicit reconcile error.
 - `admin-web` proof inbox drives `approve` / `reject`.
 - Approved proofs can be pinned back into print-ready operator flow.
 
