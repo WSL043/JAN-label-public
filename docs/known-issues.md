@@ -107,3 +107,8 @@
 - status: open
 - impact: `apps/windows-shell` cannot be built locally when `dotnet` is unavailable, so native-shell validation must move to GitHub Windows runners
 - response: treat the `windows-shell-native` CI job as the authoritative validation path unless local `.NET 8` is explicitly installed for shell work
+
+## K-034 native-shell preview packaging is CI-driven
+- status: watch
+- impact: the native shell now has an installer path, but preview installer publication still depends on GitHub Actions artifacts and manual prerelease publication rather than a dedicated release workflow
+- response: use the `jan-label-native-shell-installer` artifact from `windows-shell-native` for preview validation until a native-shell release workflow is added

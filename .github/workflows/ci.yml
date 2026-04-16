@@ -136,10 +136,28 @@ jobs:
           dotnet-version: 8.0.x
       - run: dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
       - run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+      - name: Build native shell installer
+        shell: powershell
+        run: |
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          New-Item -ItemType Directory -Force -Path "apps/windows-shell/dist" | Out-Null
+          $outputDir = (Resolve-Path "apps/windows-shell/dist").Path
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=preview-$shortSha" `
+            "/DMyOutputDir=$outputDir" `
+            "/DMyOutputBaseFilename=JAN-Label_preview-windows-native-shell_$shortSha" `
+            "apps/windows-shell/installer/JanLabel.WindowsShell.iss"
       - uses: actions/upload-artifact@v7
         with:
           name: jan-label-native-shell
           path: apps/windows-shell/bin/Release/net8.0-windows/win-x64/publish/**
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jan-label-native-shell-installer
+          path: apps/windows-shell/dist/*.exe
           if-no-files-found: error
 
   docs-guard:

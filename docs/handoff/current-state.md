@@ -42,6 +42,7 @@
   - WPF operator shell prototype with native menu / ribbon / docking layout
   - module navigation for `Job Setup`, `Designer`, `Batch Manager`, and `History`
   - Windows-only shell language baseline for future operator UX work
+  - GitHub Windows CI now emits both self-contained preview binaries and an installer artifact for native-shell evaluation
 - release automation
 - `pnpm release:notes --version <version>`
 - `pnpm release:readiness --version <version>`
@@ -96,6 +97,7 @@
   - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
+  - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
 
 ## Release Boundary
 
@@ -140,6 +142,7 @@ Operational note:
   - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - GitHub Actions has already passed the Windows desktop and native-shell validation path for PR `#33`, so local MSVC and `.NET` toolchain absence is no longer a blocker as long as the remote Windows runners remain green.
 - Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
+- Native-shell preview packaging should also be taken from the GitHub Actions `jan-label-native-shell-installer` artifact until a dedicated release workflow supersedes the CI path.
 - `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
 
 ## Release Status
