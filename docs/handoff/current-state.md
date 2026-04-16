@@ -43,6 +43,7 @@
   - module navigation for `Job Setup`, `Designer`, `Batch Manager`, and `History`
   - Windows-only shell language baseline for future operator UX work
   - GitHub Windows CI now emits both self-contained preview binaries and an installer artifact for native-shell evaluation
+  - startup path now opens `MainWindow` directly instead of idling as a background process with no shell window
 - release automation
 - `pnpm release:notes --version <version>`
 - `pnpm release:readiness --version <version>`

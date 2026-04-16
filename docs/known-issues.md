@@ -112,3 +112,7 @@
 - status: watch
 - impact: the native shell now has an installer path, but preview installer publication still depends on GitHub Actions artifacts and manual prerelease publication rather than a dedicated release workflow
 - response: use the `jan-label-native-shell-installer` artifact from `windows-shell-native` for preview validation until a native-shell release workflow is added
+
+## K-035 native-shell startup window was missing
+- status: resolved
+- resolution: `apps/windows-shell/App.xaml` now declares `StartupUri="MainWindow.xaml"`, so the preview installer launches the operator shell window instead of leaving a background process with no visible UI
