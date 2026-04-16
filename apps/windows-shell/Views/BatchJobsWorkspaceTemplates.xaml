@@ -72,7 +72,7 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Import Sessions" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="xlsx / csv" />
               </DockPanel>
-              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding ImportSessions}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
+              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding ImportSessions}" SelectedItem="{Binding SelectedImportSession, Mode=TwoWay}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Grid>
@@ -124,7 +124,7 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Batch Queue" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding QueueSummary}" />
               </DockPanel>
-              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding BatchRows}">
+              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding BatchRows}" SelectedItem="{Binding SelectedBatch, Mode=TwoWay}">
                 <ListView.View>
                   <GridView>
                     <GridViewColumn Width="110" DisplayMemberBinding="{Binding BatchId}" Header="Batch" />
@@ -164,7 +164,9 @@
           </Grid.RowDefinitions>
           <Border Style="{StaticResource PaneBorderStyle}">
             <StackPanel>
-              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selected Import Session" />
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Current Queue Focus" />
+              <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding SelectionHeading}" />
+              <TextBlock Margin="0,2,0,8" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding SelectionSummary}" />
               <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SessionDetailRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>

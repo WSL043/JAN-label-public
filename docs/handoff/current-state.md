@@ -49,6 +49,7 @@
   - Home and Designer now share a template-library board that makes winning default, draft-only entries, dispatch safety, authority owner, and rollback path visible from one selection surface
   - ribbon, quick-access, and header actions now write visible shell feedback instead of remaining inert buttons
   - shell actions now also route operators toward the relevant lane instead of acknowledging clicks without any workspace transition
+  - Print Console, Batch Jobs, and History now use selection-driven detail panes, so choosing a proof, job, import session, bundle, or ledger row updates blocker, route, and next-action context in place
   - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
   - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - module-aware native workspaces for migration/readiness, designer, print console, batch queue, and history/audit review instead of a single static shell mock
@@ -122,6 +123,7 @@
   - shared shell chrome now exposes lane context, authority, route, and blocker-oriented status so the shell is judged against operator decision speed, not only visual density
   - template-library reasoning is no longer a flat mock list; `Home` and `Designer` now share a library board with selected-template detail, dispatch-safe state, default resolution, and rollback guidance
   - shell actions now route operators to the appropriate lane for review while still keeping backend authority in `apps/desktop-shell`
+  - the operational lanes no longer keep a frozen right pane; selection inside proof, queue, bundle, and audit lists now changes the decision context the operator sees
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
@@ -163,6 +165,11 @@ Passed in the latest release-hardening batch:
 - `dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`
 
 Passed in the latest native-shell UX batch:
+
+- `git diff --check`
+- `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
+
+Passed in the latest native-shell selection-state batch:
 
 - `git diff --check`
 - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`

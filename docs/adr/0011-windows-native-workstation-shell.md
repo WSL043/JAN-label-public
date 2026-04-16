@@ -59,6 +59,9 @@ Rules:
 - Template-library reasoning should not be hidden behind designer state alone:
   - `Home` and `Designer` should expose the same packaged-vs-local library board language
   - the winning default, draft-only state, dispatch eligibility, and rollback path should be visible from a single selection panel
+- Operational lanes should not leave the right-side detail pane static:
+  - selecting a proof, dispatch job, import session, backup bundle, or ledger row should update blocker, route, and next-action context in place
+  - lane focus should help an operator decide what to do next without scanning a separate document or modal first
 - Shell actions may route operators to the appropriate lane for review, but that routing must not imply backend authority moved out of `apps/desktop-shell`
 - Formal release automation should validate more than shell compilation:
   - native-shell build

@@ -347,6 +347,11 @@ public sealed class DesignerSelectionModel : BindableModel
 
 public sealed class PrintConsoleWorkspaceModel : WorkspaceModel
 {
+    private QueueItemModel? _selectedProof;
+    private JobRowModel? _selectedJob;
+    private string _selectionHeading = "Select a proof or job";
+    private string _selectionSummary = "Review route, blocker, and next action before dispatch.";
+
     public ObservableCollection<QueueItemModel> ProofQueue { get; } = new();
 
     public ObservableCollection<PropertyRowModel> RouteRows { get; } = new();
@@ -363,15 +368,121 @@ public sealed class PrintConsoleWorkspaceModel : WorkspaceModel
 
     public ObservableCollection<StatusItemModel> StatusItems { get; } = new();
 
+    public QueueItemModel? SelectedProof
+    {
+        get => _selectedProof;
+        set
+        {
+            if (ReferenceEquals(_selectedProof, value))
+            {
+                return;
+            }
+
+            _selectedProof = value;
+            if (value is not null)
+            {
+                _selectedJob = null;
+                OnPropertyChanged(nameof(SelectedJob));
+            }
+
+            RefreshSelectionFromProof(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public JobRowModel? SelectedJob
+    {
+        get => _selectedJob;
+        set
+        {
+            if (ReferenceEquals(_selectedJob, value))
+            {
+                return;
+            }
+
+            _selectedJob = value;
+            if (value is not null)
+            {
+                _selectedProof = null;
+                OnPropertyChanged(nameof(SelectedProof));
+            }
+
+            RefreshSelectionFromJob(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public string SelectionHeading
+    {
+        get => _selectionHeading;
+        private set => SetProperty(ref _selectionHeading, value);
+    }
+
+    public string SelectionSummary
+    {
+        get => _selectionSummary;
+        private set => SetProperty(ref _selectionSummary, value);
+    }
+
     public string MessageSummary { get; init; } = string.Empty;
 
     public string FooterDetail { get; init; } = string.Empty;
 
     public string JobSummary { get; init; } = string.Empty;
+
+    private void RefreshSelectionFromProof(QueueItemModel? proof)
+    {
+        SelectedJobRows.Clear();
+
+        if (proof is null)
+        {
+            SelectionHeading = "Select a proof or job";
+            SelectionSummary = "Review route, blocker, and next action before dispatch.";
+            return;
+        }
+
+        SelectionHeading = proof.Label;
+        SelectionSummary = proof.Note;
+        SelectedJobRows.Add(new PropertyRowModel("Subject", proof.Subtext));
+        SelectedJobRows.Add(new PropertyRowModel("State", proof.Badge));
+        SelectedJobRows.Add(new PropertyRowModel("Authority", proof.Owner));
+        SelectedJobRows.Add(new PropertyRowModel("Route", proof.Route));
+        SelectedJobRows.Add(new PropertyRowModel("Blocker", proof.Blocker));
+        SelectedJobRows.Add(new PropertyRowModel("Next action", proof.NextAction));
+    }
+
+    private void RefreshSelectionFromJob(JobRowModel? job)
+    {
+        SelectedJobRows.Clear();
+
+        if (job is null)
+        {
+            SelectionHeading = "Select a proof or job";
+            SelectionSummary = "Review route, blocker, and next action before dispatch.";
+            return;
+        }
+
+        SelectionHeading = job.Subject;
+        SelectionSummary = job.Note;
+        SelectedJobRows.Add(new PropertyRowModel("Template", job.Template));
+        SelectedJobRows.Add(new PropertyRowModel("Proof", job.Proof));
+        SelectedJobRows.Add(new PropertyRowModel("Route", job.Route));
+        SelectedJobRows.Add(new PropertyRowModel("Status", job.Status));
+        SelectedJobRows.Add(new PropertyRowModel("JAN", job.Jan));
+        SelectedJobRows.Add(new PropertyRowModel("Qty", job.Qty));
+        SelectedJobRows.Add(new PropertyRowModel("Lineage", job.Lineage));
+        SelectedJobRows.Add(new PropertyRowModel("Blocker", job.Blocker));
+        SelectedJobRows.Add(new PropertyRowModel("Next action", job.NextAction));
+    }
 }
 
 public sealed class BatchJobsWorkspaceModel : WorkspaceModel
 {
+    private QueueItemModel? _selectedImportSession;
+    private BatchRowModel? _selectedBatch;
+    private string _selectionHeading = "Select an import session or batch";
+    private string _selectionSummary = "Review queue readiness, blockers, and retry rules before submit.";
+
     public ObservableCollection<QueueItemModel> ImportSessions { get; } = new();
 
     public ObservableCollection<PropertyRowModel> ColumnRows { get; } = new();
@@ -388,15 +499,121 @@ public sealed class BatchJobsWorkspaceModel : WorkspaceModel
 
     public ObservableCollection<StatusItemModel> StatusItems { get; } = new();
 
+    public QueueItemModel? SelectedImportSession
+    {
+        get => _selectedImportSession;
+        set
+        {
+            if (ReferenceEquals(_selectedImportSession, value))
+            {
+                return;
+            }
+
+            _selectedImportSession = value;
+            if (value is not null)
+            {
+                _selectedBatch = null;
+                OnPropertyChanged(nameof(SelectedBatch));
+            }
+
+            RefreshSelectionFromImportSession(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public BatchRowModel? SelectedBatch
+    {
+        get => _selectedBatch;
+        set
+        {
+            if (ReferenceEquals(_selectedBatch, value))
+            {
+                return;
+            }
+
+            _selectedBatch = value;
+            if (value is not null)
+            {
+                _selectedImportSession = null;
+                OnPropertyChanged(nameof(SelectedImportSession));
+            }
+
+            RefreshSelectionFromBatch(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public string SelectionHeading
+    {
+        get => _selectionHeading;
+        private set => SetProperty(ref _selectionHeading, value);
+    }
+
+    public string SelectionSummary
+    {
+        get => _selectionSummary;
+        private set => SetProperty(ref _selectionSummary, value);
+    }
+
     public string MessageSummary { get; init; } = string.Empty;
 
     public string FooterDetail { get; init; } = string.Empty;
 
     public string QueueSummary { get; init; } = string.Empty;
+
+    private void RefreshSelectionFromImportSession(QueueItemModel? session)
+    {
+        SessionDetailRows.Clear();
+
+        if (session is null)
+        {
+            SelectionHeading = "Select an import session or batch";
+            SelectionSummary = "Review queue readiness, blockers, and retry rules before submit.";
+            return;
+        }
+
+        SelectionHeading = session.Label;
+        SelectionSummary = session.Note;
+        SessionDetailRows.Add(new PropertyRowModel("Workbook", session.Subtext));
+        SessionDetailRows.Add(new PropertyRowModel("State", session.Badge));
+        SessionDetailRows.Add(new PropertyRowModel("Owner", session.Owner));
+        SessionDetailRows.Add(new PropertyRowModel("Submit route", session.Route));
+        SessionDetailRows.Add(new PropertyRowModel("Blocker", session.Blocker));
+        SessionDetailRows.Add(new PropertyRowModel("Next action", session.NextAction));
+    }
+
+    private void RefreshSelectionFromBatch(BatchRowModel? batch)
+    {
+        SessionDetailRows.Clear();
+
+        if (batch is null)
+        {
+            SelectionHeading = "Select an import session or batch";
+            SelectionSummary = "Review queue readiness, blockers, and retry rules before submit.";
+            return;
+        }
+
+        SelectionHeading = batch.BatchId;
+        SelectionSummary = batch.Note;
+        SessionDetailRows.Add(new PropertyRowModel("Template", batch.Template));
+        SessionDetailRows.Add(new PropertyRowModel("Records", batch.Records));
+        SessionDetailRows.Add(new PropertyRowModel("Status", batch.Status));
+        SessionDetailRows.Add(new PropertyRowModel("Ready rows", batch.ReadyRows));
+        SessionDetailRows.Add(new PropertyRowModel("Warn rows", batch.WarnRows));
+        SessionDetailRows.Add(new PropertyRowModel("Submit route", batch.SubmitRoute));
+        SessionDetailRows.Add(new PropertyRowModel("Blocker", batch.Blocker));
+        SessionDetailRows.Add(new PropertyRowModel("Retry rule", batch.RetryRule));
+    }
 }
 
 public sealed class HistoryWorkspaceModel : WorkspaceModel
 {
+    private QueueItemModel? _selectedPendingProof;
+    private QueueItemModel? _selectedBundle;
+    private AuditRowModel? _selectedAuditRow;
+    private string _selectionHeading = "Select a proof, bundle, or ledger entry";
+    private string _selectionSummary = "Review audit impact and recovery safety before acting.";
+
     public ObservableCollection<QueueItemModel> PendingProofs { get; } = new();
 
     public ObservableCollection<QueueItemModel> BundleRows { get; } = new();
@@ -413,11 +630,158 @@ public sealed class HistoryWorkspaceModel : WorkspaceModel
 
     public ObservableCollection<StatusItemModel> StatusItems { get; } = new();
 
+    public QueueItemModel? SelectedPendingProof
+    {
+        get => _selectedPendingProof;
+        set
+        {
+            if (ReferenceEquals(_selectedPendingProof, value))
+            {
+                return;
+            }
+
+            _selectedPendingProof = value;
+            if (value is not null)
+            {
+                _selectedBundle = null;
+                _selectedAuditRow = null;
+                OnPropertyChanged(nameof(SelectedBundle));
+                OnPropertyChanged(nameof(SelectedAuditRow));
+            }
+
+            RefreshSelectionFromPendingProof(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public QueueItemModel? SelectedBundle
+    {
+        get => _selectedBundle;
+        set
+        {
+            if (ReferenceEquals(_selectedBundle, value))
+            {
+                return;
+            }
+
+            _selectedBundle = value;
+            if (value is not null)
+            {
+                _selectedPendingProof = null;
+                _selectedAuditRow = null;
+                OnPropertyChanged(nameof(SelectedPendingProof));
+                OnPropertyChanged(nameof(SelectedAuditRow));
+            }
+
+            RefreshSelectionFromBundle(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public AuditRowModel? SelectedAuditRow
+    {
+        get => _selectedAuditRow;
+        set
+        {
+            if (ReferenceEquals(_selectedAuditRow, value))
+            {
+                return;
+            }
+
+            _selectedAuditRow = value;
+            if (value is not null)
+            {
+                _selectedPendingProof = null;
+                _selectedBundle = null;
+                OnPropertyChanged(nameof(SelectedPendingProof));
+                OnPropertyChanged(nameof(SelectedBundle));
+            }
+
+            RefreshSelectionFromAuditRow(value);
+            OnPropertyChanged();
+        }
+    }
+
+    public string SelectionHeading
+    {
+        get => _selectionHeading;
+        private set => SetProperty(ref _selectionHeading, value);
+    }
+
+    public string SelectionSummary
+    {
+        get => _selectionSummary;
+        private set => SetProperty(ref _selectionSummary, value);
+    }
+
     public string MessageSummary { get; init; } = string.Empty;
 
     public string FooterDetail { get; init; } = string.Empty;
 
     public string LedgerSummary { get; init; } = string.Empty;
+
+    private void RefreshSelectionFromPendingProof(QueueItemModel? proof)
+    {
+        SelectedEntryRows.Clear();
+
+        if (proof is null)
+        {
+            SelectionHeading = "Select a proof, bundle, or ledger entry";
+            SelectionSummary = "Review audit impact and recovery safety before acting.";
+            return;
+        }
+
+        SelectionHeading = proof.Label;
+        SelectionSummary = proof.Note;
+        SelectedEntryRows.Add(new PropertyRowModel("Subject", proof.Subtext));
+        SelectedEntryRows.Add(new PropertyRowModel("State", proof.Badge));
+        SelectedEntryRows.Add(new PropertyRowModel("Authority", proof.Owner));
+        SelectedEntryRows.Add(new PropertyRowModel("Artifact", proof.Route));
+        SelectedEntryRows.Add(new PropertyRowModel("Blocker", proof.Blocker));
+        SelectedEntryRows.Add(new PropertyRowModel("Next action", proof.NextAction));
+    }
+
+    private void RefreshSelectionFromBundle(QueueItemModel? bundle)
+    {
+        SelectedEntryRows.Clear();
+
+        if (bundle is null)
+        {
+            SelectionHeading = "Select a proof, bundle, or ledger entry";
+            SelectionSummary = "Review audit impact and recovery safety before acting.";
+            return;
+        }
+
+        SelectionHeading = bundle.Label;
+        SelectionSummary = bundle.Note;
+        SelectedEntryRows.Add(new PropertyRowModel("Bundle", bundle.Subtext));
+        SelectedEntryRows.Add(new PropertyRowModel("State", bundle.Badge));
+        SelectedEntryRows.Add(new PropertyRowModel("Restore policy", bundle.Owner));
+        SelectedEntryRows.Add(new PropertyRowModel("Validation", bundle.Route));
+        SelectedEntryRows.Add(new PropertyRowModel("Blocker", bundle.Blocker));
+        SelectedEntryRows.Add(new PropertyRowModel("Next action", bundle.NextAction));
+    }
+
+    private void RefreshSelectionFromAuditRow(AuditRowModel? auditRow)
+    {
+        SelectedEntryRows.Clear();
+
+        if (auditRow is null)
+        {
+            SelectionHeading = "Select a proof, bundle, or ledger entry";
+            SelectionSummary = "Review audit impact and recovery safety before acting.";
+            return;
+        }
+
+        SelectionHeading = $"{auditRow.Lane} | {auditRow.Subject}";
+        SelectionSummary = auditRow.Detail;
+        SelectedEntryRows.Add(new PropertyRowModel("Status", auditRow.Status));
+        SelectedEntryRows.Add(new PropertyRowModel("Lineage", auditRow.Lineage));
+        SelectedEntryRows.Add(new PropertyRowModel("Template", auditRow.Template));
+        SelectedEntryRows.Add(new PropertyRowModel("Artifact", auditRow.Artifact));
+        SelectedEntryRows.Add(new PropertyRowModel("Action", auditRow.ActionRequired));
+        SelectedEntryRows.Add(new PropertyRowModel("When", auditRow.Time));
+    }
 }
 
 public sealed class RibbonGroupModel
@@ -480,12 +844,24 @@ public sealed class StatusStripItemModel
 
 public sealed class QueueItemModel
 {
-    public QueueItemModel(string label, string subtext, string badge, string note)
+    public QueueItemModel(
+        string label,
+        string subtext,
+        string badge,
+        string note,
+        string owner = "",
+        string route = "",
+        string blocker = "",
+        string nextAction = "")
     {
         Label = label;
         Subtext = subtext;
         Badge = badge;
         Note = note;
+        Owner = owner;
+        Route = route;
+        Blocker = blocker;
+        NextAction = nextAction;
     }
 
     public string Label { get; }
@@ -495,6 +871,14 @@ public sealed class QueueItemModel
     public string Badge { get; }
 
     public string Note { get; }
+
+    public string Owner { get; }
+
+    public string Route { get; }
+
+    public string Blocker { get; }
+
+    public string NextAction { get; }
 }
 
 public sealed class ActivityRowModel
@@ -694,13 +1078,30 @@ public sealed class TemplateCatalogRowModel
 
 public sealed class JobRowModel
 {
-    public JobRowModel(string subject, string proof, string route, string status, string note)
+    public JobRowModel(
+        string subject,
+        string proof,
+        string route,
+        string status,
+        string note,
+        string template = "",
+        string jan = "",
+        string qty = "",
+        string lineage = "",
+        string blocker = "",
+        string nextAction = "")
     {
         Subject = subject;
         Proof = proof;
         Route = route;
         Status = status;
         Note = note;
+        Template = template;
+        Jan = jan;
+        Qty = qty;
+        Lineage = lineage;
+        Blocker = blocker;
+        NextAction = nextAction;
     }
 
     public string Subject { get; }
@@ -712,17 +1113,44 @@ public sealed class JobRowModel
     public string Status { get; }
 
     public string Note { get; }
+
+    public string Template { get; }
+
+    public string Jan { get; }
+
+    public string Qty { get; }
+
+    public string Lineage { get; }
+
+    public string Blocker { get; }
+
+    public string NextAction { get; }
 }
 
 public sealed class BatchRowModel
 {
-    public BatchRowModel(string batchId, string template, string records, string status, string note)
+    public BatchRowModel(
+        string batchId,
+        string template,
+        string records,
+        string status,
+        string note,
+        string readyRows = "",
+        string warnRows = "",
+        string submitRoute = "",
+        string blocker = "",
+        string retryRule = "")
     {
         BatchId = batchId;
         Template = template;
         Records = records;
         Status = status;
         Note = note;
+        ReadyRows = readyRows;
+        WarnRows = warnRows;
+        SubmitRoute = submitRoute;
+        Blocker = blocker;
+        RetryRule = retryRule;
     }
 
     public string BatchId { get; }
@@ -734,17 +1162,40 @@ public sealed class BatchRowModel
     public string Status { get; }
 
     public string Note { get; }
+
+    public string ReadyRows { get; }
+
+    public string WarnRows { get; }
+
+    public string SubmitRoute { get; }
+
+    public string Blocker { get; }
+
+    public string RetryRule { get; }
 }
 
 public sealed class AuditRowModel
 {
-    public AuditRowModel(string time, string lane, string subject, string status, string lineage)
+    public AuditRowModel(
+        string time,
+        string lane,
+        string subject,
+        string status,
+        string lineage,
+        string template = "",
+        string artifact = "",
+        string actionRequired = "",
+        string detail = "")
     {
         Time = time;
         Lane = lane;
         Subject = subject;
         Status = status;
         Lineage = lineage;
+        Template = template;
+        Artifact = artifact;
+        ActionRequired = actionRequired;
+        Detail = detail;
     }
 
     public string Time { get; }
@@ -756,6 +1207,14 @@ public sealed class AuditRowModel
     public string Status { get; }
 
     public string Lineage { get; }
+
+    public string Template { get; }
+
+    public string Artifact { get; }
+
+    public string ActionRequired { get; }
+
+    public string Detail { get; }
 }
 
 public sealed class ToolboxGroupModel

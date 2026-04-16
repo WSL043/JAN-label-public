@@ -72,7 +72,7 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Pending Proof Review" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="approve / reject" />
               </DockPanel>
-              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding PendingProofs}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
+              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding PendingProofs}" SelectedItem="{Binding SelectedPendingProof, Mode=TwoWay}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Grid>
@@ -98,7 +98,7 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Backup Bundles" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="restore-safe" />
               </DockPanel>
-              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding BundleRows}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
+              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding BundleRows}" SelectedItem="{Binding SelectedBundle, Mode=TwoWay}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
                 <ListBox.ItemTemplate>
                   <DataTemplate>
                     <Grid>
@@ -131,7 +131,7 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Audit Ledger" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding LedgerSummary}" />
               </DockPanel>
-              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding AuditRows}">
+              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding AuditRows}" SelectedItem="{Binding SelectedAuditRow, Mode=TwoWay}">
                 <ListView.View>
                   <GridView>
                     <GridViewColumn Width="85" DisplayMemberBinding="{Binding Time}" Header="Time" />
@@ -175,7 +175,9 @@
           </Grid.RowDefinitions>
           <Border Style="{StaticResource PaneBorderStyle}">
             <StackPanel>
-              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selected Ledger Entry" />
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Current History Focus" />
+              <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding SelectionHeading}" />
+              <TextBlock Margin="0,2,0,8" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding SelectionSummary}" />
               <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SelectedEntryRows}">
                 <ItemsControl.ItemTemplate>
                   <DataTemplate>

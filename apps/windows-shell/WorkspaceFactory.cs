@@ -248,27 +248,21 @@ public static class WorkspaceFactory
     private static PrintConsoleWorkspaceModel BuildPrintConsoleWorkspace()
     {
         var model = new PrintConsoleWorkspaceModel { MessageSummary = "1 blocker / 2 informative checks", FooterDetail = "proof lineage and bridge route visible", JobSummary = "3 ready / 1 held / 0 misrouted" };
-        model.ProofQueue.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 4901234567894", "pending", "Needs operator approval before dispatch lane unlocks."));
-        model.ProofQueue.Add(new QueueItemModel("proof-240416-018", "shipper-70x50@v1 | 4901234567801", "approved", "Current approved lineage available for print."));
-        model.ProofQueue.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 4901234567818", "rejected", "Mismatch between saved overlay and proof subject."));
+        model.ProofQueue.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 4901234567894", "pending", "Needs operator approval before dispatch lane unlocks.", "desktop-shell proof review", "artifact valid / lineage pending", "Pending review blocks 200-145-4 dispatch.", "Approve or reject after confirming saved overlay and subject."));
+        model.ProofQueue.Add(new QueueItemModel("proof-240416-018", "shipper-70x50@v1 | 4901234567801", "approved", "Current approved lineage available for print.", "desktop-shell approved lineage", "artifact pinned / route open", "No blocker. Ready jobs can use this proof.", "Use as the approved reference before dispatch."));
+        model.ProofQueue.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 4901234567818", "rejected", "Mismatch between saved overlay and proof subject.", "desktop-shell review archive", "artifact retained / route closed", "Rejected proof cannot unlock print.", "Correct the subject mismatch and re-run proof."));
         model.RouteRows.Add(new PropertyRowModel("Primary route", "desktop-shell pdf-proof"));
         model.RouteRows.Add(new PropertyRowModel("Fallback route", "blocked until proof match"));
         model.RouteRows.Add(new PropertyRowModel("Printer profile", "win-spool deferred"));
         model.RouteRows.Add(new PropertyRowModel("Batch gate", "approved lineage required"));
-        model.JobRows.Add(new JobRowModel("200-145-3", "approved", "pdf-proof", "ready", "Lineage locked to proof-240416-018"));
-        model.JobRows.Add(new JobRowModel("200-145-4", "pending", "pdf-proof", "held", "Awaiting operator review"));
-        model.JobRows.Add(new JobRowModel("200-145-5", "approved", "pdf-proof", "ready", "Local overlay saved and matched"));
-        model.JobRows.Add(new JobRowModel("200-145-6", "missing", "n/a", "blocked", "No proof artifact on record"));
+        model.JobRows.Add(new JobRowModel("200-145-3", "approved", "pdf-proof", "ready", "Lineage locked to proof-240416-018", "basic-50x30@v2", "4901234567894", "24", "lineage-7ba1a3", "No blocker. Route is open.", "Dispatch when the queue window is clear."));
+        model.JobRows.Add(new JobRowModel("200-145-4", "pending", "pdf-proof", "held", "Awaiting operator review", "basic-50x30@v2", "4901234567895", "24", "lineage-pending", "proof-240416-017 is still pending review.", "Hold until a reviewer approves or rejects the proof."));
+        model.JobRows.Add(new JobRowModel("200-145-5", "approved", "pdf-proof", "ready", "Local overlay saved and matched", "basic-50x30@v2", "4901234567818", "12", "lineage-45de90", "No blocker. Overlay and proof match.", "Dispatch after current ready jobs finish."));
+        model.JobRows.Add(new JobRowModel("200-145-6", "missing", "n/a", "blocked", "No proof artifact on record", "basic-50x30@v2", "4901234567800", "8", "none", "Missing proof artifact keeps route closed.", "Generate proof and obtain approval before queueing."));
         model.TimelineRows.Add(new ActivityRowModel("14:26", "proof", "proof-240416-018 approved and pinned", "done"));
         model.TimelineRows.Add(new ActivityRowModel("14:24", "dispatch", "route check completed for 200-145-3", "ok"));
         model.TimelineRows.Add(new ActivityRowModel("14:21", "catalog", "saved overlay confirmed for basic-50x30@v2", "ok"));
         model.TimelineRows.Add(new ActivityRowModel("14:19", "proof", "proof-240416-019 rejected due to subject mismatch", "watch"));
-        model.SelectedJobRows.Add(new PropertyRowModel("SKU", "200-145-3"));
-        model.SelectedJobRows.Add(new PropertyRowModel("JAN", "4901234567894"));
-        model.SelectedJobRows.Add(new PropertyRowModel("Qty", "24"));
-        model.SelectedJobRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
-        model.SelectedJobRows.Add(new PropertyRowModel("Approved proof", "proof-240416-018"));
-        model.SelectedJobRows.Add(new PropertyRowModel("Lineage", "lineage-7ba1a3"));
         model.ControlSections.Add(new PropertySectionModel("Proof Match", "Print stays locked until the approved proof subject and lineage match exactly.", new[] { new PropertyRowModel("Required fields", "sku / brand / jan / qty / templateVersion"), new PropertyRowModel("Artifact rule", "readable, non-empty PDF"), new PropertyRowModel("Current status", "approved for 200-145-3 only") }));
         model.ControlSections.Add(new PropertySectionModel("Operator Actions", "The native shell is modeling the lane, not replacing the Rust authority yet.", new[] { new PropertyRowModel("Proof authority", "desktop-shell"), new PropertyRowModel("Dispatch authority", "desktop-shell"), new PropertyRowModel("Preview purpose", "operator UX evaluation") }));
         model.MessageRows.Add(new MessageRowModel("Warn", "dispatch", "Job 200-145-4 is held because proof-240416-017 is still pending review."));
@@ -277,34 +271,29 @@ public static class WorkspaceFactory
         model.StatusItems.Add(new StatusItemModel("Bridge", "connected", "desktop-shell route checks responding", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Proof gate", "strict", "subject and lineage must match", "LOCK", Brushes.Firebrick));
         model.StatusItems.Add(new StatusItemModel("Printer route", "pdf-proof", "physical printer matrix deferred", "PDF", Brushes.SteelBlue));
+        model.SelectedJob = model.JobRows[0];
         return model;
     }
 
     private static BatchJobsWorkspaceModel BuildBatchJobsWorkspace()
     {
         var model = new BatchJobsWorkspaceModel { MessageSummary = "3 warnings / 0 fatal", FooterDetail = "retry only for ready or failed rows", QueueSummary = "4 sessions / 186 staged records" };
-        model.ImportSessions.Add(new QueueItemModel("import-240416-a", "sales-apr16.xlsx", "42 rows", "Alias map resolved; 2 JAN warnings surfaced before queueing."));
-        model.ImportSessions.Add(new QueueItemModel("import-240416-b", "proof-fixes.csv", "18 rows", "Template version verified against local overlay."));
-        model.ImportSessions.Add(new QueueItemModel("import-240416-c", "legacy-seed.xlsx", "126 rows", "Pending proof seed only; cannot auto-approve."));
+        model.ImportSessions.Add(new QueueItemModel("import-240416-a", "sales-apr16.xlsx", "42 rows", "Alias map resolved; 2 JAN warnings surfaced before queueing.", "batch operator", "desktop-shell submit route", "Two rows still need manual JAN review.", "Review warned rows, then submit ready rows."));
+        model.ImportSessions.Add(new QueueItemModel("import-240416-b", "proof-fixes.csv", "18 rows", "Template version verified against local overlay.", "catalog-aware import", "desktop-shell submit route", "No blocker. Session is clean.", "Submit after confirming the queue window."));
+        model.ImportSessions.Add(new QueueItemModel("import-240416-c", "legacy-seed.xlsx", "126 rows", "Pending proof seed only; cannot auto-approve.", "migration intake", "pending-proof staging only", "Legacy seed rows cannot auto-approve or print.", "Seed as pending, then route through proof review."));
         model.ColumnRows.Add(new PropertyRowModel("sku", "Column B -> product_code"));
         model.ColumnRows.Add(new PropertyRowModel("jan", "Column D -> jan13"));
         model.ColumnRows.Add(new PropertyRowModel("qty", "Column F -> pack_qty"));
         model.ColumnRows.Add(new PropertyRowModel("template_version", "Derived from operator selection"));
         model.ColumnRows.Add(new PropertyRowModel("brand", "Fallback to workbook constant"));
-        model.BatchRows.Add(new BatchRowModel("batch-014", "basic-50x30@v2", "42", "ready", "Two rows require JAN review before submit"));
-        model.BatchRows.Add(new BatchRowModel("batch-015", "shipper-70x50@v1", "18", "submitted", "Locked against retry while in flight"));
-        model.BatchRows.Add(new BatchRowModel("batch-016", "basic-50x30@v2", "126", "failed", "Pending-proof seed rows blocked from dispatch"));
-        model.BatchRows.Add(new BatchRowModel("batch-017", "proof-ticket@v1", "0", "draft", "Catalog save still missing"));
+        model.BatchRows.Add(new BatchRowModel("batch-014", "basic-50x30@v2", "42", "ready", "Two rows require JAN review before submit", "40", "2", "desktop-shell submit", "Ambiguous JAN rows block full submit.", "Retry only for rows that remain ready or failed."));
+        model.BatchRows.Add(new BatchRowModel("batch-015", "shipper-70x50@v1", "18", "submitted", "Locked against retry while in flight", "18", "0", "desktop-shell submit", "Submitted rows are immutable until completion.", "No retry while submitted."));
+        model.BatchRows.Add(new BatchRowModel("batch-016", "basic-50x30@v2", "126", "failed", "Pending-proof seed rows blocked from dispatch", "0", "126", "pending-proof only", "Pending proof seeds cannot dispatch.", "Retry after proof review converts eligible rows."));
+        model.BatchRows.Add(new BatchRowModel("batch-017", "proof-ticket@v1", "0", "draft", "Catalog save still missing", "0", "0", "blocked", "Unsaved template cannot enter queue.", "Save the template to the local catalog first."));
         model.ActivityRows.Add(new ActivityRowModel("14:28", "queue", "batch-014 revalidated after alias map adjustment", "ok"));
         model.ActivityRows.Add(new ActivityRowModel("14:24", "retry", "batch-016 kept eligible because rows remain in failed state", "watch"));
         model.ActivityRows.Add(new ActivityRowModel("14:20", "submit", "batch-015 locked while submitted rows are active", "done"));
         model.ActivityRows.Add(new ActivityRowModel("14:17", "validation", "12-digit numeric JAN blocked before staging", "done"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Session", "import-240416-a"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Workbook", "sales-apr16.xlsx"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Rows ready", "40"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Rows warned", "2"));
-        model.SessionDetailRows.Add(new PropertyRowModel("Submit route", "desktop-shell"));
         model.ControlSections.Add(new PropertySectionModel("Retry Rule", "Retry is intentionally narrow to avoid mutating rows that are already submitted.", new[] { new PropertyRowModel("Eligible states", "ready / failed"), new PropertyRowModel("Locked state", "submitted"), new PropertyRowModel("Current held batch", "batch-015") }));
         model.ControlSections.Add(new PropertySectionModel("Workbook Safety", "Import remains usable without a strict external database schema.", new[] { new PropertyRowModel("JAN hardening", "12-digit numeric blocked"), new PropertyRowModel("Template mismatch", "unknown template blocks queue"), new PropertyRowModel("Legacy proof seed", "pending only") }));
         model.MessageRows.Add(new MessageRowModel("Warn", "import", "sales-apr16.xlsx contains two rows with ambiguous numeric JAN values."));
@@ -313,33 +302,28 @@ public static class WorkspaceFactory
         model.StatusItems.Add(new StatusItemModel("Queue session lock", "visible", "submit-time mutation guard active", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Template mismatch blocker", "enforced", "unknown template_version is stopped", "LOCK", Brushes.Firebrick));
         model.StatusItems.Add(new StatusItemModel("Import mode", "csv/xlsx", "external schema remains optional", "OPEN", Brushes.SteelBlue));
+        model.SelectedBatch = model.BatchRows[0];
         return model;
     }
 
     private static HistoryWorkspaceModel BuildHistoryWorkspace()
     {
         var model = new HistoryWorkspaceModel { MessageSummary = "1 attention item / 2 clean", FooterDetail = "restore stays conflict-safe", LedgerSummary = "last 5 ledger events" };
-        model.PendingProofs.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 200-145-4", "pending", "Operator needs to confirm overlay save and subject match."));
-        model.PendingProofs.Add(new QueueItemModel("proof-240416-020", "shipper-70x50@v1 | 200-145-9", "pending", "PDF artifact validated; waiting for manual approval."));
-        model.PendingProofs.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 200-145-5", "rejected", "Retained for audit visibility and retry follow-up."));
-        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-15-1800", "audit backup / 241 entries", "latest", "Validated bundle; safe candidate for explicit restore review."));
-        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-14-1800", "audit backup / 229 entries", "kept", "Retention baseline before workstation redesign release."));
-        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-12-1800", "audit backup / 201 entries", "archive", "Older bundle kept until trim policy is applied."));
-        model.AuditRows.Add(new AuditRowModel("14:27", "proof", "200-145-3", "approved", "lineage-7ba1a3"));
-        model.AuditRows.Add(new AuditRowModel("14:24", "dispatch", "200-145-3", "printed", "lineage-7ba1a3"));
-        model.AuditRows.Add(new AuditRowModel("14:19", "proof", "200-145-5", "rejected", "lineage-45de90"));
-        model.AuditRows.Add(new AuditRowModel("14:12", "backup", "bundle-2026-04-15-1800", "listed", "restore-safe"));
-        model.AuditRows.Add(new AuditRowModel("14:08", "retention", "trim-dry-run", "clean", "0 destructive ops"));
+        model.PendingProofs.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 200-145-4", "pending", "Operator needs to confirm overlay save and subject match.", "desktop-shell proof review", "PDF artifact valid / approval pending", "Pending proof blocks related dispatch lane.", "Approve or reject after checking subject and saved overlay."));
+        model.PendingProofs.Add(new QueueItemModel("proof-240416-020", "shipper-70x50@v1 | 200-145-9", "pending", "PDF artifact validated; waiting for manual approval.", "desktop-shell proof review", "PDF artifact valid / approval pending", "No technical blocker. Awaiting human decision.", "Approve if the subject and artifact still match the request."));
+        model.PendingProofs.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 200-145-5", "rejected", "Retained for audit visibility and retry follow-up.", "audit history", "artifact retained / route closed", "Rejected proofs cannot unlock print.", "Use as audit reference when preparing a corrected retry."));
+        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-15-1800", "audit backup / 241 entries", "latest", "Validated bundle; safe candidate for explicit restore review.", "restore-safe bundle", "pre-check clean / merge guarded", "None. Bundle is ready for explicit restore review.", "Validate once more immediately before restore."));
+        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-14-1800", "audit backup / 229 entries", "kept", "Retention baseline before workstation redesign release.", "retention baseline", "kept / restore-capable", "No blocker. Kept for comparison.", "Retain until the next formal release is stable."));
+        model.BundleRows.Add(new QueueItemModel("bundle-2026-04-12-1800", "audit backup / 201 entries", "archive", "Older bundle kept until trim policy is applied.", "archive bundle", "eligible for trim review", "Trim policy not yet applied.", "Run retention dry-run before deleting archival bundles."));
+        model.AuditRows.Add(new AuditRowModel("14:27", "proof", "200-145-3", "approved", "lineage-7ba1a3", "basic-50x30@v2", "valid PDF", "Ready for dispatch audit follow-through", "Approved proof with matching lineage for the current subject."));
+        model.AuditRows.Add(new AuditRowModel("14:24", "dispatch", "200-145-3", "printed", "lineage-7ba1a3", "basic-50x30@v2", "dispatch audit entry", "Use as the print reference for export or investigation", "Dispatch completed with the same approved lineage."));
+        model.AuditRows.Add(new AuditRowModel("14:19", "proof", "200-145-5", "rejected", "lineage-45de90", "basic-50x30@v2", "rejected PDF", "Correct subject mismatch before retry", "Rejected proof retained for audit and retry context."));
+        model.AuditRows.Add(new AuditRowModel("14:12", "backup", "bundle-2026-04-15-1800", "listed", "restore-safe", "audit backup", "validated bundle", "Eligible for guarded restore review", "Latest backup bundle has already passed validation checks."));
+        model.AuditRows.Add(new AuditRowModel("14:08", "retention", "trim-dry-run", "clean", "0 destructive ops", "retention policy", "dry-run report", "Safe to inspect before apply", "Dry-run confirmed there are no destructive operations queued yet."));
         model.FilterRows.Add(new PropertyRowModel("Time window", "today / current shift"));
         model.FilterRows.Add(new PropertyRowModel("Lane filter", "proof + dispatch + retention"));
         model.FilterRows.Add(new PropertyRowModel("Subject search", "200-145-3"));
         model.FilterRows.Add(new PropertyRowModel("Export scope", "filtered current view"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Entry", "dispatch print job"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Subject", "200-145-3"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Approved proof", "proof-240416-018"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Artifact", "valid PDF"));
-        model.SelectedEntryRows.Add(new PropertyRowModel("Retention bundle", "bundle-2026-04-15-1800"));
         model.ControlSections.Add(new PropertySectionModel("Proof Review", "Legacy proof seeds stay pending; approval still flows through operator review.", new[] { new PropertyRowModel("Approve path", "manual review only"), new PropertyRowModel("Reject path", "captured in audit"), new PropertyRowModel("Pin artifact", "allowed after approval") }));
         model.ControlSections.Add(new PropertySectionModel("Audit Recovery", "Restore must fail before merge if the bundle is invalid or conflicts.", new[] { new PropertyRowModel("Restore policy", "conflict-safe"), new PropertyRowModel("Bundle validation", "explicit pre-check"), new PropertyRowModel("Trim mode", "dry-run before apply") }));
         model.MessageRows.Add(new MessageRowModel("Warn", "proof", "proof-240416-017 is still pending and blocks the related dispatch lane."));
@@ -348,6 +332,7 @@ public static class WorkspaceFactory
         model.StatusItems.Add(new StatusItemModel("Pending proofs", "2 active", "review queue still requires operator action", "WATCH", Brushes.DarkGoldenrod));
         model.StatusItems.Add(new StatusItemModel("Audit export", "ready", "filtered ledger export available", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Restore path", "guarded", "bundle validation before merge", "SAFE", Brushes.SteelBlue));
+        model.SelectedPendingProof = model.PendingProofs[0];
         return model;
     }
 
