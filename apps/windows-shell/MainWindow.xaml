@@ -7,125 +7,140 @@
     xmlns:primitives="clr-namespace:System.Windows.Controls.Primitives;assembly=PresentationFramework"
     mc:Ignorable="d"
     Title="{Binding WindowTitle}"
-    Width="1600"
-    Height="960"
-    MinWidth="1440"
-    MinHeight="900"
+    Width="1760"
+    Height="1040"
+    MinWidth="1520"
+    MinHeight="920"
     WindowStartupLocation="CenterScreen"
-    Background="#EEF1F5"
+    Background="#D9DEE5"
     FontFamily="Segoe UI">
   <Window.Resources>
-    <SolidColorBrush x:Key="ChromeBrush" Color="#E7EBF0" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#FBFCFD" />
-    <SolidColorBrush x:Key="PanelEdgeBrush" Color="#B8C3CF" />
+    <SolidColorBrush x:Key="ChromeBrush" Color="#EDF1F5" />
+    <SolidColorBrush x:Key="RibbonBrush" Color="#E5EAF0" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#F9FBFD" />
+    <SolidColorBrush x:Key="PanelEdgeBrush" Color="#B0BBC7" />
+    <SolidColorBrush x:Key="MutedBrush" Color="#677585" />
+    <SolidColorBrush x:Key="SelectionBrush" Color="#D4E2F5" />
+    <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#2B72C8" />
+
+    <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+      <Setter Property="FontSize" Value="11" />
+      <Setter Property="FontWeight" Value="SemiBold" />
+      <Setter Property="Foreground" Value="#607081" />
+    </Style>
+
     <Style x:Key="MenuButtonStyle" TargetType="Button">
       <Setter Property="Margin" Value="0,0,2,0" />
       <Setter Property="Padding" Value="10,4" />
-      <Setter Property="BorderBrush" Value="#C0C8D0" />
+      <Setter Property="BorderBrush" Value="Transparent" />
       <Setter Property="BorderThickness" Value="1" />
       <Setter Property="Background" Value="Transparent" />
     </Style>
-    <Style x:Key="RibbonButtonStyle" TargetType="Button">
-      <Setter Property="Margin" Value="0,0,6,0" />
-      <Setter Property="Padding" Value="10,6" />
-      <Setter Property="BorderBrush" Value="#B6C0CB" />
-      <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="#F9FAFB" />
-      <Setter Property="MinWidth" Value="110" />
-    </Style>
+
     <Style x:Key="PaneBorderStyle" TargetType="Border">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
       <Setter Property="BorderBrush" Value="{StaticResource PanelEdgeBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
       <Setter Property="Padding" Value="10" />
       <Setter Property="Margin" Value="0,0,0,8" />
     </Style>
-    <Style x:Key="PaneHeaderStyle" TargetType="TextBlock">
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="Foreground" Value="#5A6774" />
+
+    <Style x:Key="SelectableItemStyle" TargetType="ListBoxItem">
+      <Setter Property="Padding" Value="8" />
+      <Setter Property="Margin" Value="0,0,0,4" />
+      <Setter Property="Background" Value="#F7F9FB" />
+      <Setter Property="BorderBrush" Value="#CCD5DE" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="Template">
+        <Setter.Value>
+          <ControlTemplate TargetType="ListBoxItem">
+            <Border
+                x:Name="Chrome"
+                Padding="{TemplateBinding Padding}"
+                Background="{TemplateBinding Background}"
+                BorderBrush="{TemplateBinding BorderBrush}"
+                BorderThickness="{TemplateBinding BorderThickness}">
+              <ContentPresenter />
+            </Border>
+            <ControlTemplate.Triggers>
+              <Trigger Property="IsSelected" Value="True">
+                <Setter TargetName="Chrome" Property="Background" Value="{StaticResource SelectionBrush}" />
+                <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource SelectionEdgeBrush}" />
+              </Trigger>
+            </ControlTemplate.Triggers>
+          </ControlTemplate>
+        </Setter.Value>
+      </Setter>
     </Style>
   </Window.Resources>
 
-  <Grid>
-    <Grid.RowDefinitions>
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="Auto" />
-      <RowDefinition Height="*" />
-      <RowDefinition Height="Auto" />
-    </Grid.RowDefinitions>
-
-    <Border Grid.Row="0" BorderBrush="#BCC7D2" BorderThickness="0,0,0,1" Background="#F4F6F8">
+  <DockPanel LastChildFill="True">
+    <Border DockPanel.Dock="Top" Background="{StaticResource ChromeBrush}" BorderBrush="#BCC7D2" BorderThickness="0,0,0,1">
       <Grid Margin="8,6">
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="280" />
+          <ColumnDefinition Width="Auto" />
           <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="340" />
+          <ColumnDefinition Width="Auto" />
         </Grid.ColumnDefinitions>
-
-        <StackPanel Grid.Column="0">
-          <TextBlock FontSize="15" FontWeight="SemiBold" Text="JAN Label Operator Console" />
-          <TextBlock FontSize="11" Foreground="#667382" Text="Windows-native workstation shell" />
-        </StackPanel>
-
-        <StackPanel Grid.Column="1" Orientation="Horizontal" HorizontalAlignment="Left">
+        <StackPanel Orientation="Horizontal">
           <Button Style="{StaticResource MenuButtonStyle}" Content="File" />
           <Button Style="{StaticResource MenuButtonStyle}" Content="Edit" />
           <Button Style="{StaticResource MenuButtonStyle}" Content="View" />
-          <Button Style="{StaticResource MenuButtonStyle}" Content="Data" />
-          <Button Style="{StaticResource MenuButtonStyle}" Content="Template" />
+          <Button Style="{StaticResource MenuButtonStyle}" Content="Layout" />
+          <Button Style="{StaticResource MenuButtonStyle}" Content="Data Sources" />
           <Button Style="{StaticResource MenuButtonStyle}" Content="Tools" />
-          <Button Style="{StaticResource MenuButtonStyle}" Content="Window" />
+          <Button Style="{StaticResource MenuButtonStyle}" Content="Administration" />
           <Button Style="{StaticResource MenuButtonStyle}" Content="Help" />
         </StackPanel>
-
-        <StackPanel Grid.Column="2" HorizontalAlignment="Right">
-          <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Document" />
-          <TextBlock FontSize="13" FontWeight="SemiBold" Text="{Binding ActiveDocumentName}" />
-          <TextBlock FontSize="11" Foreground="#667382" Text="{Binding ActiveDocumentMeta}" />
+        <StackPanel Grid.Column="1" HorizontalAlignment="Center">
+          <TextBlock FontSize="15" FontWeight="SemiBold" Text="{Binding WindowTitle}" />
+          <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding WorkspaceTagline}" />
+        </StackPanel>
+        <StackPanel Grid.Column="2" Orientation="Horizontal">
+          <Button Margin="0,0,6,0" Padding="12,6" Content="New Format" />
+          <Button Margin="0,0,6,0" Padding="12,6" Content="Print Preview" />
+          <Button Padding="12,6" Content="Run Proof" />
         </StackPanel>
       </Grid>
     </Border>
 
-    <Border Grid.Row="1" BorderBrush="#BCC7D2" BorderThickness="0,0,0,1" Background="{StaticResource ChromeBrush}">
-      <Grid Margin="8">
-        <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="260" />
-          <ColumnDefinition Width="*" />
-        </Grid.ColumnDefinitions>
+    <Border DockPanel.Dock="Top" Background="{StaticResource RibbonBrush}" BorderBrush="#BCC7D2" BorderThickness="0,0,0,1">
+      <Grid Margin="8,8,8,6">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+        <ListBox
+            Grid.Row="0"
+            Background="Transparent"
+            BorderThickness="0"
+            ItemsSource="{Binding Modules}"
+            SelectedItem="{Binding SelectedModule}"
+            ItemContainerStyle="{StaticResource SelectableItemStyle}">
+          <ListBox.ItemsPanel>
+            <ItemsPanelTemplate>
+              <StackPanel Orientation="Horizontal" />
+            </ItemsPanelTemplate>
+          </ListBox.ItemsPanel>
+          <ListBox.ItemTemplate>
+            <DataTemplate>
+              <Grid Width="210">
+                <Grid.ColumnDefinitions>
+                  <ColumnDefinition Width="*" />
+                  <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                  <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
+                  <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Description}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1" Foreground="#235FA9" FontWeight="SemiBold" Text="{Binding Badge}" />
+              </Grid>
+            </DataTemplate>
+          </ListBox.ItemTemplate>
+        </ListBox>
 
-        <Border Grid.Column="0" BorderBrush="#B8C3CF" BorderThickness="1" Background="#FCFDFE" Padding="10" Margin="0,0,8,0">
-          <StackPanel>
-            <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Workspace" />
-            <TextBlock FontSize="16" FontWeight="SemiBold" Margin="0,4,0,0" Text="{Binding WorkspaceTitle}" />
-            <TextBlock FontSize="12" Foreground="#5C6977" TextWrapping="Wrap" Text="{Binding WorkspaceSummary}" />
-            <primitives:UniformGrid Columns="3" Margin="0,10,0,0">
-              <Border Margin="0,0,6,0" Padding="8" BorderBrush="#D0D7DE" BorderThickness="1" Background="#F8FAFC">
-                <StackPanel>
-                  <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Bridge" />
-                  <TextBlock FontWeight="SemiBold" Text="ready" />
-                  <TextBlock FontSize="11" Foreground="#667382" Text="desktop-shell" />
-                </StackPanel>
-              </Border>
-              <Border Margin="0,0,6,0" Padding="8" BorderBrush="#D0D7DE" BorderThickness="1" Background="#F8FAFC">
-                <StackPanel>
-                  <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Payload" />
-                  <TextBlock FontWeight="SemiBold" Text="armed" />
-                  <TextBlock FontSize="11" Foreground="#667382" Text="proof route" />
-                </StackPanel>
-              </Border>
-              <Border Padding="8" BorderBrush="#D0D7DE" BorderThickness="1" Background="#F8FAFC">
-                <StackPanel>
-                  <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Queue" />
-                  <TextBlock FontWeight="SemiBold" Text="42 rows" />
-                  <TextBlock FontSize="11" Foreground="#667382" Text="31 ready / 1 failed" />
-                </StackPanel>
-              </Border>
-            </primitives:UniformGrid>
-          </StackPanel>
-        </Border>
-
-        <ItemsControl Grid.Column="1" ItemsSource="{Binding RibbonGroups}">
+        <ItemsControl Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding RibbonGroups}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate>
               <WrapPanel />
@@ -133,10 +148,10 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Border Width="220" Margin="0,0,8,0" Padding="10" BorderBrush="#B8C3CF" BorderThickness="1" Background="#FCFDFE">
+              <Border Width="230" Margin="0,0,8,0" Padding="10" Background="#FCFDFE" BorderBrush="#B9C4CF" BorderThickness="1">
                 <StackPanel>
-                  <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="{Binding Title}" />
-                  <ItemsControl ItemsSource="{Binding Commands}" Margin="0,8,0,0">
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="{Binding Title}" />
+                  <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding Commands}">
                     <ItemsControl.ItemsPanel>
                       <ItemsPanelTemplate>
                         <WrapPanel />
@@ -144,7 +159,7 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>
-                        <Button Style="{StaticResource RibbonButtonStyle}" Content="{Binding}" />
+                        <Button Margin="0,0,6,6" Padding="10,8" MinWidth="100" Content="{Binding}" />
                       </DataTemplate>
                     </ItemsControl.ItemTemplate>
                   </ItemsControl>
@@ -156,11 +171,84 @@
       </Grid>
     </Border>
 
-    <Grid Grid.Row="2" Margin="8">
+    <Border DockPanel.Dock="Bottom" Background="#E6EBF1" BorderBrush="#BCC7D2" BorderThickness="1,1,0,0">
+      <Grid Margin="8,6">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="1.25*" />
+          <ColumnDefinition Width="1*" />
+          <ColumnDefinition Width="1*" />
+        </Grid.ColumnDefinitions>
+        <Border Grid.Column="0" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
+          <StackPanel>
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Messages" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding MessageSummary}" />
+            </DockPanel>
+            <ListView Margin="0,8,0,0" Height="156" ItemsSource="{Binding MessageRows}">
+              <ListView.View>
+                <GridView>
+                  <GridViewColumn Width="70" DisplayMemberBinding="{Binding Level}" Header="Level" />
+                  <GridViewColumn Width="80" DisplayMemberBinding="{Binding Source}" Header="Source" />
+                  <GridViewColumn Width="430" DisplayMemberBinding="{Binding Message}" Header="Message" />
+                </GridView>
+              </ListView.View>
+            </ListView>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="1" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
+          <StackPanel>
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selected Record" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding RecordSummary}" />
+            </DockPanel>
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding RecordRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="110" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{Binding Value}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <Border Grid.Column="2" Style="{StaticResource PaneBorderStyle}" Margin="0">
+          <StackPanel>
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Integration Status" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding StatusSummary}" />
+            </DockPanel>
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding StatusItems}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Margin="0,0,0,6" Padding="8" Background="#FCFDFE" BorderBrush="#CFD8E1" BorderThickness="1">
+                    <DockPanel>
+                      <StackPanel>
+                        <TextBlock Style="{StaticResource SectionTitleStyle}" Text="{Binding Label}" />
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Value}" />
+                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Detail}" />
+                      </StackPanel>
+                      <TextBlock DockPanel.Dock="Right" Foreground="{Binding Accent}" FontWeight="SemiBold" Text="{Binding Tone}" />
+                    </DockPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <Grid Margin="8">
       <Grid.ColumnDefinitions>
-        <ColumnDefinition Width="260" />
+        <ColumnDefinition Width="300" />
         <ColumnDefinition Width="*" />
-        <ColumnDefinition Width="340" />
+        <ColumnDefinition Width="380" />
       </Grid.ColumnDefinitions>
 
       <Grid Grid.Column="0" Margin="0,0,8,0">
@@ -169,178 +257,303 @@
           <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-
         <Border Style="{StaticResource PaneBorderStyle}">
           <StackPanel>
-            <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Explorer" />
-            <ListBox
-                Margin="0,8,0,0"
-                ItemsSource="{Binding Modules}"
-                SelectedItem="{Binding SelectedModule}"
-                BorderThickness="0"
-                Background="Transparent">
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Navigation" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="Document + records" />
+            </DockPanel>
+            <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding Modules}" SelectedItem="{Binding SelectedModule}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
               <ListBox.ItemTemplate>
                 <DataTemplate>
-                  <Border Padding="8" Margin="0,0,0,4" BorderBrush="#D1D8DF" BorderThickness="1" Background="#F7F9FB">
+                  <Grid>
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="*" />
+                      <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
                     <StackPanel>
-                      <DockPanel>
-                        <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
-                        <TextBlock DockPanel.Dock="Right" Foreground="#0F5CC0" FontWeight="SemiBold" Text="{Binding Badge}" />
-                      </DockPanel>
-                      <TextBlock FontSize="11" Foreground="#667382" TextWrapping="Wrap" Text="{Binding Description}" />
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
+                      <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Description}" />
                     </StackPanel>
-                  </Border>
+                    <TextBlock Grid.Column="1" Foreground="#235FA9" FontWeight="SemiBold" Text="{Binding Badge}" />
+                  </Grid>
                 </DataTemplate>
               </ListBox.ItemTemplate>
             </ListBox>
           </StackPanel>
         </Border>
-
         <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}">
           <StackPanel>
-            <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="{Binding ToolPaneTitle}" />
-            <ItemsControl ItemsSource="{Binding ToolPaneItems}" Margin="0,8,0,0">
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Toolbox" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="Objects / guides" />
+            </DockPanel>
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ToolboxGroups}">
               <ItemsControl.ItemTemplate>
                 <DataTemplate>
-                  <Border Margin="0,0,0,4" Padding="8" BorderBrush="#D1D8DF" BorderThickness="1" Background="#F7F9FB">
-                    <DockPanel>
-                      <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
-                      <TextBlock DockPanel.Dock="Right" Foreground="#5E6B79" Text="{Binding Badge}" />
-                    </DockPanel>
+                  <Border Margin="0,0,0,8" Padding="8" Background="#FCFDFE" BorderBrush="#D0D8E1" BorderThickness="1">
+                    <StackPanel>
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                      <ItemsControl Margin="0,6,0,0" ItemsSource="{Binding Items}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <DockPanel Margin="0,0,0,4">
+                              <TextBlock Text="{Binding Label}" />
+                              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding Badge}" />
+                            </DockPanel>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
                   </Border>
                 </DataTemplate>
               </ItemsControl.ItemTemplate>
             </ItemsControl>
           </StackPanel>
         </Border>
-
         <Border Grid.Row="2" Style="{StaticResource PaneBorderStyle}" Margin="0">
-          <StackPanel>
-            <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Properties" />
-            <ItemsControl ItemsSource="{Binding DocumentProperties}" Margin="0,8,0,0">
-              <ItemsControl.ItemTemplate>
-                <DataTemplate>
-                  <Grid Margin="0,0,0,6">
-                    <Grid.ColumnDefinitions>
-                      <ColumnDefinition Width="100" />
-                      <ColumnDefinition Width="*" />
-                    </Grid.ColumnDefinitions>
-                    <TextBlock Foreground="#667382" Text="{Binding Name}" />
-                    <TextBlock Grid.Column="1" FontFamily="Consolas" FontSize="12" Text="{Binding Value}" />
-                  </Grid>
-                </DataTemplate>
-              </ItemsControl.ItemTemplate>
-            </ItemsControl>
-            <TextBlock Margin="0,8,0,0" FontSize="11" Foreground="#667382" TextWrapping="Wrap" Text="{Binding WorkspaceFocus}" />
-          </StackPanel>
+          <Grid>
+            <Grid.RowDefinitions>
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="Auto" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Object Browser" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="9 design objects" />
+              </DockPanel>
+              <TreeView Margin="0,8,0,0" BorderBrush="#D0D8E1" BorderThickness="1" Background="#FFFFFF" ItemsSource="{Binding ObjectNodes}">
+                <TreeView.ItemTemplate>
+                  <HierarchicalDataTemplate ItemsSource="{Binding Children}">
+                    <DockPanel>
+                      <TextBlock Text="{Binding Label}" />
+                      <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding Meta}" />
+                    </DockPanel>
+                  </HierarchicalDataTemplate>
+                </TreeView.ItemTemplate>
+              </TreeView>
+            </StackPanel>
+            <StackPanel Grid.Row="1" Margin="0,10,0,0">
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Data Sources" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="6 mapped fields" />
+              </DockPanel>
+            </StackPanel>
+            <ListView Grid.Row="2" Margin="0,38,0,0" ItemsSource="{Binding DataSources}">
+              <ListView.View>
+                <GridView>
+                  <GridViewColumn Width="120" DisplayMemberBinding="{Binding Name}" Header="Field" />
+                  <GridViewColumn Width="70" DisplayMemberBinding="{Binding Type}" Header="Type" />
+                  <GridViewColumn Width="95" DisplayMemberBinding="{Binding Sample}" Header="Sample" />
+                </GridView>
+              </ListView.View>
+            </ListView>
+          </Grid>
         </Border>
       </Grid>
 
       <Grid Grid.Column="1" Margin="0,0,8,0">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
           <RowDefinition Height="*" />
         </Grid.RowDefinitions>
-
         <Border Style="{StaticResource PaneBorderStyle}">
+          <StackPanel>
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Documents" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding CanvasMeta}" />
+            </DockPanel>
+            <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding DocumentTabs}" SelectedItem="{Binding SelectedDocument}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
+              <ListBox.ItemsPanel>
+                <ItemsPanelTemplate>
+                  <StackPanel Orientation="Horizontal" />
+                </ItemsPanelTemplate>
+              </ListBox.ItemsPanel>
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel Width="180">
+                    <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                    <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Meta}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}">
           <Grid>
             <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
+              <ColumnDefinition Width="Auto" />
               <ColumnDefinition Width="*" />
-              <ColumnDefinition Width="320" />
             </Grid.ColumnDefinitions>
-            <StackPanel>
-              <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Workbench" />
-              <TextBlock FontSize="18" FontWeight="SemiBold" Margin="0,4,0,0" Text="{Binding WorkspaceTitle}" />
-              <TextBlock FontSize="12" Foreground="#5C6977" TextWrapping="Wrap" Text="{Binding WorkspaceSummary}" />
-            </StackPanel>
-            <Border Grid.Column="1" BorderBrush="#D1D8DF" BorderThickness="1" Background="#F7F9FB" Padding="8">
-              <StackPanel>
-                <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="Current Focus" />
-                <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding WorkspaceFocus}" />
-              </StackPanel>
+            <Button Grid.Column="0" Margin="0,0,6,0" Padding="12,6" Content="Pointer" />
+            <Button Grid.Column="1" Margin="0,0,6,0" Padding="12,6" Content="Text" />
+            <Button Grid.Column="2" Margin="0,0,6,0" Padding="12,6" Content="Barcode" />
+            <TextBlock Grid.Column="3" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}" Text="{Binding CanvasHint}" />
+          </Grid>
+        </Border>
+        <Border Grid.Row="2" Style="{StaticResource PaneBorderStyle}" Margin="0">
+          <Grid Background="#E7ECF2">
+            <Grid.RowDefinitions>
+              <RowDefinition Height="28" />
+              <RowDefinition Height="*" />
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+              <ColumnDefinition Width="28" />
+              <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+            <Border Grid.Row="0" Grid.Column="1" Background="#EFF2F6" BorderBrush="#CBD4DD" BorderThickness="0,0,0,1">
+              <ItemsControl ItemsSource="{Binding TopRulerMarks}">
+                <ItemsControl.ItemsPanel>
+                  <ItemsPanelTemplate>
+                    <primitives:UniformGrid Columns="9" />
+                  </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border BorderBrush="#D0D8E1" BorderThickness="0,0,1,0">
+                      <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="{StaticResource MutedBrush}" Text="{Binding}" />
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+            <Border Grid.Row="1" Grid.Column="0" Background="#EFF2F6" BorderBrush="#CBD4DD" BorderThickness="0,0,1,0">
+              <ItemsControl ItemsSource="{Binding SideRulerMarks}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Height="44" BorderBrush="#D0D8E1" BorderThickness="0,0,0,1">
+                      <TextBlock HorizontalAlignment="Center" VerticalAlignment="Center" FontSize="10" Foreground="{StaticResource MutedBrush}" Text="{Binding}" />
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </Border>
+            <Border Grid.Row="1" Grid.Column="1" Margin="20" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}" HorizontalAlignment="Center" VerticalAlignment="Top" Background="#FFFFFF" BorderBrush="#8D98A5" BorderThickness="1.2">
+              <Canvas Background="#FFFFFF" Width="{Binding CanvasWidth}" Height="{Binding CanvasHeight}">
+                <ItemsControl ItemsSource="{Binding CanvasElements}">
+                  <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                      <Canvas />
+                    </ItemsPanelTemplate>
+                  </ItemsControl.ItemsPanel>
+                  <ItemsControl.ItemContainerStyle>
+                    <Style TargetType="ContentPresenter">
+                      <Setter Property="Canvas.Left" Value="{Binding X}" />
+                      <Setter Property="Canvas.Top" Value="{Binding Y}" />
+                    </Style>
+                  </ItemsControl.ItemContainerStyle>
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                      <Border Width="{Binding Width}" Height="{Binding Height}" Padding="4" Background="#F9FCFF" BorderBrush="#2B72C8" BorderThickness="1">
+                        <Border.Style>
+                          <Style TargetType="Border">
+                            <Setter Property="Background" Value="#F9FCFF" />
+                            <Setter Property="BorderBrush" Value="#2B72C8" />
+                            <Setter Property="BorderThickness" Value="1" />
+                            <Style.Triggers>
+                              <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                <Setter Property="Background" Value="#FFF6D8" />
+                                <Setter Property="BorderBrush" Value="#CF8D20" />
+                                <Setter Property="BorderThickness" Value="1.8" />
+                              </DataTrigger>
+                            </Style.Triggers>
+                          </Style>
+                        </Border.Style>
+                        <StackPanel>
+                          <TextBlock FontSize="10" Foreground="{StaticResource MutedBrush}" Text="{Binding Caption}" />
+                          <TextBlock FontSize="{Binding FontSize}" FontWeight="SemiBold" Text="{Binding Value}" />
+                        </StackPanel>
+                      </Border>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </Canvas>
             </Border>
           </Grid>
         </Border>
-
-        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto">
-          <ItemsControl ItemsSource="{Binding WorkbenchPanels}">
-            <ItemsControl.ItemsPanel>
-              <ItemsPanelTemplate>
-                <WrapPanel />
-              </ItemsPanelTemplate>
-            </ItemsControl.ItemsPanel>
-            <ItemsControl.ItemTemplate>
-              <DataTemplate>
-                <Border Width="360" Margin="0,0,8,8" Padding="10" BorderBrush="#B8C3CF" BorderThickness="1" Background="#FCFDFE">
-                  <StackPanel>
-                    <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="{Binding Title}" />
-                    <TextBlock Margin="0,4,0,0" FontSize="14" FontWeight="SemiBold" Text="{Binding Summary}" />
-                    <ItemsControl ItemsSource="{Binding Lines}" Margin="0,8,0,0">
-                      <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                          <Border Margin="0,0,0,4" Padding="6" BorderBrush="#D7DEE5" BorderThickness="1" Background="#F7F9FB">
-                            <TextBlock FontSize="12" TextWrapping="Wrap" Text="{Binding}" />
-                          </Border>
-                        </DataTemplate>
-                      </ItemsControl.ItemTemplate>
-                    </ItemsControl>
-                  </StackPanel>
-                </Border>
-              </DataTemplate>
-            </ItemsControl.ItemTemplate>
-          </ItemsControl>
-        </ScrollViewer>
       </Grid>
 
-      <ScrollViewer Grid.Column="2" VerticalScrollBarVisibility="Auto">
-        <ItemsControl ItemsSource="{Binding InspectorSections}">
-          <ItemsControl.ItemTemplate>
-            <DataTemplate>
-              <Border Style="{StaticResource PaneBorderStyle}">
-                <StackPanel>
-                  <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="{Binding Title}" />
-                  <TextBlock Margin="0,4,0,0" FontSize="12" FontWeight="SemiBold" Text="{Binding Summary}" />
-                  <ItemsControl ItemsSource="{Binding Rows}" Margin="0,8,0,0">
-                    <ItemsControl.ItemTemplate>
-                      <DataTemplate>
-                        <Grid Margin="0,0,0,6">
-                          <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="120" />
-                            <ColumnDefinition Width="*" />
-                          </Grid.ColumnDefinitions>
-                          <TextBlock Foreground="#667382" Text="{Binding Name}" />
-                          <TextBlock Grid.Column="1" FontSize="12" TextWrapping="Wrap" Text="{Binding Value}" />
-                        </Grid>
-                      </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                  </ItemsControl>
-                </StackPanel>
-              </Border>
-            </DataTemplate>
-          </ItemsControl.ItemTemplate>
-        </ItemsControl>
-      </ScrollViewer>
+      <Grid Grid.Column="2">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="Auto" />
+          <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+        <Border Style="{StaticResource PaneBorderStyle}">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Document Setup" />
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SetupRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="110" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{Binding Value}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selection Metrics" />
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SelectionRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="110" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{Binding Value}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+        <Border Grid.Row="2" Style="{StaticResource PaneBorderStyle}" Margin="0">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Property Grid" />
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding PropertySections}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Margin="0,0,0,8" Padding="8" Background="#FCFDFE" BorderBrush="#D0D8E1" BorderThickness="1">
+                    <StackPanel>
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                      <TextBlock Margin="0,2,0,6" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Summary}" />
+                      <ItemsControl ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Grid Margin="0,0,0,5">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="112" />
+                                <ColumnDefinition Width="*" />
+                              </Grid.ColumnDefinitions>
+                              <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                              <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </Grid>
     </Grid>
-
-    <Border Grid.Row="3" BorderBrush="#BCC7D2" BorderThickness="1,1,0,0" Background="#DFE5EC">
-      <ItemsControl ItemsSource="{Binding StatusItems}" Margin="8,6">
-        <ItemsControl.ItemsPanel>
-          <ItemsPanelTemplate>
-            <primitives:UniformGrid Columns="4" />
-          </ItemsPanelTemplate>
-        </ItemsControl.ItemsPanel>
-        <ItemsControl.ItemTemplate>
-          <DataTemplate>
-            <Border Margin="0,0,6,0" Padding="6" BorderBrush="#B8C3CF" BorderThickness="1" Background="#F9FAFB">
-              <StackPanel>
-                <TextBlock Style="{StaticResource PaneHeaderStyle}" Text="{Binding Label}" />
-                <TextBlock FontWeight="SemiBold" Text="{Binding Value}" />
-                <TextBlock FontSize="11" Foreground="#667382" Text="{Binding Detail}" />
-              </StackPanel>
-            </Border>
-          </DataTemplate>
-        </ItemsControl.ItemTemplate>
-      </ItemsControl>
-    </Border>
-  </Grid>
+  </DockPanel>
 </Window>

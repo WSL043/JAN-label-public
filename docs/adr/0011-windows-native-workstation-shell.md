@@ -35,3 +35,8 @@ Rules:
   - Windows-native WPF shell path
 - Release packaging remains on the current `desktop-shell` path until the native shell is wired into backend commands.
 - Future operator UX work should target the WPF shell first for shell language decisions, then backport only what is required to keep the transitional web path usable.
+- The native shell should not remain a placeholder chrome mock. Its baseline should include a practical label-designer frame:
+  - left toolbox and object browser
+  - center document tabs and design canvas
+  - right property grid
+  - bottom records, messages, and operator status

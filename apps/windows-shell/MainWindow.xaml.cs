@@ -3,23 +3,22 @@ using System.Collections.ObjectModel;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Windows;
+using System.Windows.Media;
 
 namespace JanLabel.WindowsShell;
 
 public partial class MainWindow : Window, INotifyPropertyChanged
 {
     private ModuleModel? _selectedModule;
-    private string _toolPaneTitle = "Tasks";
-    private string _workspaceTitle = "Job Document";
-    private string _workspaceSummary = "Operator input, execution intent, and the current working payload.";
-    private string _workspaceFocus = "Working copy drives submit. Frozen review copy stays reference-only.";
+    private DocumentTabModel? _selectedDocument;
 
     public MainWindow()
     {
         InitializeComponent();
         DataContext = this;
-        SeedStaticState();
-        SelectedModule = Modules[0];
+        Seed();
+        SelectedModule = Modules[1];
+        SelectedDocument = DocumentTabs[0];
     }
 
     public event PropertyChangedEventHandler? PropertyChanged;
@@ -28,15 +27,31 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<RibbonGroupModel> RibbonGroups { get; } = new();
 
-    public ObservableCollection<ToolItemModel> ToolPaneItems { get; } = new();
+    public ObservableCollection<ToolboxGroupModel> ToolboxGroups { get; } = new();
 
-    public ObservableCollection<PropertyRowModel> DocumentProperties { get; } = new();
+    public ObservableCollection<ObjectNodeModel> ObjectNodes { get; } = new();
 
-    public ObservableCollection<WorkbenchPanelModel> WorkbenchPanels { get; } = new();
+    public ObservableCollection<DataSourceRowModel> DataSources { get; } = new();
 
-    public ObservableCollection<InspectorSectionModel> InspectorSections { get; } = new();
+    public ObservableCollection<DocumentTabModel> DocumentTabs { get; } = new();
+
+    public ObservableCollection<CanvasElementModel> CanvasElements { get; } = new();
+
+    public ObservableCollection<PropertySectionModel> PropertySections { get; } = new();
+
+    public ObservableCollection<PropertyRowModel> SetupRows { get; } = new();
+
+    public ObservableCollection<PropertyRowModel> SelectionRows { get; } = new();
+
+    public ObservableCollection<PropertyRowModel> RecordRows { get; } = new();
+
+    public ObservableCollection<MessageRowModel> MessageRows { get; } = new();
 
     public ObservableCollection<StatusItemModel> StatusItems { get; } = new();
+
+    public ObservableCollection<string> TopRulerMarks { get; } = new();
+
+    public ObservableCollection<string> SideRulerMarks { get; } = new();
 
     public ModuleModel? SelectedModule
     {
@@ -45,387 +60,163 @@ public partial class MainWindow : Window, INotifyPropertyChanged
         {
             if (SetProperty(ref _selectedModule, value))
             {
-                LoadModuleState(value);
                 OnPropertyChanged(nameof(WindowTitle));
-                OnPropertyChanged(nameof(ActiveDocumentMeta));
             }
         }
     }
 
-    public string ToolPaneTitle
+    public DocumentTabModel? SelectedDocument
     {
-        get => _toolPaneTitle;
-        set => SetProperty(ref _toolPaneTitle, value);
+        get => _selectedDocument;
+        set => SetProperty(ref _selectedDocument, value);
     }
 
-    public string WorkspaceTitle
+    public string WindowTitle => $"JAN Label Workstation - {SelectedModule?.Label ?? "Designer"}";
+
+    public string WorkspaceTagline => "BarTender-style operator workstation baseline";
+
+    public string CanvasMeta => "basic-50x30@v2 | pdf-proof | record 12 / 24";
+
+    public string CanvasHint => "Select objects on the canvas, edit properties on the right, validate through proof before print.";
+
+    public string MessageSummary => "2 warnings / 0 blockers";
+
+    public string RecordSummary => "24 active records";
+
+    public string StatusSummary => "desktop-shell remains the proof/print authority";
+
+    public double CanvasWidth => 660;
+
+    public double CanvasHeight => 410;
+
+    private void Seed()
     {
-        get => _workspaceTitle;
-        set => SetProperty(ref _workspaceTitle, value);
-    }
+        Modules.Add(new ModuleModel("Home", "Shell / session state", "active"));
+        Modules.Add(new ModuleModel("Designer", "Format authoring and preview", "design"));
+        Modules.Add(new ModuleModel("Print Console", "Working payload and proof route", "ready"));
+        Modules.Add(new ModuleModel("Batch Jobs", "Workbook import and queue", "24"));
+        Modules.Add(new ModuleModel("History", "Proof review and audit", "6 pending"));
 
-    public string WorkspaceSummary
-    {
-        get => _workspaceSummary;
-        set => SetProperty(ref _workspaceSummary, value);
-    }
+        RibbonGroups.Add(new RibbonGroupModel("Clipboard", "Paste", "Duplicate", "Delete"));
+        RibbonGroups.Add(new RibbonGroupModel("Insert", "Text", "Barcode", "Line", "Box"));
+        RibbonGroups.Add(new RibbonGroupModel("Arrange", "Align Left", "Make Same Size", "Snap"));
+        RibbonGroups.Add(new RibbonGroupModel("Data", "Record Browser", "Query Prompt", "Named Data Sources"));
+        RibbonGroups.Add(new RibbonGroupModel("Validate", "Rust Preview", "Save to Catalog", "Run Proof"));
 
-    public string WorkspaceFocus
-    {
-        get => _workspaceFocus;
-        set => SetProperty(ref _workspaceFocus, value);
-    }
-
-    public string ActiveDocumentName => "JOB-20260416-001";
-
-    public string ActiveDocumentMeta => $"{SelectedModule?.Label ?? "Operator Workstation"} | basic-50x30@v1";
-
-    public string WindowTitle => $"JAN Label Operator Console - {SelectedModule?.Label ?? "Workstation"}";
-
-    private void SeedStaticState()
-    {
-        Modules.Add(new ModuleModel("compose", "Job Setup", "Working copy, operator data, and proof intent.", "ready"));
-        Modules.Add(new ModuleModel("templates", "Designer", "Canvas, objects, renderer, and local library.", "valid"));
-        Modules.Add(new ModuleModel("queue", "Batch Manager", "Import session, validation, and dispatch queue.", "42"));
-        Modules.Add(new ModuleModel("audit", "History", "Proof approvals, audit ledger, and recovery.", "6 pending"));
-
-        DocumentProperties.Add(new PropertyRowModel("Job", "JOB-20260416-001"));
-        DocumentProperties.Add(new PropertyRowModel("Template", "basic-50x30@v1"));
-        DocumentProperties.Add(new PropertyRowModel("Mode", "proof"));
-        DocumentProperties.Add(new PropertyRowModel("Bridge", "desktop-shell"));
-
-        StatusItems.Add(new StatusItemModel("Bridge", "ready", "desktop-shell backend"));
-        StatusItems.Add(new StatusItemModel("Payload", "armed", "live working copy"));
-        StatusItems.Add(new StatusItemModel("Queue", "42 rows", "31 ready / 1 failed"));
-        StatusItems.Add(new StatusItemModel("Audit", "6 pending", "restore capable"));
-    }
-
-    private void LoadModuleState(ModuleModel? module)
-    {
-        RibbonGroups.Clear();
-        ToolPaneItems.Clear();
-        WorkbenchPanels.Clear();
-        InspectorSections.Clear();
-
-        if (module is null)
+        ToolboxGroups.Add(new ToolboxGroupModel("Objects", new[]
         {
-            return;
-        }
-
-        switch (module.Key)
+            new ToolboxItemModel("Text", "A"),
+            new ToolboxItemModel("Barcode", "JAN"),
+            new ToolboxItemModel("Counter", "#"),
+            new ToolboxItemModel("Picture", "IMG"),
+        }));
+        ToolboxGroups.Add(new ToolboxGroupModel("Guides", new[]
         {
-            case "compose":
-                LoadComposeState();
-                break;
-            case "templates":
-                LoadTemplateState();
-                break;
-            case "queue":
-                LoadQueueState();
-                break;
-            default:
-                LoadAuditState();
-                break;
-        }
-    }
+            new ToolboxItemModel("Margins", "4 mm"),
+            new ToolboxItemModel("Grid", "2 mm"),
+            new ToolboxItemModel("Snap", "On"),
+        }));
 
-    private void LoadComposeState()
-    {
-        ToolPaneTitle = "Tasks";
-        WorkspaceTitle = "Job Document";
-        WorkspaceSummary = "Operator input, execution intent, and the current working payload.";
-        WorkspaceFocus = "Working copy drives submit. Frozen review copy stays reference-only.";
-        RibbonGroups.Add(new RibbonGroupModel("File", "Refresh bridge", "Load workspace", "Clear workspace"));
-        RibbonGroups.Add(new RibbonGroupModel("Document", "Freeze review copy", "New job"));
-        RibbonGroups.Add(new RibbonGroupModel("Proof / Print", "Submit live job"));
-        ToolPaneItems.Add(new ToolItemModel("Working copy", "live"));
-        ToolPaneItems.Add(new ToolItemModel("Review copy", "frozen"));
-        ToolPaneItems.Add(new ToolItemModel("Authority", "proof-gated"));
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Payload",
-                "Current working copy",
-                new[]
-                {
-                    "SKU 200-145-3 / Parent SKU 200-145",
-                    "JAN 4901234567894 / Qty 24 / Brand JAN-LAB",
-                    "Execution intent proof / requested by operator-1",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Proof Boundary",
-                "Submit authority",
-                new[]
-                {
-                    "Live payload is authoritative.",
-                    "Frozen review copy is export/reference only.",
-                    "desktop-shell enforces lineage and approved-proof checks.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Preview",
-                "Document verification",
-                new[]
-                {
-                    "Template route basic-50x30@v1",
-                    "Adapter PDF proof",
-                    "Local catalog remains the dispatch source of truth.",
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Document",
-                "Operator context",
-                new[]
-                {
-                    new PropertyRowModel("Requested by", "operator-1"),
-                    new PropertyRowModel("Requested at", "2026-04-16 14:20"),
-                    new PropertyRowModel("Execution", "proof / review-first"),
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Authority",
-                "Dispatch rules",
-                new[]
-                {
-                    new PropertyRowModel("Template authority", "saved local catalog only"),
-                    new PropertyRowModel("Proof gate", "approved lineage + subject match"),
-                    new PropertyRowModel("Fallback", "browser mode remains submit-disabled"),
-                }
-            )
-        );
-    }
+        ObjectNodes.Add(new ObjectNodeModel("Label Format", "50 x 30 mm", new[]
+        {
+            new ObjectNodeModel("Static Layer", "3 objects", new[]
+            {
+                new ObjectNodeModel("Brand mark", "Text"),
+                new ObjectNodeModel("Frame", "Box"),
+                new ObjectNodeModel("Divider", "Line"),
+            }),
+            new ObjectNodeModel("Data Layer", "5 objects", new[]
+            {
+                new ObjectNodeModel("Product name", "{{sku}}"),
+                new ObjectNodeModel("JAN barcode", "{{jan}}"),
+                new ObjectNodeModel("JAN text", "{{jan}}"),
+                new ObjectNodeModel("Quantity", "{{qty}}"),
+            }),
+        }));
 
-    private void LoadTemplateState()
-    {
-        ToolPaneTitle = "Toolbox";
-        WorkspaceTitle = "Template Designer";
-        WorkspaceSummary = "Canvas authoring, object properties, library save, and renderer parity.";
-        WorkspaceFocus = "Local draft, preview, and library authority stay separate so unsaved edits never dispatch.";
-        RibbonGroups.Add(new RibbonGroupModel("Authoring", "Check template", "Reset designer", "Refresh renderer"));
-        RibbonGroups.Add(new RibbonGroupModel("Library", "Publish local copy", "Inspect manifest"));
-        RibbonGroups.Add(new RibbonGroupModel("Selection", "Page setup", "Objects", "Preview", "Library"));
-        ToolPaneItems.Add(new ToolItemModel("Page Setup", "valid"));
-        ToolPaneItems.Add(new ToolItemModel("Objects", "8 fields"));
-        ToolPaneItems.Add(new ToolItemModel("Preview", "rust-ready"));
-        ToolPaneItems.Add(new ToolItemModel("Library", "local"));
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Canvas",
-                "Layout surface",
-                new[]
-                {
-                    "50mm x 30mm media / border on",
-                    "Object list: SKU, JAN, brand, qty",
-                    "Selection model and property grid are native-shell targets",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Renderer",
-                "Rust parity review",
-                new[]
-                {
-                    "Rust preview stays authoritative for output parity.",
-                    "Local canvas is for editing speed and geometry review.",
-                    "Saved library state remains the dispatch boundary.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Library",
-                "Catalog governance",
-                new[]
-                {
-                    "Packaged + local overlay resolution shown together.",
-                    "Manifest health and orphaned JSON need dedicated operator UX.",
-                    "Single-writer repair guidance remains visible.",
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Selection",
-                "Current object",
-                new[]
-                {
-                    new PropertyRowModel("Object", "jan"),
-                    new PropertyRowModel("Binding", "{{jan}}"),
-                    new PropertyRowModel("Font", "Segoe UI 10pt"),
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Authority",
-                "Catalog rules",
-                new[]
-                {
-                    new PropertyRowModel("Draft", "not authoritative"),
-                    new PropertyRowModel("Library", "local overlay wins when saved"),
-                    new PropertyRowModel("Repair", "manifest + backup guidance required"),
-                }
-            )
-        );
-    }
+        DataSources.Add(new DataSourceRowModel("sku", "Text", "200-145-3"));
+        DataSources.Add(new DataSourceRowModel("jan", "JAN", "4901234567894"));
+        DataSources.Add(new DataSourceRowModel("qty", "Number", "24"));
+        DataSources.Add(new DataSourceRowModel("brand", "Text", "JAN-LAB"));
+        DataSources.Add(new DataSourceRowModel("template_version", "Text", "basic-50x30@v2"));
+        DataSources.Add(new DataSourceRowModel("proof_mode", "Expr", "proof"));
 
-    private void LoadQueueState()
-    {
-        ToolPaneTitle = "Views";
-        WorkspaceTitle = "Batch Manager";
-        WorkspaceSummary = "Spreadsheet intake, row validation, and controlled batch dispatch.";
-        WorkspaceFocus = "Batch mutation lock remains active until the current dispatch session completes.";
-        RibbonGroups.Add(new RibbonGroupModel("Batch", "Build batch", "Clear batch", "Reset import"));
-        RibbonGroups.Add(new RibbonGroupModel("Dispatch", "Run batch", "Retry failed"));
-        RibbonGroups.Add(new RibbonGroupModel("View", "All rows", "Ready rows", "Failed rows"));
-        ToolPaneItems.Add(new ToolItemModel("All rows", "42"));
-        ToolPaneItems.Add(new ToolItemModel("Ready rows", "31"));
-        ToolPaneItems.Add(new ToolItemModel("Failed rows", "1"));
-        ToolPaneItems.Add(new ToolItemModel("Submitted rows", "10"));
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Import Session",
-                "Workbook intake",
-                new[]
-                {
-                    "CSV/XLSX mapping remains operator-driven.",
-                    "Risky numeric JAN cells remain blocked or warned.",
-                    "Queue snapshot is built from validated rows only.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Grid",
-                "Dispatch ledger view",
-                new[]
-                {
-                    "Sticky headers, sort, filter, and paging stay dense.",
-                    "Rows show ready / failed / submitted state.",
-                    "Mutation controls lock while batch dispatch is active.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Recovery",
-                "Retry scope",
-                new[]
-                {
-                    "Only ready and failed rows can re-enter dispatch.",
-                    "Submitted rows remain immutable.",
-                    "Lineage and proof gate still resolve in desktop-shell.",
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Selected Row",
-                "Current queue selection",
-                new[]
-                {
-                    new PropertyRowModel("Row", "18"),
-                    new PropertyRowModel("Status", "failed"),
-                    new PropertyRowModel("Reason", "template version not found"),
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Session",
-                "Batch boundaries",
-                new[]
-                {
-                    new PropertyRowModel("Snapshot", "queue-20260416-01"),
-                    new PropertyRowModel("Mutation lock", "active during submit"),
-                    new PropertyRowModel("Retry policy", "ready + failed only"),
-                }
-            )
-        );
-    }
+        DocumentTabs.Add(new DocumentTabModel("basic-50x30", "record-linked format"));
+        DocumentTabs.Add(new DocumentTabModel("proof-preview", "validation surface"));
 
-    private void LoadAuditState()
-    {
-        ToolPaneTitle = "Views";
-        WorkspaceTitle = "Audit Ledger";
-        WorkspaceSummary = "Proof review, export, retention, bundle inventory, and recovery.";
-        WorkspaceFocus = "History combines proof review, export, retention, bundle inventory, and restore.";
-        RibbonGroups.Add(new RibbonGroupModel("Audit", "Refresh ledger", "Refresh bundles", "Export records"));
-        RibbonGroups.Add(new RibbonGroupModel("Recovery", "Restore bundle", "Inspect bundle"));
-        RibbonGroups.Add(new RibbonGroupModel("Proof", "Approve", "Reject", "Pin proof"));
-        ToolPaneItems.Add(new ToolItemModel("All entries", "198"));
-        ToolPaneItems.Add(new ToolItemModel("Proof only", "34"));
-        ToolPaneItems.Add(new ToolItemModel("Print only", "164"));
-        ToolPaneItems.Add(new ToolItemModel("Pending proof", "6"));
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Ledger",
-                "Operational history",
-                new[]
-                {
-                    "Proof and print events stay in the same lineage family.",
-                    "Retention and export operate on the persisted local ledger.",
-                    "Bundle inventory is part of the audit workstation, not a side list.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Restore",
-                "Bundle recovery",
-                new[]
-                {
-                    "Restore remains all-or-nothing on conflict or invalid input.",
-                    "Success refreshes ledger search and backup inventory.",
-                    "UI must keep restore confirmation explicit.",
-                }
-            )
-        );
-        WorkbenchPanels.Add(
-            new WorkbenchPanelModel(
-                "Proof Review",
-                "Inbox discipline",
-                new[]
-                {
-                    "Legacy proofs seed only as pending.",
-                    "Approval is always operator-driven.",
-                    "Approved artifact path and PDF validity remain enforced.",
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Selected Entry",
-                "Focused ledger record",
-                new[]
-                {
-                    new PropertyRowModel("Job ID", "proof-20260416-004"),
-                    new PropertyRowModel("Mode", "proof"),
-                    new PropertyRowModel("Status", "pending"),
-                }
-            )
-        );
-        InspectorSections.Add(
-            new InspectorSectionModel(
-                "Recovery",
-                "Bundle restore state",
-                new[]
-                {
-                    new PropertyRowModel("Bundle", "audit-backup-20260416.json"),
-                    new PropertyRowModel("Confirmation", "required"),
-                    new PropertyRowModel("Apply mode", "merge restore / fail on conflict"),
-                }
-            )
-        );
+        CanvasElements.Add(new CanvasElementModel("BRAND", "JAN-LAB", 30, 22, 120, 32, 14, false));
+        CanvasElements.Add(new CanvasElementModel("SKU", "200-145-3", 30, 72, 180, 36, 18, false));
+        CanvasElements.Add(new CanvasElementModel("BARCODE", "| ||| || ||| | ||", 28, 132, 320, 102, 16, true));
+        CanvasElements.Add(new CanvasElementModel("JAN", "4901234567894", 50, 244, 220, 26, 14, false));
+        CanvasElements.Add(new CanvasElementModel("QTY", "24 PCS", 470, 38, 120, 40, 20, false));
+        CanvasElements.Add(new CanvasElementModel("STATUS", "Proof lineage locked", 390, 304, 210, 32, 13, false));
+
+        SetupRows.Add(new PropertyRowModel("Document", "basic-50x30@v2"));
+        SetupRows.Add(new PropertyRowModel("Printer profile", "pdf-proof / 300 dpi"));
+        SetupRows.Add(new PropertyRowModel("Catalog authority", "saved local overlay only"));
+        SetupRows.Add(new PropertyRowModel("Dispatch route", "desktop-shell"));
+        SetupRows.Add(new PropertyRowModel("Working record", "12 / 24"));
+
+        PropertySections.Add(new PropertySectionModel("Selected Object", "Property-grid style editing for the focused item.", new[]
+        {
+            new PropertyRowModel("Name", "JAN barcode"),
+            new PropertyRowModel("Binding", "{{jan}}"),
+            new PropertyRowModel("Symbology", "EAN-13 / JAN"),
+            new PropertyRowModel("Position", "28,132"),
+            new PropertyRowModel("Size", "320 x 102"),
+        }));
+        PropertySections.Add(new PropertySectionModel("Layout Rules", "Output constraints remain deterministic and print-core-safe.", new[]
+        {
+            new PropertyRowModel("Scale", "fixed 100%"),
+            new PropertyRowModel("Barcode engine", "Zint only"),
+            new PropertyRowModel("Output", "SVG / PDF"),
+            new PropertyRowModel("Unsaved draft", "preview only"),
+        }));
+        PropertySections.Add(new PropertySectionModel("Proof Gate", "Dispatch is still gated outside the shell.", new[]
+        {
+            new PropertyRowModel("Authority", "approved proof lineage"),
+            new PropertyRowModel("Required match", "sku / brand / jan / qty / templateVersion"),
+            new PropertyRowModel("Artifact", "valid non-empty PDF"),
+        }));
+
+        SelectionRows.Add(new PropertyRowModel("X", "28.0 mm"));
+        SelectionRows.Add(new PropertyRowModel("Y", "13.2 mm"));
+        SelectionRows.Add(new PropertyRowModel("Width", "32.0 mm"));
+        SelectionRows.Add(new PropertyRowModel("Height", "10.2 mm"));
+        SelectionRows.Add(new PropertyRowModel("Rotation", "0"));
+
+        RecordRows.Add(new PropertyRowModel("SKU", "200-145-3"));
+        RecordRows.Add(new PropertyRowModel("JAN", "4901234567894"));
+        RecordRows.Add(new PropertyRowModel("Brand", "JAN-LAB"));
+        RecordRows.Add(new PropertyRowModel("Qty", "24"));
+        RecordRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
+
+        MessageRows.Add(new MessageRowModel("Info", "renderer", "Rust preview and canvas geometry are aligned for the selected format."));
+        MessageRows.Add(new MessageRowModel("Warn", "catalog", "Local catalog override is active. Save before proof if this draft should dispatch."));
+        MessageRows.Add(new MessageRowModel("Info", "proof", "Approved proof lineage will be required before print route unlocks."));
+
+        StatusItems.Add(new StatusItemModel("Bridge", "connected", "desktop-shell / proof gate", "OK", Brushes.ForestGreen));
+        StatusItems.Add(new StatusItemModel("Catalog", "overlay active", "packaged + local manifest", "WATCH", Brushes.DarkGoldenrod));
+        StatusItems.Add(new StatusItemModel("Audit", "restore-ready", "backup bundles available", "OK", Brushes.ForestGreen));
+        StatusItems.Add(new StatusItemModel("Printer", "pdf-proof", "physical validation deferred", "PDF", Brushes.SteelBlue));
+
+        TopRulerMarks.Add("0");
+        TopRulerMarks.Add("10");
+        TopRulerMarks.Add("20");
+        TopRulerMarks.Add("30");
+        TopRulerMarks.Add("40");
+        TopRulerMarks.Add("50");
+        TopRulerMarks.Add("60");
+        TopRulerMarks.Add("70");
+        TopRulerMarks.Add("80");
+
+        SideRulerMarks.Add("0");
+        SideRulerMarks.Add("5");
+        SideRulerMarks.Add("10");
+        SideRulerMarks.Add("15");
+        SideRulerMarks.Add("20");
+        SideRulerMarks.Add("25");
+        SideRulerMarks.Add("30");
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)
@@ -448,15 +239,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
 public sealed class ModuleModel
 {
-    public ModuleModel(string key, string label, string description, string badge)
+    public ModuleModel(string label, string description, string badge)
     {
-        Key = key;
         Label = label;
         Description = description;
         Badge = badge;
     }
-
-    public string Key { get; }
 
     public string Label { get; }
 
@@ -478,9 +266,22 @@ public sealed class RibbonGroupModel
     public ObservableCollection<string> Commands { get; }
 }
 
-public sealed class ToolItemModel
+public sealed class ToolboxGroupModel
 {
-    public ToolItemModel(string label, string badge)
+    public ToolboxGroupModel(string title, IEnumerable<ToolboxItemModel> items)
+    {
+        Title = title;
+        Items = new ObservableCollection<ToolboxItemModel>(items);
+    }
+
+    public string Title { get; }
+
+    public ObservableCollection<ToolboxItemModel> Items { get; }
+}
+
+public sealed class ToolboxItemModel
+{
+    public ToolboxItemModel(string label, string badge)
     {
         Label = label;
         Badge = badge;
@@ -489,6 +290,82 @@ public sealed class ToolItemModel
     public string Label { get; }
 
     public string Badge { get; }
+}
+
+public sealed class ObjectNodeModel
+{
+    public ObjectNodeModel(string label, string meta, IEnumerable<ObjectNodeModel>? children = null)
+    {
+        Label = label;
+        Meta = meta;
+        Children = children is null ? new ObservableCollection<ObjectNodeModel>() : new ObservableCollection<ObjectNodeModel>(children);
+    }
+
+    public string Label { get; }
+
+    public string Meta { get; }
+
+    public ObservableCollection<ObjectNodeModel> Children { get; }
+}
+
+public sealed class DataSourceRowModel
+{
+    public DataSourceRowModel(string name, string type, string sample)
+    {
+        Name = name;
+        Type = type;
+        Sample = sample;
+    }
+
+    public string Name { get; }
+
+    public string Type { get; }
+
+    public string Sample { get; }
+}
+
+public sealed class DocumentTabModel
+{
+    public DocumentTabModel(string name, string meta)
+    {
+        Name = name;
+        Meta = meta;
+    }
+
+    public string Name { get; }
+
+    public string Meta { get; }
+}
+
+public sealed class CanvasElementModel
+{
+    public CanvasElementModel(string caption, string value, double x, double y, double width, double height, double fontSize, bool isHighlighted)
+    {
+        Caption = caption;
+        Value = value;
+        X = x;
+        Y = y;
+        Width = width;
+        Height = height;
+        FontSize = fontSize;
+        IsHighlighted = isHighlighted;
+    }
+
+    public string Caption { get; }
+
+    public string Value { get; }
+
+    public double X { get; }
+
+    public double Y { get; }
+
+    public double Width { get; }
+
+    public double Height { get; }
+
+    public double FontSize { get; }
+
+    public bool IsHighlighted { get; }
 }
 
 public sealed class PropertyRowModel
@@ -504,25 +381,9 @@ public sealed class PropertyRowModel
     public string Value { get; }
 }
 
-public sealed class WorkbenchPanelModel
+public sealed class PropertySectionModel
 {
-    public WorkbenchPanelModel(string title, string summary, IEnumerable<string> lines)
-    {
-        Title = title;
-        Summary = summary;
-        Lines = new ObservableCollection<string>(lines);
-    }
-
-    public string Title { get; }
-
-    public string Summary { get; }
-
-    public ObservableCollection<string> Lines { get; }
-}
-
-public sealed class InspectorSectionModel
-{
-    public InspectorSectionModel(string title, string summary, IEnumerable<PropertyRowModel> rows)
+    public PropertySectionModel(string title, string summary, IEnumerable<PropertyRowModel> rows)
     {
         Title = title;
         Summary = summary;
@@ -536,13 +397,31 @@ public sealed class InspectorSectionModel
     public ObservableCollection<PropertyRowModel> Rows { get; }
 }
 
+public sealed class MessageRowModel
+{
+    public MessageRowModel(string level, string source, string message)
+    {
+        Level = level;
+        Source = source;
+        Message = message;
+    }
+
+    public string Level { get; }
+
+    public string Source { get; }
+
+    public string Message { get; }
+}
+
 public sealed class StatusItemModel
 {
-    public StatusItemModel(string label, string value, string detail)
+    public StatusItemModel(string label, string value, string detail, string tone, Brush accent)
     {
         Label = label;
         Value = value;
         Detail = detail;
+        Tone = tone;
+        Accent = accent;
     }
 
     public string Label { get; }
@@ -550,4 +429,8 @@ public sealed class StatusItemModel
     public string Value { get; }
 
     public string Detail { get; }
+
+    public string Tone { get; }
+
+    public Brush Accent { get; }
 }

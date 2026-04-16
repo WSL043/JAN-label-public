@@ -39,8 +39,9 @@
   - `preview_template_draft`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
 - `apps/windows-shell`
-  - WPF operator shell prototype with native menu / ribbon / docking layout
-  - module navigation for `Job Setup`, `Designer`, `Batch Manager`, and `History`
+  - WPF operator workstation baseline with native menu / ribbon / docking layout
+  - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
+  - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - Windows-only shell language baseline for future operator UX work
   - GitHub Windows CI now emits both self-contained preview binaries and an installer artifact for native-shell evaluation
   - startup path now opens `MainWindow` directly instead of idling as a background process with no shell window
@@ -96,6 +97,7 @@
   - buttons, tabs, and metric cards now use denser desktop-oriented controls instead of rounded dark cards
 - A new migration front is now in place for the shell itself:
   - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
+  - the shell no longer stops at generic chrome; it now carries a practical label-design workstation structure operators can actually evaluate
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
