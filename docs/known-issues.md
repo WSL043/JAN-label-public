@@ -110,8 +110,13 @@
 
 ## K-034 native-shell preview packaging is CI-driven
 - status: watch
-- impact: the native shell now has an installer path, but preview installer publication still depends on GitHub Actions artifacts and manual prerelease publication rather than a dedicated release workflow
-- response: use the `jan-label-native-shell-installer` artifact from `windows-shell-native` for preview validation until a native-shell release workflow is added
+- impact: the native shell now has both CI preview installers and formal tagged-release installer assets, but preview publication still depends on GitHub Actions artifacts and manual prerelease publication rather than a dedicated preview release workflow
+- response: use the `jan-label-native-shell-installer` artifact from `windows-shell-native` for preview validation; tagged releases now upload the native-shell installer asset directly
+
+## K-036 local Windows host may be missing Inno Setup for native-shell packaging
+- status: open
+- impact: `pnpm release:readiness --version <version>` can classify native-shell installer generation as `blocked` on hosts that can build/publish WPF but do not have `ISCC.exe`
+- response: use GitHub Actions Windows runners or install Inno Setup locally only when native-shell installer generation must run on the workstation
 
 ## K-035 native-shell startup window was missing
 - status: resolved

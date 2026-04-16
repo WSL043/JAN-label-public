@@ -3,6 +3,7 @@
 - Updated: 2026-04-16
 - Branch: `main`
 - Release base: `v0.2.0` (`0b6827e`)
+- Next formal release target: `v0.3.0`
 - Active PR: `none`
 - Branch relation to `origin/main` on 2026-04-16: `main` includes the merged `T-041` governance batch from PR `#33`, including local template catalog diagnostics, repair guidance, single-writer operating rules, and the initial native WPF workstation shell baseline under `apps/windows-shell`
 
@@ -40,6 +41,11 @@
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
 - `apps/windows-shell`
   - WPF operator workstation baseline with native menu / ribbon / docking layout
+  - `Fluent.Ribbon` shell chrome for real ribbon, backstage, and quick-access behavior instead of hand-built ribbon lookalikes
+  - `Dirkster.AvalonDock` for package-backed tool windows, docked inspectors, and designer document tabs
+  - `PropertyTools.Wpf` for the right-side designer property inspector baseline
+  - designer canvas selection now drives the property inspector instead of leaving it as static metadata
+  - ribbon, quick-access, and header actions now write visible shell feedback instead of remaining inert buttons
   - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
   - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - module-aware native workspaces for migration/readiness, designer, print console, batch queue, and history/audit review instead of a single static shell mock
@@ -51,6 +57,8 @@
 - `pnpm release:notes --version <version>`
 - `pnpm release:readiness --version <version>`
 - `Release` workflow uploads release notes and readiness artifacts
+- `release:readiness` now validates native-shell build, self-contained publish, and installer generation separately
+- tagged formal releases now build and upload the native-shell installer asset in addition to the desktop-shell installer asset
 - GitHub release publishing
   - `v0.2.0` tag published through the Release workflow
   - Windows installer asset uploaded successfully
@@ -99,12 +107,15 @@
   - buttons, tabs, and metric cards now use denser desktop-oriented controls instead of rounded dark cards
 - A new migration front is now in place for the shell itself:
   - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
+  - shell chrome is now based on `Fluent.Ribbon`, so the native shell is using a real Windows ribbon/backstage package instead of a custom imitation
+  - the designer surface now uses `Dirkster.AvalonDock` and `PropertyTools.Wpf`, so docked tools and the right-side inspector are moving onto package-backed Windows controls instead of a fixed hand-built pane grid
   - the shell no longer stops at generic chrome; it now carries practical operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - each module now has its own lane-aware surface so operators can evaluate information density and flow before backend command wiring lands
   - shared shell chrome now exposes lane context, authority, route, and blocker-oriented status so the shell is judged against operator decision speed, not only visual density
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
+  - tagged release automation is now wired to publish the native-shell installer asset, so formal releases can carry both the transitional desktop shell and the native-shell preview direction
 
 ## Release Boundary
 
@@ -134,26 +145,27 @@ Passed on this batch:
 - `pnpm lint`
 - `pnpm typecheck`
 - `pnpm --filter @label/admin-web build`
+- `cargo clippy --workspace --all-targets -- -D warnings`
+- `cargo test --workspace`
+- `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
+- `pnpm --filter @label/desktop-shell build --ci --no-sign`
 - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
-- Local Rust/Tauri validation for this branch still depends on a Windows MSVC linker and was not completed on this host
+- `dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`
 
 Operational note:
 
 - Local Windows may intermittently return `os error 5` during `cargo test --workspace`. Re-run once and confirm `desktop-shell` tests pass before treating it as a regression.
-- This host currently cannot complete Rust/Tauri verification because `link.exe` is not available:
-  - `cargo clippy --workspace --all-targets -- -D warnings`
-  - `cargo test --workspace`
-  - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
-  - `pnpm release:readiness --version v0.2.0`
-- GitHub Actions has already passed the Windows desktop and native-shell validation path for PR `#33`, so local MSVC and `.NET` toolchain absence is no longer a blocker as long as the remote Windows runners remain green.
-- Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
-- Native-shell preview packaging should also be taken from the GitHub Actions `jan-label-native-shell-installer` artifact until a dedicated release workflow supersedes the CI path.
-- `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
+- This host can now complete local Rust/Tauri verification and desktop-shell NSIS bundling.
+- The remaining local packaging blocker is native-shell installer generation because `ISCC.exe` is not installed:
+  - `pnpm release:readiness --version v0.3.0` reports the native-shell installer step as `blocked`
+  - GitHub Windows runners remain the authoritative packaging path for native-shell installers until Inno Setup is intentionally installed on the local workstation
+- `docs/release/v0.3.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the current readiness report remains `fail` because `T-049` is still in progress and the local host does not have Inno Setup for native-shell installer generation.
 
 ## Release Status
 
 - `v0.1.3` was tagged and published on `2026-04-15`.
 - `v0.2.0` was tagged and published on `2026-04-15`.
+- The next formal release target is `v0.3.0`.
 - GitHub `Release` workflow run `24474516998` succeeded and published the Windows installer asset.
 - Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
 - Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
@@ -163,12 +175,27 @@ Operational note:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
 
+## v0.3.0 Gate
+
+- `v0.3.0` is the next formal release target for the Windows-native workstation direction.
+- Release intent:
+  - native shell should look and read like a real Windows operator application
+  - template library reasoning should be clearer than the transitional web path
+  - pre-release bug hunt must include repeated sub-agent review passes before formal announcement
+- Minimum additional gate beyond the current baseline:
+  - `T-049` materially closer to backend parity, with package-backed native shell surfaces replacing obvious hand-built mock chrome
+  - `T-042` template library operator UX moved out of ambiguous mock status
+  - `T-044` recovery story explicit enough for operator release
+  - native-shell build / publish / installer checks green on GitHub Windows release runners
+  - sub-agent review pass logged before tag / GitHub Release publication
+
 ## Next Main Tasks
 
 1. `T-049`: Windows-native workstation shell migration
 2. `T-042`: template library operator UX
 3. `T-044`: audit transaction hardening
-4. `T-012`: self-hosted runner / webhook operations
+4. `T-045d`: cut `v0.3.0` Windows-native workstation release
+5. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 

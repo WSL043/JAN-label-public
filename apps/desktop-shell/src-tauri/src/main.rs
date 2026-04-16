@@ -2180,8 +2180,8 @@ mod tests {
         available_adapters_for_host, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
         sanitize_path_component, template_catalog_command, trim_audit_ledger, export_audit_ledger,
-        save_template_to_local_catalog, TemplateCatalogWritebackRequest,
-        list_audit_backup_bundles, restore_audit_backup_bundle,
+        save_template_to_local_catalog, template_catalog_governance_command,
+        TemplateCatalogWritebackRequest, list_audit_backup_bundles,
         BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
         TemplateDraftPreviewSample,
         ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
@@ -2529,7 +2529,7 @@ mod tests {
             issue.code == "missing_template_file"
                 && issue.message.contains("overlay-missing@v1")
         }));
-        assert!(governance.repair_guidance.iter().any(|step| {
+        assert!(governance.repair_guidance.iter().any(|step: &String| {
             step.contains("save the same template_version again")
         }));
 
@@ -2558,7 +2558,7 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.code == "manifest_parse_failed"));
-        assert!(governance.repair_guidance.iter().any(|step| {
+        assert!(governance.repair_guidance.iter().any(|step: &String| {
             step.contains("rename it out of the overlay directory")
         }));
 

@@ -18,8 +18,8 @@
 ## 2. Tag policy
 
 - `vMAJOR.MINOR.PATCH`
-- Current release target is `v0.2.0`
-- Use a minor release for the operator workstation redesign, audit restore, and release automation cut
+- Current release target is `v0.3.0`
+- Use a minor release for the Windows-native workstation direction, package-backed designer shell, and native-shell release asset cut
 
 ### Historical tags
 
@@ -56,6 +56,8 @@ git push origin vNEXT
 - If local workspace has transient `target-*` directories, remove them before formatting checks.
 - `main` must be passing CI and the local branch must not have unresolved blockers.
 - Release workflow must run successfully with `desktop-shell` Windows installer output.
+- Release workflow must keep the GitHub Release in draft state until native-shell assets are uploaded successfully.
+- Formal tag releases now also upload the native-shell installer asset and `.sha256` alongside the desktop-shell installer asset.
 - `maintenance ledger` issue and CI summary should be attached to release notes.
 - Release notes now draft to `docs/release/vNEXT.md`.
 - Release readiness now drafts `artifacts/release-readiness.json` and `artifacts/release-readiness.md`.

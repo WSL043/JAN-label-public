@@ -199,6 +199,8 @@ public static class WorkspaceFactory
             CatalogSummary = "local override active",
             CanvasWidth = 660,
             CanvasHeight = 410,
+            PrimaryDocumentTitle = "basic-50x30",
+            SecondaryDocumentTitle = "proof-preview",
         };
 
         model.ToolboxGroups.Add(new ToolboxGroupModel("Objects", new[] { new ToolboxItemModel("Text", "A"), new ToolboxItemModel("Barcode", "JAN"), new ToolboxItemModel("Counter", "#"), new ToolboxItemModel("Picture", "IMG") }));
@@ -214,11 +216,11 @@ public static class WorkspaceFactory
         model.DataSources.Add(new DataSourceRowModel("brand", "Text", "JAN-LAB"));
         model.DataSources.Add(new DataSourceRowModel("template_version", "Text", "basic-50x30@v2"));
         model.DataSources.Add(new DataSourceRowModel("proof_mode", "Expr", "proof"));
-        model.DocumentTabs.Add(new DocumentTabModel("basic-50x30", "record-linked format"));
-        model.DocumentTabs.Add(new DocumentTabModel("proof-preview", "validation surface"));
+        model.DocumentTabs.Add(new DocumentTabModel(model.PrimaryDocumentTitle, "record-linked format"));
+        model.DocumentTabs.Add(new DocumentTabModel(model.SecondaryDocumentTitle, "validation surface"));
         model.CanvasElements.Add(new CanvasElementModel("BRAND", "JAN-LAB", 30, 22, 120, 32, 14, false));
         model.CanvasElements.Add(new CanvasElementModel("SKU", "200-145-3", 30, 72, 180, 36, 18, false));
-        model.CanvasElements.Add(new CanvasElementModel("BARCODE", "| ||| || ||| | ||", 28, 132, 320, 102, 16, true));
+        model.CanvasElements.Add(new CanvasElementModel("BARCODE", "| ||| || ||| | ||", 28, 132, 320, 102, 16, false));
         model.CanvasElements.Add(new CanvasElementModel("JAN", "4901234567894", 50, 244, 220, 26, 14, false));
         model.CanvasElements.Add(new CanvasElementModel("QTY", "24 PCS", 470, 38, 120, 40, 20, false));
         model.CanvasElements.Add(new CanvasElementModel("STATUS", "Proof lineage locked", 390, 304, 210, 32, 13, false));
@@ -230,11 +232,6 @@ public static class WorkspaceFactory
         model.PropertySections.Add(new PropertySectionModel("Selected Object", "Property-grid style editing for the focused item.", new[] { new PropertyRowModel("Name", "JAN barcode"), new PropertyRowModel("Binding", "{{jan}}"), new PropertyRowModel("Symbology", "EAN-13 / JAN"), new PropertyRowModel("Position", "28,132"), new PropertyRowModel("Size", "320 x 102") }));
         model.PropertySections.Add(new PropertySectionModel("Layout Rules", "Output constraints remain deterministic and print-core-safe.", new[] { new PropertyRowModel("Scale", "fixed 100%"), new PropertyRowModel("Barcode engine", "Zint only"), new PropertyRowModel("Output", "SVG / PDF"), new PropertyRowModel("Unsaved draft", "preview only") }));
         model.PropertySections.Add(new PropertySectionModel("Proof Gate", "Dispatch is still gated outside the shell.", new[] { new PropertyRowModel("Authority", "approved proof lineage"), new PropertyRowModel("Required match", "sku / brand / jan / qty / templateVersion"), new PropertyRowModel("Artifact", "valid non-empty PDF") }));
-        model.SelectionRows.Add(new PropertyRowModel("X", "28.0 mm"));
-        model.SelectionRows.Add(new PropertyRowModel("Y", "13.2 mm"));
-        model.SelectionRows.Add(new PropertyRowModel("Width", "32.0 mm"));
-        model.SelectionRows.Add(new PropertyRowModel("Height", "10.2 mm"));
-        model.SelectionRows.Add(new PropertyRowModel("Rotation", "0"));
         model.RecordRows.Add(new PropertyRowModel("SKU", "200-145-3"));
         model.RecordRows.Add(new PropertyRowModel("JAN", "4901234567894"));
         model.RecordRows.Add(new PropertyRowModel("Brand", "JAN-LAB"));
@@ -248,6 +245,7 @@ public static class WorkspaceFactory
         model.StatusItems.Add(new StatusItemModel("Audit", "restore-ready", "backup bundles available", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Printer", "pdf-proof", "physical validation deferred", "PDF", Brushes.SteelBlue));
         AddRulers(model.TopRulerMarks, model.SideRulerMarks);
+        model.SelectCanvasElement(model.CanvasElements[2]);
         return model;
     }
 

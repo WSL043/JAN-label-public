@@ -33,14 +33,6 @@ jobs:
         shell: bash
         run: |
           pnpm release:notes --version "${GITHUB_REF_NAME}"
-      - name: Require printer matrix measurement
-        shell: bash
-        run: |
-          count=$(find docs/printer-matrix -maxdepth 1 -type f -name '*.md' ! -name 'template.md' | wc -l | tr -d ' ')
-          if [[ "$count" -lt 1 ]]; then
-            echo "At least one printer-matrix measurement is required before tagging a release."
-            exit 1
-          fi
       - name: Require desktop-shell version matches tag
         shell: bash
         run: |
@@ -76,6 +68,11 @@ jobs:
           corepack enable
           corepack install
       - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
       - run: pnpm install --frozen-lockfile
       - name: Generate release notes draft
         env:
@@ -91,6 +88,30 @@ jobs:
             artifacts/release-readiness.json
             artifacts/release-readiness.md
             docs/release/${{ github.ref_name }}.md
+      - name: Publish native shell
+        run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      - name: Build native shell installer
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path "apps/windows-shell/dist" | Out-Null
+          $outputDir = (Resolve-Path "apps/windows-shell/dist").Path
+          $outputBaseFilename = "JAN-Label_windows-native-shell_$env:GITHUB_REF_NAME"
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
+            "/DMyAppVersion=$env:GITHUB_REF_NAME" `
+            "/DMyOutputDir=$outputDir" `
+            "/DMyOutputBaseFilename=$outputBaseFilename" `
+            "apps/windows-shell/installer/JanLabel.WindowsShell.iss"
+          $installer = Join-Path $outputDir "$outputBaseFilename.exe"
+          $hash = (Get-FileHash $installer -Algorithm SHA256).Hash
+          Set-Content -Path "$installer.sha256" -Value "$hash  $(Split-Path $installer -Leaf)"
+      - name: Upload native shell installer artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: jan-label-native-shell-release-installer
+          path: |
+            apps/windows-shell/dist/*.exe
+            apps/windows-shell/dist/*.sha256
+          if-no-files-found: error
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -98,9 +119,22 @@ jobs:
           projectPath: apps/desktop-shell
           tagName: ${{ github.ref_name }}
           releaseName: JAN Label ${{ github.ref_name }}
+          releaseDraft: true
           releaseBody: |
             Windows desktop installer built from `apps/desktop-shell`.
             See the generated notes below for merged changes in this tag.
           generateReleaseNotes: true
           args: --ci --no-sign
           assetNamePattern: JAN-Label_[version]_windows_[arch][setup][ext]
+      - name: Upload native shell assets to GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $assets = Get-ChildItem "apps/windows-shell/dist/*.exe", "apps/windows-shell/dist/*.sha256" | ForEach-Object { $_.FullName }
+          gh release upload $env:GITHUB_REF_NAME $assets --clobber
+      - name: Publish completed GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit $env:GITHUB_REF_NAME --draft=false

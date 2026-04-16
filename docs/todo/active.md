@@ -50,7 +50,7 @@ Priority order for post-`v0.1.2` branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` builds on GitHub Windows runners, installer previews can be published from CI artifacts, and the shell now exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History` while backend command parity is still landing |
+| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` uses package-backed Windows shell primitives (`Fluent.Ribbon`, `Dirkster.AvalonDock`, `PropertyTools.Wpf`), builds on GitHub Windows runners, installer previews can be published from CI artifacts, and the shell now exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History` while backend command parity is still landing |
 
 ## Next
 
@@ -58,6 +58,7 @@ Priority order for post-`v0.1.2` branch work.
 | --- | --- | --- | --- | --- | --- |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
 | T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |
+| T-045d | P1 | pending | Codex + Sub-Agent | Cut `v0.3.0` Windows-native workstation release | `v0.3.0` tag is published only after native-shell operator UX, template-library clarity, audit recovery expectations, native-shell release asset wiring, and repeated sub-agent pre-release review passes are all recorded |
 | T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 
 ## Blocked

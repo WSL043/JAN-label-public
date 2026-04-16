@@ -27,6 +27,8 @@ Rules:
 - `apps/desktop-shell` keeps owning proof/print gate, audit restore, and template-catalog authority until an explicit backend migration ADR supersedes it.
 - Desktop shell layout decisions may stop optimizing for mobile or non-Windows viewport compromises.
 - Validation for `apps/windows-shell` is authoritative on GitHub Windows runners when local `dotnet` is unavailable.
+- For shell chrome, prefer a real Windows ribbon package over hand-crafted imitation when the dependency is compatible and clearly licensed. Current shell-chrome choice: `Fluent.Ribbon`.
+- For the designer frame, prefer package-backed docking and inspector controls over hand-built faux panes when the dependency is compatible and clearly licensed. Current designer-shell choices: `Dirkster.AvalonDock` for docking/documents and `PropertyTools.Wpf` for the right-side property inspector baseline.
 
 ## Consequences
 
@@ -40,6 +42,10 @@ Rules:
   - center document tabs and design canvas
   - right property grid
   - bottom records, messages, and operator status
+- The practical designer baseline should be package-backed where possible:
+  - ribbon/backstage from `Fluent.Ribbon`
+  - docked tool windows and documents from `Dirkster.AvalonDock`
+  - property inspector from `PropertyTools.Wpf`
 - The shell should quickly move from a single designer mock to lane-aware workspaces so operators can evaluate the whole workstation shape:
   - `Home` migration and readiness dashboard
   - `Designer` authoring surface
@@ -50,3 +56,8 @@ Rules:
   - current authority should be visible without opening another pane
   - blockers should be legible in the current lane
   - route / proof / catalog state should remain visible in shared shell chrome
+- Formal release automation should validate more than shell compilation:
+  - native-shell build
+  - self-contained publish
+  - installer generation
+  - GitHub Release asset upload on tagged releases

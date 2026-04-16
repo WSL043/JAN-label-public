@@ -80,6 +80,10 @@ function previousTag(currentVersion) {
     .split(/\r?\n/)
     .map((line) => line.trim())
     .filter(Boolean);
+  const stableTags = tags.filter((tag) => /^v\d+\.\d+\.\d+$/.test(tag) && tag !== currentVersion);
+  if (stableTags.length > 0) {
+    return stableTags[0];
+  }
   return tags.find((tag) => tag !== currentVersion) ?? null;
 }
 
@@ -178,9 +182,9 @@ const repo = remote ? parseRemoteRepo(remote) : null;
 const ledger = loadMaintenanceLedger(repo);
 const priorTag = previousTag(version);
 const commitRange = priorTag ? `${priorTag}..HEAD` : "HEAD";
-const shippingNow = takeLines(sectionBody(currentState, "Shipping Now"));
-const landedThisBatch = takeLines(sectionBody(currentState, "Landed In This Batch"));
-const nextTasks = takeLines(sectionBody(currentState, "Next Main Tasks"));
+const shippingNow = takeLines(sectionBody(currentState, "Shipping Now"), 40);
+const landedThisBatch = takeLines(sectionBody(currentState, "Landed In This Batch"), 40);
+const nextTasks = takeLines(sectionBody(currentState, "Next Main Tasks"), 20);
 const notes = `# ${version}
 
 - Generated: ${generatedAt}

@@ -1,7 +1,14 @@
 {
   "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
   "files": {
-    "ignore": ["target/**", "dist/**", "node_modules/**"]
+    "ignore": [
+      "target/**",
+      "dist/**",
+      "node_modules/**",
+      "**/bin/**",
+      "**/obj/**",
+      "apps/desktop-shell/src-tauri/gen/**"
+    ]
   },
   "formatter": {
     "enabled": true,

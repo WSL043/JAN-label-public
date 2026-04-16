@@ -26,6 +26,42 @@ function normalizeVersion(input) {
   return input.startsWith("v") ? input : `v${input}`;
 }
 
+function detectToolchainBlocker(output) {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const blockerPatterns = [
+    {
+      pattern:
+        /makensis\.exe[\s\S]*(os error 2|not recognized|指定されたファイルが見つかりません)/i,
+      reason: "NSIS tooling is missing on the local Windows host.",
+    },
+    {
+      pattern:
+        /ISCC\.exe[\s\S]*(CommandNotFoundException|not recognized|cannot find|could not|指定されたファイルが見つかりません)/i,
+      reason: "Inno Setup is missing on the local Windows host.",
+    },
+    {
+      pattern: /link\.exe[\s\S]*(not found|cannot find|could not|is not recognized)/i,
+      reason: "MSVC linker tools are missing on the local Windows host.",
+    },
+    {
+      pattern:
+        /(The term 'dotnet' is not recognized|No executable found matching command \"dotnet\"|'dotnet' is not recognized as an internal or external command)/i,
+      reason: ".NET SDK is missing on the local Windows host.",
+    },
+  ];
+
+  for (const entry of blockerPatterns) {
+    if (entry.pattern.test(output)) {
+      return entry.reason;
+    }
+  }
+
+  return null;
+}
+
 function runCommand(command, { retryOnWindowsOsError5 = false } = {}) {
   const attempt = () =>
     spawnSync(command, {
@@ -36,23 +72,53 @@ function runCommand(command, { retryOnWindowsOsError5 = false } = {}) {
     });
 
   let result = attempt();
-  const combinedOutput = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+  let output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
   if (
     retryOnWindowsOsError5 &&
     result.status !== 0 &&
     process.platform === "win32" &&
-    /os error 5/i.test(combinedOutput)
+    /os error 5/i.test(output)
   ) {
     result = attempt();
     result.retryAttempted = true;
+    output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
   }
 
   return {
     command,
     ok: result.status === 0,
     code: result.status ?? 1,
-    output: `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim(),
+    output,
     retryAttempted: Boolean(result.retryAttempted),
+    blocked: result.status !== 0 ? detectToolchainBlocker(output) : null,
+  };
+}
+
+function runCommandWithArtifact(command, artifactPath, options) {
+  const result = runCommand(command, options);
+  if (result.ok && !fs.existsSync(artifactPath)) {
+    return {
+      ...result,
+      ok: false,
+      output: `${result.output}\nExpected artifact was not created: ${artifactPath}`.trim(),
+    };
+  }
+
+  return {
+    ...result,
+    artifactPath,
+  };
+}
+
+function skippedCheck(command, output) {
+  return {
+    command,
+    ok: false,
+    code: null,
+    output,
+    retryAttempted: false,
+    blocked: null,
+    skipped: true,
   };
 }
 
@@ -66,6 +132,48 @@ function sectionNowRows(markdown) {
     .map((line) => line.trim())
     .filter((line) => line.startsWith("|"));
   return rowLines.slice(2).filter((line) => !/^\|\s*None\s*\|/i.test(line));
+}
+
+function releaseNotesStatus(notesPath, version) {
+  if (!fs.existsSync(notesPath)) {
+    return {
+      exists: false,
+      ok: false,
+      path: notesPath,
+      output: "Release notes draft is missing.",
+    };
+  }
+
+  const content = fs.readFileSync(notesPath, "utf8");
+  const checks = [
+    content.startsWith(`# ${version}`),
+    /^- Generated: /m.test(content),
+    /^- Previous tag: /m.test(content),
+    /^- Commit range: /m.test(content),
+  ];
+
+  return {
+    exists: true,
+    ok: checks.every(Boolean),
+    path: notesPath,
+    output: checks.every(Boolean)
+      ? "Release notes draft has the expected generated structure."
+      : "Release notes draft exists but is missing generated metadata.",
+  };
+}
+
+function statusLabel(check) {
+  if (check.ok) {
+    return "pass";
+  }
+  if (check.skipped || check.blocked) {
+    return "blocked";
+  }
+  return "fail";
+}
+
+function powershellSingleQuote(input) {
+  return input.replace(/'/g, "''");
 }
 
 const args = parseArgs(process.argv.slice(2));
@@ -85,32 +193,79 @@ const validations = [
   "cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml",
 ].map((command) =>
   runCommand(command, {
-    retryOnWindowsOsError5: command === "cargo test --workspace",
+    retryOnWindowsOsError5: command.startsWith("cargo test"),
   }),
 );
 
 const desktopBuild =
   process.platform === "win32"
     ? runCommand("pnpm --filter @label/desktop-shell build --ci --no-sign")
-    : {
-        command: "pnpm --filter @label/desktop-shell build --ci --no-sign",
-        ok: false,
-        code: null,
-        output: "Windows desktop build check is only available on Windows hosts.",
-        skipped: true,
-      };
+    : skippedCheck(
+        "pnpm --filter @label/desktop-shell build --ci --no-sign",
+        "Windows desktop build check is only available on Windows hosts.",
+      );
+
+const nativeShellBuildCommand =
+  "dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release";
+const nativeShellPublishCommand =
+  "dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true";
+const nativeShellInstallerOutputDir = path.join(process.cwd(), "apps", "windows-shell", "dist");
+const nativeShellInstallerBaseFilename = `JAN-Label_windows-native-shell_${version}`;
+const nativeShellInstallerArtifactPath = path.join(
+  nativeShellInstallerOutputDir,
+  `${nativeShellInstallerBaseFilename}.exe`,
+);
+const nativeShellInstallerCommand = `powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '${powershellSingleQuote(nativeShellInstallerOutputDir)}' | Out-Null; & 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe' '/DMyAppVersion=${version}' '/DMyOutputDir=${powershellSingleQuote(nativeShellInstallerOutputDir)}' '/DMyOutputBaseFilename=${nativeShellInstallerBaseFilename}' 'apps/windows-shell/installer/JanLabel.WindowsShell.iss'"`;
+
+const nativeShellBuild =
+  process.platform === "win32"
+    ? runCommand(nativeShellBuildCommand)
+    : skippedCheck(
+        nativeShellBuildCommand,
+        "Windows native shell build check is only available on Windows hosts.",
+      );
+
+const nativeShellPublish =
+  process.platform === "win32"
+    ? runCommand(nativeShellPublishCommand)
+    : skippedCheck(
+        nativeShellPublishCommand,
+        "Windows native shell publish check is only available on Windows hosts.",
+      );
+
+const nativeShellInstaller =
+  process.platform !== "win32"
+    ? skippedCheck(
+        nativeShellInstallerCommand,
+        "Windows native shell installer check is only available on Windows hosts.",
+      )
+    : !nativeShellPublish.ok
+      ? skippedCheck(
+          nativeShellInstallerCommand,
+          "Native shell installer check was skipped because self-contained publish did not pass.",
+        )
+      : runCommandWithArtifact(nativeShellInstallerCommand, nativeShellInstallerArtifactPath);
 
 const notesPath = path.join(process.cwd(), "docs", "release", `${version}.md`);
-const releaseNotesDraftExists = fs.existsSync(notesPath);
+const notes = releaseNotesStatus(notesPath, version);
 const activeTodo = fs.readFileSync(path.join(process.cwd(), "docs", "todo", "active.md"), "utf8");
 const nowRows = sectionNowRows(activeTodo);
 const nowTasksEmpty = nowRows.length === 0;
-const validationPassed = validations.every((item) => item.ok);
-const desktopBuildPassed = desktopBuild.ok;
+
+const requiredChecks = [
+  ...validations,
+  desktopBuild,
+  nativeShellBuild,
+  nativeShellPublish,
+  nativeShellInstaller,
+];
+
+const blockingChecks = requiredChecks.filter((item) => !item.ok && (item.blocked || item.skipped));
+const failingChecks = requiredChecks.filter((item) => !item.ok && !item.blocked && !item.skipped);
 const overallStatus =
-  validationPassed && releaseNotesDraftExists && nowTasksEmpty && desktopBuildPassed
+  notes.ok && nowTasksEmpty && failingChecks.length === 0 && blockingChecks.length === 0
     ? "pass"
-    : process.platform !== "win32" && !desktopBuildPassed
+    : failingChecks.length === 0 && blockingChecks.length > 0 && notes.ok && nowTasksEmpty
       ? "blocked"
       : "fail";
 
@@ -119,22 +274,44 @@ const report = {
   generatedAt: new Date().toISOString(),
   nowTasksEmpty,
   nowTaskCount: nowRows.length,
-  validationPassed,
-  releaseNotesDraft: {
-    exists: releaseNotesDraftExists,
-    path: notesPath,
-  },
+  releaseNotesDraft: notes,
   validations: validations.map((item) => ({
     command: item.command,
     ok: item.ok,
+    blocked: item.blocked,
     retryAttempted: item.retryAttempted,
     output: item.output,
   })),
   windowsDesktopBuild: {
     command: desktopBuild.command,
     ok: Boolean(desktopBuild.ok),
+    blocked: desktopBuild.blocked,
     skipped: Boolean(desktopBuild.skipped),
     output: desktopBuild.output,
+  },
+  windowsNativeShell: {
+    build: {
+      command: nativeShellBuild.command,
+      ok: Boolean(nativeShellBuild.ok),
+      blocked: nativeShellBuild.blocked,
+      skipped: Boolean(nativeShellBuild.skipped),
+      output: nativeShellBuild.output,
+    },
+    publish: {
+      command: nativeShellPublish.command,
+      ok: Boolean(nativeShellPublish.ok),
+      blocked: nativeShellPublish.blocked,
+      skipped: Boolean(nativeShellPublish.skipped),
+      output: nativeShellPublish.output,
+    },
+    installer: {
+      command: nativeShellInstaller.command,
+      ok: Boolean(nativeShellInstaller.ok),
+      blocked: nativeShellInstaller.blocked,
+      skipped: Boolean(nativeShellInstaller.skipped),
+      artifactPath: nativeShellInstaller.artifactPath ?? nativeShellInstallerArtifactPath,
+      output: nativeShellInstaller.output,
+    },
   },
   overallStatus,
 };
@@ -144,22 +321,37 @@ const markdown = `# Release Readiness ${version}
 - Generated: ${report.generatedAt}
 - Overall status: **${report.overallStatus}**
 - Now tasks empty: ${report.nowTasksEmpty ? "yes" : `no (${report.nowTaskCount})`}
-- Release notes draft: ${releaseNotesDraftExists ? notesPath : "missing"}
-- Windows desktop build: ${desktopBuildPassed ? "pass" : desktopBuild.skipped ? "blocked" : "fail"}
+- Release notes draft: ${notes.ok ? notes.path : notes.exists ? `${notes.path} (stale)` : "missing"}
+- Windows desktop build: ${statusLabel(desktopBuild)}
+- Windows native shell build: ${statusLabel(nativeShellBuild)}
+- Windows native shell publish: ${statusLabel(nativeShellPublish)}
+- Windows native shell installer: ${statusLabel(nativeShellInstaller)}
 
 ## Validation Commands
 
 ${report.validations
   .map(
     (item) =>
-      `- ${item.ok ? "[pass]" : "[fail]"} \`${item.command}\`${item.retryAttempted ? " (retried once)" : ""}`,
+      `- ${item.ok ? "[pass]" : item.blocked ? "[blocked]" : "[fail]"} \`${item.command}\`${item.retryAttempted ? " (retried once)" : ""}${item.blocked ? ` - ${item.blocked}` : ""}`,
   )
   .join("\n")}
+
+## Release Notes Draft
+
+- Path: ${notes.path}
+- Result: ${notes.ok ? "pass" : "fail"}
 
 ## Desktop Build
 
 - Command: \`${desktopBuild.command}\`
-- Result: ${desktopBuildPassed ? "pass" : desktopBuild.skipped ? "blocked" : "fail"}
+- Result: ${statusLabel(desktopBuild)}${desktopBuild.blocked ? ` (${desktopBuild.blocked})` : ""}
+
+## Native Shell Checks
+
+- Build: ${statusLabel(nativeShellBuild)}${nativeShellBuild.blocked ? ` (${nativeShellBuild.blocked})` : ""}
+- Publish: ${statusLabel(nativeShellPublish)}${nativeShellPublish.blocked ? ` (${nativeShellPublish.blocked})` : ""}
+- Installer: ${statusLabel(nativeShellInstaller)}${nativeShellInstaller.blocked ? ` (${nativeShellInstaller.blocked})` : ""}
+- Installer artifact: ${nativeShellInstaller.artifactPath ?? nativeShellInstallerArtifactPath}
 
 ## Remaining Now Tasks
 
