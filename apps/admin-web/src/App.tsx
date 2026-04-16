@@ -26,6 +26,7 @@ import {
   type LegacyProofSeedResult,
   type PrintBridgeStatus,
   type SaveTemplateToLocalCatalogResult,
+  type TemplateCatalogGovernanceResult,
   type TemplateCatalogResult,
   type TemplateDraftPreviewRequest,
   type TemplateDraftPreviewResult,
@@ -34,6 +35,7 @@ import {
   exportAuditLedger,
   fetchPrintBridgeStatus,
   fetchTemplateCatalog,
+  fetchTemplateCatalogGovernance,
   isTauriConnected,
   listAuditBackupBundles,
   previewTemplateDraft,
@@ -171,6 +173,12 @@ type TemplateCatalogState = {
   phase: TemplateCatalogPhase;
   templates: TemplateOption[];
   defaultTemplateVersion: string | null;
+  message: string;
+};
+type TemplateCatalogGovernancePhase = "idle" | "loading" | "ready" | "unavailable" | "error";
+type TemplateCatalogGovernanceState = {
+  phase: TemplateCatalogGovernancePhase;
+  result: TemplateCatalogGovernanceResult | null;
   message: string;
 };
 type LegacyProofSeedPhase = "idle" | "validating" | "seeding" | "success" | "error";
@@ -2367,6 +2375,12 @@ export function App() {
     defaultTemplateVersion: templateVersionOf(templateOptions[0]),
     message: "Using bundled template catalog fallback.",
   });
+  const [templateCatalogGovernance, setTemplateCatalogGovernance] =
+    useState<TemplateCatalogGovernanceState>({
+      phase: "idle",
+      result: null,
+      message: "Catalog maintenance state has not been loaded yet.",
+    });
   const [templateCatalogWriteState, setTemplateCatalogWriteState] = useState<SubmitState>({
     phase: "idle",
     message: "",
@@ -2495,6 +2509,34 @@ export function App() {
     templateReferenceVersion,
   );
   const templateCatalogSummary = buildTemplateSourceSummary(availableTemplateOptions);
+  const templateCatalogGovernanceResult = templateCatalogGovernance.result;
+  const templateCatalogGovernanceIssues = templateCatalogGovernanceResult?.issues ?? [];
+  const templateCatalogGovernanceHasError = templateCatalogGovernanceIssues.some(
+    (issue) => issue.severity === "error",
+  );
+  const templateCatalogGovernanceHasWarning = templateCatalogGovernanceIssues.some(
+    (issue) => issue.severity === "warning",
+  );
+  const templateCatalogGovernanceHeadline =
+    templateCatalogGovernance.phase === "unavailable"
+      ? "Catalog maintenance unavailable"
+      : templateCatalogGovernance.phase === "error"
+        ? "Catalog maintenance check failed"
+        : templateCatalogGovernanceHasError
+          ? "Catalog maintenance attention needed"
+          : templateCatalogGovernanceHasWarning
+            ? "Catalog maintenance warning"
+            : templateCatalogGovernance.phase === "ready"
+              ? "Catalog maintenance looks healthy"
+              : "Catalog maintenance pending";
+  const templateCatalogGovernanceToneClass =
+    templateCatalogGovernance.phase === "error" || templateCatalogGovernanceHasError
+      ? "status-fail"
+      : templateCatalogGovernanceHasWarning
+        ? "status-pending"
+        : templateCatalogGovernance.phase === "ready"
+          ? "status-ok"
+          : "notice-text";
   const selectedTemplateOption =
     availableTemplateOptions.find(
       (option) =>
@@ -2960,45 +3002,45 @@ export function App() {
   }> = [
     {
       id: "compose",
-      label: "Draft",
-      description: "Manual compose and live payload review",
+      label: "Data Entry",
+      description: "Manual job input and live payload review",
       badge: draft ? "ready" : "incomplete",
     },
     {
       id: "templates",
-      label: "Template",
-      description: "Authoring, JSON, and renderer parity",
+      label: "Designer",
+      description: "Label design, JSON, and renderer parity",
       badge: templateValidation.status,
     },
     {
       id: "queue",
-      label: "Queue",
+      label: "Batch Queue",
       description: "Import, validate, and dispatch batches",
       badge: queuedRows.length > 0 ? String(queuedRows.length) : String(sourceRows.length),
     },
     {
       id: "audit",
-      label: "Audit",
-      description: "Proof approvals, export, retention",
+      label: "History",
+      description: "Proof approvals, retention, and audit review",
       badge:
         pendingProofCount > 0 ? `${pendingProofCount} pending` : String(auditSearch.entries.length),
     },
   ];
   const workspaceDetailById: Record<WorkspaceMode, { title: string; summary: string }> = {
     compose: {
-      title: "Draft Composer",
-      summary: "Manual draft entry, execution intent, and live payload review.",
+      title: "Label Job",
+      summary: "Manual job entry, execution intent, and live payload review.",
     },
     templates: {
-      title: "Template Workbench",
+      title: "Label Designer",
       summary: "Structured authoring, catalog-aligned JSON, and renderer parity checks.",
     },
     queue: {
-      title: "Import And Queue",
+      title: "Batch Queue",
       summary: "Spreadsheet intake, mapping, row validation, and staged batch dispatch.",
     },
     audit: {
-      title: "Audit And Proof Review",
+      title: "Audit & Proof Review",
       summary: "Approval flow, retention, backup inventory, and legacy proof migration.",
     },
   };
@@ -3043,6 +3085,7 @@ export function App() {
           : selectedAuditBackupBundle
             ? `Restore target armed: ${selectedAuditBackupBundle.fileName}.`
             : "Audit lane covers proof review, retention, bundle inventory, and restore.";
+  const shellMenuItems = ["File", "Edit", "View", "Layout", "Tools", "Help"] as const;
   const activityFeed = useMemo<ActivityItem[]>(() => {
     const items: ActivityItem[] = [];
     const pushItem = (
@@ -3558,6 +3601,7 @@ export function App() {
           result.message ?? `Template ${responseVersion} ${action} in desktop local catalog.`,
       });
       await refreshTemplateCatalog();
+      await refreshTemplateCatalogGovernance();
     } catch (error) {
       setTemplateCatalogWriteState({
         phase: "error",
@@ -3994,6 +4038,7 @@ export function App() {
         message: `Bridge ready. Active adapter: ${status.printAdapterKind}`,
       });
       void refreshTemplateCatalog();
+      void refreshTemplateCatalogGovernance();
       void refreshAuditSearch();
       void refreshAuditBackupBundles();
     } catch (error) {
@@ -4001,6 +4046,45 @@ export function App() {
         phase: "error",
         status: null,
         message: `Bridge status check failed: ${formatErrorMessage(error)}`,
+      });
+    }
+  });
+
+  const refreshTemplateCatalogGovernance = useEffectEvent(async () => {
+    if (!isTauriConnected()) {
+      setTemplateCatalogGovernance({
+        phase: "unavailable",
+        result: null,
+        message:
+          "Browser preview mode / desktop bridge unavailable. Open admin-web from desktop shell to inspect catalog maintenance state.",
+      });
+      return;
+    }
+
+    setTemplateCatalogGovernance((current) => ({
+      ...current,
+      phase: "loading",
+      message: "Inspecting desktop template catalog maintenance state...",
+    }));
+
+    try {
+      const result = await fetchTemplateCatalogGovernance();
+      const issueCount = result.issues.length;
+      setTemplateCatalogGovernance({
+        phase: "ready",
+        result,
+        message:
+          issueCount === 0
+            ? "Catalog maintenance diagnostics loaded with no active issues."
+            : `Catalog maintenance diagnostics loaded with ${issueCount} issue${
+                issueCount === 1 ? "" : "s"
+              }.`,
+      });
+    } catch (error) {
+      setTemplateCatalogGovernance({
+        phase: "error",
+        result: null,
+        message: `Catalog maintenance check failed: ${formatErrorMessage(error)}`,
       });
     }
   });
@@ -4610,120 +4694,252 @@ export function App() {
   return (
     <main className="page app-shell">
       <header className="app-topbar">
-        <div className="app-brand">
-          <span className="app-kicker">JAN Label / v0.2.0</span>
-          <strong>Operator Workstation</strong>
-          <p>Desktop-first proof, queue, template, and audit control surface.</p>
+        <div className="app-window-caption">
+          <span>JAN Label</span>
+          <strong>
+            {activeWorkspaceMeta.title} | {session.jobId}
+          </strong>
+          <small>{templateOptionLabel}</small>
         </div>
-        <div className="app-current-view">
-          <h1>{activeWorkspaceMeta.title}</h1>
-          <p>{activeWorkspaceFocus}</p>
-          <div className="workspace-meta-grid shell-metrics">
-            {workstationStatusCards.map((item) => (
-              <div key={item.id}>
-                <span>{item.label}</span>
-                <strong>{item.value}</strong>
-                <small>{item.detail}</small>
-              </div>
-            ))}
+        <div className="app-menubar">
+          {shellMenuItems.map((item) => (
+            <button key={item} className="menu-button" type="button">
+              {item}
+            </button>
+          ))}
+        </div>
+        <div className="workspace-tabstrip">
+          {workspaceItems.map((item) => (
+            <button
+              key={item.id}
+              className={`workspace-tab ${activeWorkspace === item.id ? "active" : ""}`}
+              type="button"
+              aria-pressed={activeWorkspace === item.id}
+              onClick={() => setActiveWorkspace(item.id)}
+            >
+              <span>{item.label}</span>
+              <strong>{item.badge}</strong>
+            </button>
+          ))}
+        </div>
+        <div className="ribbon-shell">
+          <div className="ribbon-group">
+            <span className="ribbon-group-title">Application</span>
+            <div className="ribbon-button-row">
+              <button className="button-secondary" type="button" onClick={refreshBridgeStatus}>
+                Refresh bridge
+              </button>
+              <button className="button-secondary" type="button" onClick={restorePersistedState}>
+                Restore state
+              </button>
+              <button className="button-secondary" type="button" onClick={clearPersistedState}>
+                Clear state
+              </button>
+            </div>
           </div>
-        </div>
-        <div className="app-commandbar">
-          <div className="commandbar-context">
-            <span className="app-kicker">Current route</span>
-            <strong>{session.jobId}</strong>
-            <p>
-              {templateOptionLabel} / {executionModeLabel}
-            </p>
+          <div className="ribbon-group ribbon-group-metrics">
+            <span className="ribbon-group-title">Workspace</span>
+            <div className="workspace-meta-grid shell-metrics">
+              {workstationStatusCards.map((item) => (
+                <div key={item.id}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
+                </div>
+              ))}
+            </div>
           </div>
           {activeWorkspace === "compose" ? (
             <>
-              <button className="button-secondary" type="button" onClick={stageManualDraft}>
-                Stage snapshot
-              </button>
-              <button
-                className="button-primary"
-                type="button"
-                onClick={() => void submitManualDraft()}
-                disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
-              >
-                Submit current draft
-              </button>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Snapshot</span>
+                <div className="ribbon-button-row">
+                  <button className="button-secondary" type="button" onClick={stageManualDraft}>
+                    Stage snapshot
+                  </button>
+                  <button className="button-secondary" type="button" onClick={resetForm}>
+                    Reset session
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Dispatch</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void submitManualDraft()}
+                    disabled={manualSubmit.phase === "submitting" || isBridgeSubmitBlocked}
+                  >
+                    Submit current draft
+                  </button>
+                </div>
+              </div>
             </>
           ) : null}
           {activeWorkspace === "templates" ? (
             <>
-              <button className="button-secondary" type="button" onClick={validateTemplateText}>
-                Validate template
-              </button>
-              <button
-                className="button-primary"
-                type="button"
-                onClick={() => void runTemplateCatalogSave()}
-                disabled={!isTauriConnected() || templateCatalogWriteState.phase === "submitting"}
-              >
-                Save to catalog
-              </button>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Designer</span>
+                <div className="ribbon-button-row">
+                  <button className="button-secondary" type="button" onClick={validateTemplateText}>
+                    Validate JSON
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={resetTemplateToDefaults}
+                  >
+                    Reset template
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => void refreshTemplateRenderPreview()}
+                    disabled={templateRenderPreview.phase === "rendering"}
+                  >
+                    Refresh preview
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Catalog</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void runTemplateCatalogSave()}
+                    disabled={
+                      !isTauriConnected() || templateCatalogWriteState.phase === "submitting"
+                    }
+                  >
+                    Save to catalog
+                  </button>
+                </div>
+              </div>
             </>
           ) : null}
           {activeWorkspace === "queue" ? (
             <>
-              <button
-                className="button-secondary"
-                type="button"
-                onClick={buildQueueSnapshot}
-                disabled={!isQueueReady}
-              >
-                Build session
-              </button>
-              <button
-                className="button-primary"
-                type="button"
-                onClick={() => void submitQueuedRows()}
-                disabled={
-                  !canSubmitQueuedRows ||
-                  batchSubmit.phase === "submitting" ||
-                  isBridgeSubmitBlocked
-                }
-              >
-                Dispatch queue
-              </button>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Session</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={buildQueueSnapshot}
+                    disabled={!isQueueReady}
+                  >
+                    Build session
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={clearQueueSnapshot}
+                    disabled={queueMutationLocked}
+                  >
+                    Clear queue
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={resetDataSource}
+                    disabled={queueMutationLocked}
+                  >
+                    Reset source
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Dispatch</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => void submitQueuedRows()}
+                    disabled={
+                      !canSubmitQueuedRows ||
+                      batchSubmit.phase === "submitting" ||
+                      isBridgeSubmitBlocked
+                    }
+                  >
+                    Dispatch queue
+                  </button>
+                </div>
+              </div>
             </>
           ) : null}
           {activeWorkspace === "audit" ? (
             <>
-              <button
-                className="button-secondary"
-                type="button"
-                onClick={() => {
-                  void refreshAuditSearch(auditQuery);
-                }}
-              >
-                Refresh audit
-              </button>
-              <button
-                className="button-primary"
-                type="button"
-                onClick={() => {
-                  void runAuditExport();
-                }}
-                disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
-              >
-                Export ledger
-              </button>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Ledger</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditSearch(auditQuery);
+                    }}
+                  >
+                    Refresh audit
+                  </button>
+                  <button
+                    className="button-secondary"
+                    type="button"
+                    onClick={() => {
+                      void refreshAuditBackupBundles();
+                    }}
+                  >
+                    Refresh bundles
+                  </button>
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => {
+                      void runAuditExport();
+                    }}
+                    disabled={!bridgeStatusAvailable || auditExportState.phase === "submitting"}
+                  >
+                    Export ledger
+                  </button>
+                </div>
+              </div>
+              <div className="ribbon-group">
+                <span className="ribbon-group-title">Restore</span>
+                <div className="ribbon-button-row">
+                  <button
+                    className="button-primary"
+                    type="button"
+                    onClick={() => {
+                      void runAuditRestore();
+                    }}
+                    disabled={!auditRestoreReady}
+                  >
+                    Restore bundle
+                  </button>
+                </div>
+              </div>
             </>
           ) : null}
+          <div className="ribbon-group ribbon-group-summary">
+            <span className="ribbon-group-title">Focused lane</span>
+            <div className="commandbar-context">
+              <span className="app-kicker">{activeWorkspaceMeta.title}</span>
+              <strong>{session.jobId}</strong>
+              <p>{activeWorkspaceFocus}</p>
+            </div>
+          </div>
         </div>
       </header>
 
       <div className="app-body">
         <aside className="app-rail">
-          <div className="rail-group">
-            <span className="rail-heading">Workspaces</span>
+          <div className="rail-group rail-pane">
+            <span className="rail-heading">Navigator</span>
             {workspaceItems.map((item) => (
               <button
                 key={item.id}
-                className={`rail-button ${activeWorkspace === item.id ? "active" : ""}`}
+                className={`rail-button rail-nav-item ${activeWorkspace === item.id ? "active" : ""}`}
                 type="button"
                 aria-pressed={activeWorkspace === item.id}
                 onClick={() => setActiveWorkspace(item.id)}
@@ -4735,17 +4951,150 @@ export function App() {
             ))}
           </div>
 
-          <div className="rail-group">
-            <span className="rail-heading">Operations</span>
-            <button className="rail-command" type="button" onClick={refreshBridgeStatus}>
-              Refresh bridge
-            </button>
-            <button className="rail-command" type="button" onClick={restorePersistedState}>
-              Restore saved state
-            </button>
-            <button className="rail-command" type="button" onClick={clearPersistedState}>
-              Clear saved state
-            </button>
+          <div className="rail-group rail-pane">
+            <span className="rail-heading">
+              {activeWorkspace === "templates"
+                ? "Designer views"
+                : activeWorkspace === "queue"
+                  ? "Queue filters"
+                  : activeWorkspace === "audit"
+                    ? "Audit filters"
+                    : "Route detail"}
+            </span>
+            {activeWorkspace === "templates"
+              ? templateWorkspaceItems.map((item) => (
+                  <button
+                    key={item.id}
+                    className={`rail-command ${templateWorkspaceMode === item.id ? "active" : ""}`}
+                    type="button"
+                    onClick={() => setTemplateWorkspaceMode(item.id)}
+                  >
+                    {item.label} | {item.badge}
+                  </button>
+                ))
+              : null}
+            {activeWorkspace === "queue" ? (
+              <>
+                <button
+                  className={`rail-command ${queueViewFilter === "all" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("all");
+                    setQueuePage(1);
+                  }}
+                >
+                  All rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "ready" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("ready");
+                    setQueuePage(1);
+                  }}
+                >
+                  Ready rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "failed" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("failed");
+                    setQueuePage(1);
+                  }}
+                >
+                  Failed rows
+                </button>
+                <button
+                  className={`rail-command ${queueViewFilter === "submitted" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setQueueViewFilter("submitted");
+                    setQueuePage(1);
+                  }}
+                >
+                  Submitted rows
+                </button>
+              </>
+            ) : null}
+            {activeWorkspace === "audit" ? (
+              <>
+                <button
+                  className={`rail-command ${auditModeFilter === "all" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("all");
+                    setAuditPage(1);
+                  }}
+                >
+                  All entries
+                </button>
+                <button
+                  className={`rail-command ${auditModeFilter === "proof" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("proof");
+                    setAuditPage(1);
+                  }}
+                >
+                  Proof only
+                </button>
+                <button
+                  className={`rail-command ${auditModeFilter === "print" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditModeFilter("print");
+                    setAuditPage(1);
+                  }}
+                >
+                  Print only
+                </button>
+                <button
+                  className={`rail-command ${auditProofFilter === "pending" ? "active" : ""}`}
+                  type="button"
+                  onClick={() => {
+                    setAuditProofFilter("pending");
+                    setAuditPage(1);
+                  }}
+                >
+                  Pending proof
+                </button>
+              </>
+            ) : null}
+            {activeWorkspace === "compose" ? (
+              <>
+                <p className="rail-note">
+                  Current execution route: {templateOptionLabel} / {executionModeLabel}.
+                </p>
+                <p className="rail-note">
+                  Stage is for frozen review only. Submit always uses the live form state.
+                </p>
+              </>
+            ) : null}
+          </div>
+
+          <div className="rail-group rail-pane rail-note-group">
+            <span className="rail-heading">Document</span>
+            <div className="rail-property-list">
+              <div>
+                <span>Job</span>
+                <strong>{session.jobId}</strong>
+              </div>
+              <div>
+                <span>Template</span>
+                <strong>{templateOptionLabel}</strong>
+              </div>
+              <div>
+                <span>Execution</span>
+                <strong>{executionModeLabel}</strong>
+              </div>
+            </div>
+            <p className="rail-note">
+              Saved local catalog entries are the only dispatchable template authority.
+            </p>
+            <p className="rail-note">
+              Print stays proof-gated by approved lineage and subject match inside desktop-shell.
+            </p>
           </div>
         </aside>
 
@@ -5822,6 +6171,141 @@ export function App() {
                             </p>
                           </div>
                         ) : null}
+                        <div className="proof-note catalog-governance-block">
+                          <strong>Catalog maintenance</strong>
+                          <p className={templateCatalogGovernanceToneClass}>
+                            {templateCatalogGovernanceHeadline}
+                          </p>
+                          <p>{templateCatalogGovernance.message}</p>
+                          {templateCatalogGovernanceResult ? (
+                            <>
+                              <div className="preview-summary catalog-governance-summary">
+                                <div>
+                                  <span>Manifest</span>
+                                  <strong>{templateCatalogGovernanceResult.manifestStatus}</strong>
+                                  <small className="mono-data">
+                                    {templateCatalogGovernanceResult.manifestPath}
+                                  </small>
+                                </div>
+                                <div>
+                                  <span>Overlay directory</span>
+                                  <strong>
+                                    {templateCatalogGovernanceResult.overlayJsonFileCount} JSON file
+                                    {templateCatalogGovernanceResult.overlayJsonFileCount === 1
+                                      ? ""
+                                      : "s"}
+                                  </strong>
+                                  <small className="mono-data">
+                                    {templateCatalogGovernanceResult.overlayDirectoryPath}
+                                  </small>
+                                </div>
+                                <div>
+                                  <span>Effective default</span>
+                                  <strong>
+                                    {
+                                      templateCatalogGovernanceResult.effectiveDefaultTemplateVersion
+                                    }
+                                  </strong>
+                                  <small>
+                                    via {templateCatalogGovernanceResult.effectiveDefaultSource} /{" "}
+                                    {templateCatalogGovernanceResult.localEntryCount} local entr
+                                    {templateCatalogGovernanceResult.localEntryCount === 1
+                                      ? "y"
+                                      : "ies"}
+                                  </small>
+                                </div>
+                              </div>
+
+                              {templateCatalogGovernanceIssues.length > 0 ? (
+                                <div className="catalog-guidance-card">
+                                  <strong>Health issues</strong>
+                                  <ul className="catalog-guidance-list">
+                                    {templateCatalogGovernanceIssues.map((issue) => (
+                                      <li key={`${issue.code}-${issue.message}`}>
+                                        <span
+                                          className={
+                                            issue.severity === "error"
+                                              ? "status-fail"
+                                              : issue.severity === "warning"
+                                                ? "status-pending"
+                                                : "notice-text"
+                                          }
+                                        >
+                                          {issue.severity}
+                                        </span>{" "}
+                                        <span className="mono-data">{issue.code}</span>:{" "}
+                                        {issue.message}
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : (
+                                <p className="status-ok">
+                                  No active manifest or overlay health issues were detected.
+                                </p>
+                              )}
+
+                              <div className="catalog-guidance-card">
+                                <strong>Backup / restore guidance</strong>
+                                <ul className="catalog-guidance-list">
+                                  {templateCatalogGovernanceResult.backupGuidance.map((step) => (
+                                    <li key={step}>{step}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div className="catalog-guidance-card">
+                                <strong>Manifest repair guidance</strong>
+                                <ul className="catalog-guidance-list">
+                                  {templateCatalogGovernanceResult.repairGuidance.map((step) => (
+                                    <li key={step}>{step}</li>
+                                  ))}
+                                </ul>
+                              </div>
+                              <div className="catalog-guidance-card">
+                                <strong>Single-writer rules</strong>
+                                <ul className="catalog-guidance-list">
+                                  {templateCatalogGovernanceResult.singleWriterGuidance.map(
+                                    (step) => (
+                                      <li key={step}>{step}</li>
+                                    ),
+                                  )}
+                                </ul>
+                              </div>
+                              {templateCatalogGovernanceResult.localEntries.length > 0 ? (
+                                <div className="catalog-guidance-card">
+                                  <strong>Local manifest entries</strong>
+                                  <ul className="catalog-entry-list">
+                                    {templateCatalogGovernanceResult.localEntries.map((entry) => (
+                                      <li key={`${entry.version}-${entry.path}`}>
+                                        <div className="catalog-entry-row">
+                                          <span className="mono-data">{entry.version}</span>
+                                          <span
+                                            className={
+                                              entry.enabled ? "status-ok" : "status-pending"
+                                            }
+                                          >
+                                            {entry.enabled ? "enabled" : "disabled"}
+                                          </span>
+                                          <span
+                                            className={
+                                              entry.fileExists ? "status-ok" : "status-fail"
+                                            }
+                                          >
+                                            {entry.fileExists ? "file present" : "file missing"}
+                                          </span>
+                                        </div>
+                                        <small className="hint-text">
+                                          {entry.labelName} /{" "}
+                                          <span className="mono-data">{entry.path}</span>
+                                        </small>
+                                      </li>
+                                    ))}
+                                  </ul>
+                                </div>
+                              ) : null}
+                            </>
+                          ) : null}
+                        </div>
                         <div className="toolbar template-action-toolbar">
                           <button
                             className="button-secondary"

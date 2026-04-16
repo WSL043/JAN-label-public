@@ -44,18 +44,18 @@ Priority order for post-`v0.1.2` branch work.
 | T-043 | P3 | done | Codex | Release checklist automation | `pnpm release:readiness --version <version>` writes machine-readable release readiness artifacts and the release workflow uploads them |
 | T-048 | P1 | done | Codex | `v0.2.0` operator workstation redesign | `admin-web` uses a dark-neutral, dense three-pane workstation with lane-aware inspector focus across compose/template/queue/audit |
 | T-045c | P1 | done | Codex | Cut `v0.2.0` operator workstation release | PR `#31` merged, tag `v0.2.0` published, GitHub Release workflow succeeded, and the Windows installer asset is available |
+| T-041 | P2 | done | Codex + Sub-Agent | Local template catalog governance hardening | Catalog lane exposes backup/restore guidance, manifest repair guidance, local overlay diagnostics, and explicit single-writer operating rules |
 
 ## Now
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| None | - | clear | Codex | No active implementation blockers remain after the `v0.2.0` release cut | Refill `Now` from `Next` when the next milestone is chosen |
+| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` builds on GitHub Windows runners, the new Windows-only shell direction is documented, and native workstation structure is ready to absorb current lanes |
 
 ## Next
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-041 | P2 | pending | Codex + Sub-Agent | Local template catalog governance hardening | Local catalog maintenance has backup/restore guidance, manifest repair guidance, and clear single-writer operational rules |
 | T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
 | T-044 | P2 | pending | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch and pending-proof registration are atomic or have explicit recovery tooling |
 | T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |

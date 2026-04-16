@@ -2,7 +2,7 @@
 
 mod audit_store;
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
 use std::io::Read;
@@ -198,6 +198,11 @@ fn template_catalog_command() -> Result<TemplateCatalogResult, String> {
             })
             .collect(),
     })
+}
+
+#[command]
+fn template_catalog_governance_command() -> Result<TemplateCatalogGovernanceResult, String> {
+    inspect_template_catalog_governance()
 }
 
 #[command]
@@ -505,6 +510,43 @@ struct TemplateCatalogEntryResult {
     label_name: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogGovernanceResult {
+    manifest_status: String,
+    overlay_directory_path: String,
+    manifest_path: String,
+    manifest_exists: bool,
+    effective_default_template_version: String,
+    effective_default_source: String,
+    local_entry_count: usize,
+    overlay_json_file_count: usize,
+    local_entries: Vec<TemplateCatalogGovernanceEntryResult>,
+    issues: Vec<TemplateCatalogGovernanceIssueResult>,
+    backup_guidance: Vec<String>,
+    repair_guidance: Vec<String>,
+    single_writer_guidance: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogGovernanceEntryResult {
+    version: String,
+    label_name: String,
+    path: String,
+    resolved_path: String,
+    enabled: bool,
+    file_exists: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TemplateCatalogGovernanceIssueResult {
+    severity: String,
+    code: String,
+    message: String,
 }
 
 #[derive(Debug, Clone, serde::Deserialize)]
@@ -1282,6 +1324,355 @@ fn local_template_versions(manifest_path: Option<&Path>) -> Result<HashSet<Strin
         .collect())
 }
 
+fn inspect_template_catalog_governance() -> Result<TemplateCatalogGovernanceResult, String> {
+    let packaged_manifest = template_catalog().map_err(|error| error.to_string())?;
+    let packaged_versions = packaged_manifest
+        .templates
+        .iter()
+        .filter(|entry| entry.enabled)
+        .map(|entry| entry.version.clone())
+        .collect::<HashSet<_>>();
+    let overlay_dir = template_overlay_dir();
+    let manifest_path = template_catalog_manifest_path();
+    let manifest_exists = manifest_path.exists();
+    let manifest_file_name = manifest_path
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("template-manifest.json")
+        .to_string();
+    let overlay_json_files = overlay_json_files(&overlay_dir, &manifest_file_name)?;
+    let overlay_json_file_count = overlay_json_files.len();
+    let mut manifest_status = if manifest_exists { "ready" } else { "missing" }.to_string();
+    let mut effective_default_template_version = packaged_manifest.default_template_version.clone();
+    let mut effective_default_source = "packaged".to_string();
+    let mut local_entry_count = 0usize;
+    let mut local_entries = Vec::new();
+    let mut issues = Vec::new();
+    let mut referenced_local_paths = HashSet::new();
+
+    if !manifest_exists {
+        issues.push(governance_info(
+            "manifest_missing",
+            "The desktop local template manifest does not exist yet. Saving a template from the Catalog lane will create it.",
+        ));
+    } else {
+        let manifest_contents = match fs::read_to_string(&manifest_path) {
+            Ok(contents) => contents,
+            Err(error) => {
+                manifest_status = "error".to_string();
+                issues.push(governance_error(
+                    "manifest_read_failed",
+                    format!(
+                        "Template manifest '{}' could not be read: {error}",
+                        manifest_path.display()
+                    ),
+                ));
+                String::new()
+            }
+        };
+
+        if manifest_status != "error" {
+            match serde_json::from_str::<TemplateManifest>(&manifest_contents) {
+                Ok(local_manifest) => {
+                    local_entry_count = local_manifest.templates.len();
+
+                    if local_manifest.schema_version.trim().is_empty() {
+                        issues.push(governance_warning(
+                            "manifest_schema_missing",
+                            "The local template manifest is missing schema_version. The packaged schema will be used until the manifest is rewritten.",
+                        ));
+                    }
+                    if local_manifest.default_template_version.trim().is_empty() {
+                        issues.push(governance_warning(
+                            "manifest_default_missing",
+                            "The local template manifest is missing default_template_version. The packaged default will be used until the manifest is rewritten.",
+                        ));
+                    }
+
+                    for (version, count) in duplicate_template_versions(&local_manifest.templates) {
+                        issues.push(governance_warning(
+                            "duplicate_local_version",
+                            format!(
+                                "Local template manifest contains {count} entries for template_version '{version}'. Keep a single entry per template_version."
+                            ),
+                        ));
+                    }
+
+                    for entry in &local_manifest.templates {
+                        let normalized_path = entry.path.replace('\\', "/");
+                        let path_is_absolute = Path::new(&normalized_path).is_absolute();
+                        let path_has_parent_traversal = contains_parent_traversal(&normalized_path);
+                        let resolved_path = if path_is_absolute {
+                            PathBuf::from(&normalized_path)
+                        } else {
+                            overlay_dir.join(&normalized_path)
+                        };
+                        let file_exists =
+                            !path_is_absolute && !path_has_parent_traversal && resolved_path.exists();
+
+                        if !path_is_absolute && !path_has_parent_traversal {
+                            referenced_local_paths.insert(normalized_path.clone());
+                        }
+                        if path_is_absolute {
+                            issues.push(governance_error(
+                                "absolute_template_path",
+                                format!(
+                                    "Local template entry '{}' points to an absolute path '{}'. Local overlay paths must stay relative to the overlay directory.",
+                                    entry.version, entry.path
+                                ),
+                            ));
+                        }
+                        if path_has_parent_traversal {
+                            issues.push(governance_error(
+                                "template_path_traversal",
+                                format!(
+                                    "Local template entry '{}' contains parent traversal in '{}'. Parent traversal is rejected for overlay templates.",
+                                    entry.version, entry.path
+                                ),
+                            ));
+                        } else if !file_exists {
+                            issues.push(governance_error(
+                                "missing_template_file",
+                                format!(
+                                    "Local template entry '{}' references '{}' but the file is missing from the overlay directory.",
+                                    entry.version, entry.path
+                                ),
+                            ));
+                        }
+
+                        local_entries.push(TemplateCatalogGovernanceEntryResult {
+                            version: entry.version.clone(),
+                            label_name: entry.label_name.clone(),
+                            path: entry.path.clone(),
+                            resolved_path: resolved_path.to_string_lossy().into_owned(),
+                            enabled: entry.enabled,
+                            file_exists,
+                        });
+                    }
+
+                    let effective_manifest = template_catalog_with_overlay(Some(&manifest_path))
+                        .map_err(|error| error.to_string())?;
+                    effective_default_template_version =
+                        effective_manifest.default_template_version.clone();
+                    effective_default_source = if local_manifest
+                        .templates
+                        .iter()
+                        .any(|entry| entry.enabled && entry.version == effective_default_template_version)
+                    {
+                        "local".to_string()
+                    } else if packaged_versions.contains(&effective_default_template_version) {
+                        "packaged".to_string()
+                    } else {
+                        "unknown".to_string()
+                    };
+
+                    let effective_versions = effective_manifest
+                        .templates
+                        .iter()
+                        .filter(|entry| entry.enabled)
+                        .map(|entry| entry.version.clone())
+                        .collect::<HashSet<_>>();
+                    if !effective_versions.contains(&effective_default_template_version) {
+                        issues.push(governance_error(
+                            "default_template_missing",
+                            format!(
+                                "Effective default template_version '{}' is not available in the merged packaged/local catalog.",
+                                effective_default_template_version
+                            ),
+                        ));
+                    }
+                }
+                Err(error) => {
+                    manifest_status = "error".to_string();
+                    issues.push(governance_error(
+                        "manifest_parse_failed",
+                        format!(
+                            "Template manifest '{}' is not valid JSON: {error}",
+                            manifest_path.display()
+                        ),
+                    ));
+                }
+            }
+        }
+    }
+
+    let unreferenced_local_files = overlay_json_files
+        .iter()
+        .filter(|path| !referenced_local_paths.contains(*path))
+        .cloned()
+        .collect::<Vec<_>>();
+    if !unreferenced_local_files.is_empty() {
+        issues.push(governance_warning(
+            "unreferenced_local_file",
+            format!(
+                "Overlay directory contains JSON files that are not referenced by the manifest: {}.",
+                unreferenced_local_files.join(", ")
+            ),
+        ));
+    }
+
+    let mut repair_guidance = vec![
+        format!(
+            "Close desktop-shell before manually editing or replacing '{}'.",
+            manifest_path.display()
+        ),
+        format!(
+            "Keep a backup of '{}' before any manual manifest repair.",
+            overlay_dir.display()
+        ),
+    ];
+    if issues
+        .iter()
+        .any(|issue| issue.code == "manifest_parse_failed" || issue.code == "manifest_read_failed")
+    {
+        repair_guidance.push(format!(
+            "If '{}' is broken, rename it out of the overlay directory, reopen desktop-shell, and save one valid template from the Catalog lane to regenerate a clean manifest.",
+            manifest_path.display()
+        ));
+    }
+    if issues
+        .iter()
+        .any(|issue| issue.code == "missing_template_file")
+    {
+        repair_guidance.push(
+            "If a manifest entry points to a missing JSON file, restore that file from backup or save the same template_version again from the Catalog lane.".to_string(),
+        );
+    }
+    if issues
+        .iter()
+        .any(|issue| issue.code == "duplicate_local_version")
+    {
+        repair_guidance.push(
+            "Keep exactly one manifest entry per template_version. Remove duplicate entries before using proof or print dispatch.".to_string(),
+        );
+    }
+    if issues
+        .iter()
+        .any(|issue| issue.code == "unreferenced_local_file")
+    {
+        repair_guidance.push(
+            "JSON files that are not referenced by template-manifest.json do not dispatch. Add a manifest entry or remove the orphaned file after backup.".to_string(),
+        );
+    }
+    if repair_guidance.len() == 2 {
+        repair_guidance.push(
+            "If the catalog route looks wrong, refresh the desktop catalog and compare template-manifest.json against the JSON files in the overlay directory.".to_string(),
+        );
+    }
+
+    Ok(TemplateCatalogGovernanceResult {
+        manifest_status,
+        overlay_directory_path: overlay_dir.to_string_lossy().into_owned(),
+        manifest_path: manifest_path.to_string_lossy().into_owned(),
+        manifest_exists,
+        effective_default_template_version,
+        effective_default_source,
+        local_entry_count,
+        overlay_json_file_count,
+        local_entries,
+        issues,
+        backup_guidance: vec![
+            "Close desktop-shell before copying or restoring the local template catalog.".to_string(),
+            format!(
+                "Back up the entire overlay directory as a unit: {}",
+                overlay_dir.display()
+            ),
+            format!(
+                "The manifest file and local template JSON files must stay together. Manifest path: {}",
+                manifest_path.display()
+            ),
+            "Restore by replacing the overlay directory, then reopen desktop-shell and refresh the catalog.".to_string(),
+        ],
+        repair_guidance,
+        single_writer_guidance: vec![
+            "Treat the local template catalog as single-writer state.".to_string(),
+            "Do not save templates from multiple desktop-shell instances against the same overlay directory.".to_string(),
+            "Do not mix manual file edits with live Catalog-lane saves while desktop-shell is running.".to_string(),
+            "Finish any backup or restore with desktop-shell closed before reopening the operator workstation.".to_string(),
+        ],
+    })
+}
+
+fn overlay_json_files(overlay_dir: &Path, manifest_file_name: &str) -> Result<Vec<String>, String> {
+    if !overlay_dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut files = fs::read_dir(overlay_dir)
+        .map_err(|error| {
+            format!(
+                "failed to read template overlay directory '{}': {error}",
+                overlay_dir.display()
+            )
+        })?
+        .filter_map(|entry| {
+            let entry = entry.ok()?;
+            if !entry.file_type().ok()?.is_file() {
+                return None;
+            }
+
+            let path = entry.path();
+            if path.extension().and_then(|ext| ext.to_str()) != Some("json") {
+                return None;
+            }
+
+            let file_name = path.file_name()?.to_str()?.to_string();
+            if file_name == manifest_file_name {
+                return None;
+            }
+
+            Some(file_name)
+        })
+        .collect::<Vec<_>>();
+    files.sort();
+    Ok(files)
+}
+
+fn contains_parent_traversal(path: &str) -> bool {
+    path.split('/').any(|segment| segment == "..")
+}
+
+fn duplicate_template_versions(entries: &[TemplateManifestEntry]) -> Vec<(String, usize)> {
+    let mut counts = HashMap::new();
+    for entry in entries {
+        *counts.entry(entry.version.clone()).or_insert(0usize) += 1;
+    }
+
+    let mut duplicates = counts
+        .into_iter()
+        .filter(|(_, count)| *count > 1)
+        .collect::<Vec<_>>();
+    duplicates.sort_by(|left, right| left.0.cmp(&right.0));
+    duplicates
+}
+
+fn governance_error(code: &str, message: impl Into<String>) -> TemplateCatalogGovernanceIssueResult {
+    TemplateCatalogGovernanceIssueResult {
+        severity: "error".to_string(),
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
+fn governance_warning(
+    code: &str,
+    message: impl Into<String>,
+) -> TemplateCatalogGovernanceIssueResult {
+    TemplateCatalogGovernanceIssueResult {
+        severity: "warning".to_string(),
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
+fn governance_info(code: &str, message: impl Into<String>) -> TemplateCatalogGovernanceIssueResult {
+    TemplateCatalogGovernanceIssueResult {
+        severity: "info".to_string(),
+        code: code.to_string(),
+        message: message.into(),
+    }
+}
+
 fn resolve_optional_env(key: &str) -> Option<String> {
     env::var(key).ok()
 }
@@ -1773,6 +2164,7 @@ fn main() {
             approve_proof,
             reject_proof,
             template_catalog_command,
+            template_catalog_governance_command,
             save_template_to_local_catalog,
             preview_template_draft,
             validate_legacy_proof_seed,
@@ -2038,6 +2430,137 @@ mod tests {
             .expect("overlay writeback entry should remain in manifest");
         assert_eq!(writeback.get("label_name").and_then(|value| value.as_str()), Some("overlay-writeback-renamed"));
         assert_eq!(writeback.get("enabled").and_then(|value| value.as_bool()), Some(false));
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn template_catalog_governance_reports_local_overlay_health() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_TEMPLATE_OVERLAY_DIR]);
+        let root = env::temp_dir().join("jan-label-template-governance-ready");
+        let _ = fs::remove_dir_all(&root);
+        let overlay_dir = root.join("catalog-overlays");
+        env::set_var(ENV_TEMPLATE_OVERLAY_DIR, &overlay_dir);
+
+        save_template_to_local_catalog(TemplateCatalogWritebackRequest {
+            template_source: r##"
+                {
+                  "schema_version": "template-spec-v1",
+                  "template_version": "overlay-governance@v1",
+                  "label_name": "overlay-governance",
+                  "page": { "width_mm": 62, "height_mm": 29 },
+                  "fields": [
+                    {
+                      "name": "sku",
+                      "x_mm": 2,
+                      "y_mm": 5,
+                      "font_size_mm": 3,
+                      "template": "sku:{sku}"
+                    }
+                  ]
+                }
+                "##
+            .to_string(),
+            enabled: true,
+            set_as_default: true,
+            label_name: Some("overlay-governance".to_string()),
+            description: Some("governance health test".to_string()),
+        })
+        .expect("write local governance template should succeed");
+
+        let governance =
+            template_catalog_governance_command().expect("governance diagnostics should succeed");
+
+        assert_eq!(governance.manifest_status, "ready");
+        assert_eq!(governance.effective_default_template_version, "overlay-governance@v1");
+        assert_eq!(governance.effective_default_source, "local");
+        assert_eq!(governance.local_entry_count, 1);
+        assert!(governance
+            .local_entries
+            .iter()
+            .any(|entry| entry.version == "overlay-governance@v1" && entry.file_exists));
+        assert!(!governance
+            .issues
+            .iter()
+            .any(|issue| issue.severity == "error"));
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn template_catalog_governance_reports_missing_local_template_file() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_TEMPLATE_OVERLAY_DIR]);
+        let root = env::temp_dir().join("jan-label-template-governance-missing-file");
+        let _ = fs::remove_dir_all(&root);
+        let overlay_dir = root.join("catalog-overlays");
+        let manifest_path = overlay_dir.join("template-manifest.json");
+        env::set_var(ENV_TEMPLATE_OVERLAY_DIR, overlay_dir.clone());
+
+        fs::create_dir_all(&overlay_dir).expect("create overlay dir for diagnostics test");
+        fs::write(
+            &manifest_path,
+            r##"
+            {
+              "schema_version": "template-manifest-v1",
+              "default_template_version": "overlay-missing@v1",
+              "templates": [
+                {
+                  "version": "overlay-missing@v1",
+                  "path": "overlay-missing@v1.json",
+                  "label_name": "overlay-missing",
+                  "description": "missing local file",
+                  "enabled": true
+                }
+              ]
+            }
+            "##,
+        )
+        .expect("write manifest for missing-file test");
+
+        let governance =
+            template_catalog_governance_command().expect("governance diagnostics should succeed");
+
+        assert_eq!(governance.manifest_status, "ready");
+        assert!(governance.issues.iter().any(|issue| {
+            issue.code == "missing_template_file"
+                && issue.message.contains("overlay-missing@v1")
+        }));
+        assert!(governance.repair_guidance.iter().any(|step| {
+            step.contains("save the same template_version again")
+        }));
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn template_catalog_governance_reports_manifest_parse_failures_with_repair_guidance() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_TEMPLATE_OVERLAY_DIR]);
+        let root = env::temp_dir().join("jan-label-template-governance-bad-manifest");
+        let _ = fs::remove_dir_all(&root);
+        let overlay_dir = root.join("catalog-overlays");
+        let manifest_path = overlay_dir.join("template-manifest.json");
+        env::set_var(ENV_TEMPLATE_OVERLAY_DIR, overlay_dir.clone());
+
+        fs::create_dir_all(&overlay_dir).expect("create overlay dir for malformed manifest test");
+        fs::write(&manifest_path, "{ not-valid-json").expect("write malformed manifest");
+
+        let governance =
+            template_catalog_governance_command().expect("governance diagnostics should succeed");
+
+        assert_eq!(governance.manifest_status, "error");
+        assert!(governance
+            .issues
+            .iter()
+            .any(|issue| issue.code == "manifest_parse_failed"));
+        assert!(governance.repair_guidance.iter().any(|step| {
+            step.contains("rename it out of the overlay directory")
+        }));
 
         restore_env_vars(backup);
         let _ = fs::remove_dir_all(&root);

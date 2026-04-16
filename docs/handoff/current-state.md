@@ -1,10 +1,10 @@
 # current-state
 
 - Updated: 2026-04-16
-- Branch: `main`
+- Branch: `codex/t041-classic-workstation-governance`
 - Release base: `v0.2.0` (`0b6827e`)
-- Active PR: `none`
-- Branch relation to `origin/main` on 2026-04-16: `main` includes the merged operator workstation batch and tagged `v0.2.0` release commit; post-release sync is being prepared separately
+- Active PR: `#33`
+- Branch relation to `origin/main` on 2026-04-16: `codex/t041-classic-workstation-governance` is ahead of `origin/main` with local template catalog governance diagnostics, repair guidance, single-writer operating rules, a Windows-first shell language pass, and the first native WPF workstation prototype under `apps/windows-shell`
 
 ## Shipping Now
 
@@ -19,9 +19,10 @@
   - manual draft, batch queue, retry, and bridge-status-aware submit blocking
   - CSV/XLSX import with alias mapping and numeric JAN hardening
   - proof inbox, audit search, audit export, audit retention, and audit backup restore controls
-  - dark-neutral three-pane workstation shell with lane-aware inspector focus
+  - three-pane workstation shell with classic Windows/BarTender-style chrome, dense toolbar rows, and lane-aware inspector focus
   - structured template editor, local canvas preview, Rust renderer preview, and catalog authority split
   - desktop template catalog sync, source display, and save-to-local-catalog action
+  - catalog maintenance diagnostics with backup/restore guidance, manifest repair guidance, and single-writer rules
   - explicit live payload vs staged snapshot vs dispatch boundary review in compose
 - `apps/desktop-shell`
   - `dispatch_print_job`
@@ -33,9 +34,14 @@
   - `restore_audit_backup_bundle`
   - `approve_proof` / `reject_proof`
   - `template_catalog_command`
+  - `template_catalog_governance_command`
   - `save_template_to_local_catalog`
   - `preview_template_draft`
   - `validate_legacy_proof_seed` / `seed_legacy_proofs`
+- `apps/windows-shell`
+  - WPF operator shell prototype with native menu / ribbon / docking layout
+  - module navigation for `Job Setup`, `Designer`, `Batch Manager`, and `History`
+  - Windows-only shell language baseline for future operator UX work
 - release automation
 - `pnpm release:notes --version <version>`
 - `pnpm release:readiness --version <version>`
@@ -78,6 +84,18 @@
   - CI and Release install pnpm through `actions/setup-node` plus Corepack
   - `docs-guard` now evaluates changed files through native `git diff`
   - Codex CI autofix uses the same Corepack-based pnpm bootstrap as the main CI jobs
+- Local template catalog governance is now operator-visible instead of implicit:
+  - `desktop-shell` exposes `template_catalog_governance_command`
+  - Catalog lane surfaces manifest status, overlay file health, effective default resolution, and orphaned local JSON warnings
+  - operators now get explicit backup/restore guidance, manifest repair guidance, and single-writer operating rules before manual catalog repair
+- The workstation chrome is no longer targeting an AI desktop look:
+  - top-level shell now uses a titlebar plus toolbar layout
+  - lane navigation, tables, and inspector panels are styled closer to traditional Windows label software
+  - buttons, tabs, and metric cards now use denser desktop-oriented controls instead of rounded dark cards
+- A new migration front is now in place for the shell itself:
+  - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
+  - `apps/admin-web` remains the operational path until backend parity lands in the native shell
+  - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
 
 ## Release Boundary
 
@@ -101,25 +119,14 @@
 
 Passed on this batch:
 
+- `git diff --check`
 - `pnpm fixture:validate`
 - `pnpm format:check`
 - `pnpm lint`
 - `pnpm typecheck`
 - `pnpm --filter @label/admin-web build`
-- `cargo fmt --all --check`
-- `pnpm release:notes --version v0.2.0`
-- GitHub Actions `CI` workflow on PR `#31`
-  - `fixture-validation`
-  - `web-format-lint`
-  - `web-typecheck`
-  - `rust-format`
-  - `rust-lint`
-  - `rust-test`
-  - `golden-tests`
-  - `desktop-shell-windows`
-- GitHub `Release` workflow on tag `v0.2.0`
-  - `verify-release-ready`
-  - `publish-windows-release`
+- Local Rust/Tauri validation for this branch still depends on a Windows MSVC linker and was not completed on this host
+- Local WPF validation for this branch also depends on a local `.NET` SDK and was not completed on this host
 
 Operational note:
 
@@ -129,7 +136,10 @@ Operational note:
   - `cargo test --workspace`
   - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
   - `pnpm release:readiness --version v0.2.0`
+- This host currently cannot complete native-shell verification because `dotnet` is not available:
+  - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - GitHub Actions has already passed the Windows desktop build/test path for PR `#31`, so local MSVC toolchain absence is no longer a release blocker as long as the remote Windows runner remains green.
+- Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
 - `docs/release/v0.2.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the local readiness report remains `fail` only because this workstation does not have the Windows desktop linker toolchain installed.
 
 ## Release Status
@@ -140,15 +150,17 @@ Operational note:
 - Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
 - Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
 - The operator workstation redesign, audit restore flow, and release automation artifacts are now in the published baseline.
+- The current branch adds local template catalog governance diagnostics on top of the `v0.2.0` baseline.
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
 
 ## Next Main Tasks
 
-1. `T-041`: local template catalog governance hardening
+1. `T-049`: Windows-native workstation shell migration
 2. `T-042`: template library operator UX
 3. `T-044`: audit transaction hardening
+4. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 

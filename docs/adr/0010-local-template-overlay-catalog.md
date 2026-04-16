@@ -40,10 +40,12 @@ Tradeoffs:
 
 - The local catalog is machine-local and not multi-host.
 - There is no shared catalog service in this release.
-- Backup/restore and multi-writer governance remain follow-up work.
+- Backup/restore remains a filesystem procedure, not a shared service.
+- Multi-writer coordination remains an operator rule, not an enforced lock service.
 
 ## Follow-Up
 
 - `T-028f`: audit backup list / restore
-- `T-041`: local template catalog governance hardening
+- `T-041`: local template catalog governance hardening delivered desktop diagnostics, manifest repair guidance, backup/restore guidance, and explicit single-writer rules
+- `T-042`: template library operator UX
 - physical printer validation before release

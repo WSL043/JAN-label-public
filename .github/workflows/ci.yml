@@ -126,6 +126,22 @@ jobs:
           path: apps/desktop-shell/src-tauri/target/release/bundle/**
           if-no-files-found: error
 
+  windows-shell-native:
+    name: windows-shell-native
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: 8.0.x
+      - run: dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
+      - run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      - uses: actions/upload-artifact@v7
+        with:
+          name: jan-label-native-shell
+          path: apps/windows-shell/bin/Release/net8.0-windows/win-x64/publish/**
+          if-no-files-found: error
+
   docs-guard:
     name: docs-guard
     runs-on: ubuntu-latest

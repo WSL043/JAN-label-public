@@ -12,6 +12,7 @@ const APPROVE_PROOF_COMMAND = "approve_proof";
 const REJECT_PROOF_COMMAND = "reject_proof";
 const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
 const TEMPLATE_CATALOG_COMMAND = "template_catalog_command";
+const TEMPLATE_CATALOG_GOVERNANCE_COMMAND = "template_catalog_governance_command";
 const SAVE_TEMPLATE_TO_LOCAL_CATALOG_COMMAND = "save_template_to_local_catalog";
 const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
 const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
@@ -248,6 +249,37 @@ export type TemplateCatalogResult = {
   templates: TemplateCatalogEntry[];
 };
 
+export type TemplateCatalogGovernanceIssue = {
+  severity: "info" | "warning" | "error";
+  code: string;
+  message: string;
+};
+
+export type TemplateCatalogGovernanceEntry = {
+  version: string;
+  labelName: string;
+  path: string;
+  resolvedPath: string;
+  enabled: boolean;
+  fileExists: boolean;
+};
+
+export type TemplateCatalogGovernanceResult = {
+  manifestStatus: "missing" | "ready" | "error";
+  overlayDirectoryPath: string;
+  manifestPath: string;
+  manifestExists: boolean;
+  effectiveDefaultTemplateVersion: string;
+  effectiveDefaultSource: TemplateCatalogSource;
+  localEntryCount: number;
+  overlayJsonFileCount: number;
+  localEntries: TemplateCatalogGovernanceEntry[];
+  issues: TemplateCatalogGovernanceIssue[];
+  backupGuidance: string[];
+  repairGuidance: string[];
+  singleWriterGuidance: string[];
+};
+
 export function isTauriConnected(): boolean {
   return isTauri();
 }
@@ -357,6 +389,15 @@ export async function fetchTemplateCatalog(): Promise<TemplateCatalogResult> {
     );
   }
   return invoke<TemplateCatalogResult>(TEMPLATE_CATALOG_COMMAND, {});
+}
+
+export async function fetchTemplateCatalogGovernance(): Promise<TemplateCatalogGovernanceResult> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to inspect template catalog maintenance state.",
+    );
+  }
+  return invoke<TemplateCatalogGovernanceResult>(TEMPLATE_CATALOG_GOVERNANCE_COMMAND, {});
 }
 
 export async function saveTemplateToLocalCatalog(
