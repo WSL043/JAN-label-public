@@ -11,13 +11,14 @@ Current scope:
 - module navigation for Home / Designer / Print Console / Batch Jobs / History
 - module-specific operator workspaces instead of a single static mock:
   - Home migration and readiness dashboard
-  - Designer docked toolbox, template library, object browser, data-source panes, design documents, and package-backed property inspector
+  - Designer docked toolbox, template library board, object browser, data-source panes, design documents, and package-backed property inspector
   - Print Console proof queue, dispatch grid, and guardrail inspector
   - Batch Jobs import sessions, queue table, and retry guardrails
   - History proof review, audit ledger, retention, and restore visibility
 - shared context strip and status strip that keep lane purpose, authority, route, and active blocker signals visible in shell chrome
 - designer canvas selection now drives the property inspector, so the inspector is no longer a static metadata pane
-- ribbon, quick-access, and header actions now produce visible shell feedback instead of dead UI buttons
+- Home and Designer now share a reusable template-library board that makes default winner, draft-only state, dispatch safety, authority owner, and rollback path visible from one panel
+- ribbon, quick-access, and header actions now route operators toward the relevant lane and produce visible shell feedback instead of dead UI buttons
 - shell-level mock data that lets operators evaluate lane density and information architecture before backend wiring lands
 - shell-only scaffolding while Rust dispatch/audit/template commands are still owned by `apps/desktop-shell`
 - GitHub Windows CI publishes both a self-contained preview build artifact and an installer artifact for operator UI review

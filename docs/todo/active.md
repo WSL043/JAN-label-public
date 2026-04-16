@@ -46,6 +46,7 @@ Priority order for post-`v0.1.2` branch work.
 | T-045c | P1 | done | Codex | Cut `v0.2.0` operator workstation release | PR `#31` merged, tag `v0.2.0` published, GitHub Release workflow succeeded, and the Windows installer asset is available |
 | T-041 | P2 | done | Codex + Sub-Agent | Local template catalog governance hardening | Catalog lane exposes backup/restore guidance, manifest repair guidance, local overlay diagnostics, and explicit single-writer operating rules |
 | T-044 | P2 | done | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch commits through a recovery marker, stale markers auto-recover on locked audit access, corrupt markers are quarantined for manual reconcile, and command-level proof dispatch coverage exists |
+| T-042 | P2 | done | Codex | Template library operator UX | `apps/windows-shell` now exposes a reusable template-library board where operators can browse, select, and reason about packaged vs local templates, default winner, draft-only state, dispatch safety, and rollback path with less ambiguity |
 
 ## Now
 
@@ -57,7 +58,6 @@ Priority order for post-`v0.1.2` branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-042 | P2 | pending | Codex + Sub-Agent | Template library operator UX | Operators can browse, select, and reason about packaged vs local templates with less ambiguity |
 | T-045d | P1 | pending | Codex + Sub-Agent | Cut `v0.3.0` Windows-native workstation release | `v0.3.0` tag is published only after native-shell operator UX, template-library clarity, audit recovery expectations, native-shell release asset wiring, and repeated sub-agent pre-release review passes are all recorded |
 | T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 

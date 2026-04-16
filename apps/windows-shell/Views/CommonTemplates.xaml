@@ -1,6 +1,7 @@
 <ResourceDictionary
     xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:JanLabel.WindowsShell">
   <SolidColorBrush x:Key="ChromeBrush" Color="#EDF1F5" />
   <SolidColorBrush x:Key="RibbonBrush" Color="#E5EAF0" />
   <SolidColorBrush x:Key="PanelBrush" Color="#F9FBFD" />
@@ -93,4 +94,158 @@
     <Setter Property="BorderThickness" Value="0,0,1,0" />
     <Setter Property="Padding" Value="10,3" />
   </Style>
+
+  <Style x:Key="LibraryBadgeStyle" TargetType="Border">
+    <Setter Property="Margin" Value="0,0,6,6" />
+    <Setter Property="Padding" Value="6,2" />
+    <Setter Property="Background" Value="#EEF3F8" />
+    <Setter Property="BorderBrush" Value="#C7D1DB" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style x:Key="LibraryPanelCardStyle" TargetType="Border">
+    <Setter Property="Margin" Value="0,0,0,8" />
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="Background" Value="#FCFDFE" />
+    <Setter Property="BorderBrush" Value="#CFD8E1" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <DataTemplate DataType="{x:Type local:TemplateLibraryPanelModel}">
+    <ScrollViewer VerticalScrollBarVisibility="Auto">
+      <StackPanel>
+        <DockPanel>
+          <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Template Library Board" />
+          <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding HeaderDetail}" />
+        </DockPanel>
+        <TextBlock Margin="0,3,0,10" FontSize="11" Foreground="#235FA9" Text="{Binding StatusSummary}" />
+
+        <ItemsControl ItemsSource="{Binding SummaryCards}">
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource LibraryPanelCardStyle}">
+                <StackPanel>
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="{Binding Title}" />
+                  <DockPanel Margin="0,4,0,3">
+                    <TextBlock FontSize="18" FontWeight="SemiBold" Text="{Binding Value}" />
+                  </DockPanel>
+                  <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Detail}" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+
+        <Border Style="{StaticResource LibraryPanelCardStyle}">
+          <StackPanel>
+            <DockPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Entries" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="packaged / local / draft" />
+            </DockPanel>
+            <ListBox
+                Margin="0,8,0,0"
+                ItemsSource="{Binding Entries}"
+                SelectedItem="{Binding SelectedTemplate, Mode=TwoWay}"
+                ItemContainerStyle="{StaticResource SelectableItemStyle}">
+              <ListBox.ItemTemplate>
+                <DataTemplate>
+                  <StackPanel>
+                    <DockPanel>
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Name}" />
+                      <TextBlock DockPanel.Dock="Right" Foreground="#235FA9" FontWeight="SemiBold" Text="{Binding State}" />
+                    </DockPanel>
+                    <WrapPanel Margin="0,4,0,2">
+                      <Border Style="{StaticResource LibraryBadgeStyle}">
+                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Source}" />
+                      </Border>
+                      <Border Style="{StaticResource LibraryBadgeStyle}">
+                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Authority}" />
+                      </Border>
+                    </WrapPanel>
+                    <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Dispatch}" />
+                    <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Text="{Binding Note}" />
+                  </StackPanel>
+                </DataTemplate>
+              </ListBox.ItemTemplate>
+            </ListBox>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource LibraryPanelCardStyle}">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selected Template" />
+            <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding SelectionHeading}" />
+            <TextBlock Margin="0,2,0,8" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding SelectionSummary}" />
+            <ItemsControl ItemsSource="{Binding DetailRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Grid Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                      <ColumnDefinition Width="88" />
+                      <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource LibraryPanelCardStyle}">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Operator Guidance" />
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding GuidanceSections}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Margin="0,0,0,8" Padding="8" Background="#FFFFFF" BorderBrush="#D0D8E1" BorderThickness="1">
+                    <StackPanel>
+                      <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                      <TextBlock Margin="0,2,0,6" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Summary}" />
+                      <ItemsControl ItemsSource="{Binding Rows}">
+                        <ItemsControl.ItemTemplate>
+                          <DataTemplate>
+                            <Grid Margin="0,0,0,5">
+                              <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="92" />
+                                <ColumnDefinition Width="*" />
+                              </Grid.ColumnDefinitions>
+                              <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                              <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                            </Grid>
+                          </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                      </ItemsControl>
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+
+        <Border Style="{StaticResource LibraryPanelCardStyle}" Margin="0">
+          <StackPanel>
+            <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Current Alerts" />
+            <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding AlertRows}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate>
+                  <Border Margin="0,0,0,6" Padding="8" Background="#FFFFFF" BorderBrush="#D0D8E1" BorderThickness="1">
+                    <StackPanel>
+                      <DockPanel>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Level}" />
+                        <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding Source}" />
+                      </DockPanel>
+                      <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Text="{Binding Message}" />
+                    </StackPanel>
+                  </Border>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </StackPanel>
+        </Border>
+      </StackPanel>
+    </ScrollViewer>
+  </DataTemplate>
 </ResourceDictionary>

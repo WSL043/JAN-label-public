@@ -87,22 +87,7 @@
             </StackPanel>
           </Border>
           <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
-            <StackPanel>
-              <DockPanel>
-                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Template Library Snapshot" />
-                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="packaged + local" />
-              </DockPanel>
-              <ListView Margin="0,8,0,0" ItemsSource="{Binding TemplateRows}">
-                <ListView.View>
-                  <GridView>
-                    <GridViewColumn Width="132" DisplayMemberBinding="{Binding Name}" Header="Template" />
-                    <GridViewColumn Width="78" DisplayMemberBinding="{Binding Source}" Header="Source" />
-                    <GridViewColumn Width="78" DisplayMemberBinding="{Binding State}" Header="State" />
-                    <GridViewColumn Width="190" DisplayMemberBinding="{Binding Note}" Header="Operator note" />
-                  </GridView>
-                </ListView.View>
-              </ListView>
-            </StackPanel>
+            <ContentControl Content="{Binding TemplateLibrary}" />
           </Border>
         </Grid>
 

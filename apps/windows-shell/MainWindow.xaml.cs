@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
@@ -88,8 +89,16 @@ public partial class MainWindow : RibbonWindow, INotifyPropertyChanged
 
     private void RecordShellAction(string actionLabel)
     {
-        var moduleLabel = SelectedModule?.Label ?? "Shell";
-        LastActionStatus = $"{moduleLabel}: {actionLabel} requested. Prototype shell acknowledged the action and keeps proof/print authority in desktop-shell.";
+        var originLabel = SelectedModule?.Label ?? "Shell";
+        var routedModule = ResolveTargetModule(actionLabel);
+        if (routedModule is not null && !ReferenceEquals(routedModule, SelectedModule))
+        {
+            SelectedModule = routedModule;
+        }
+
+        var targetLabel = SelectedModule?.Label ?? originLabel;
+        var routeVerb = string.Equals(originLabel, targetLabel, StringComparison.Ordinal) ? "stayed in" : "routed to";
+        LastActionStatus = $"{actionLabel}: {routeVerb} {targetLabel}. {BuildActionOutcome(actionLabel, targetLabel)}";
         RefreshStatusStrip(SelectedModule);
     }
 
@@ -134,6 +143,143 @@ public partial class MainWindow : RibbonWindow, INotifyPropertyChanged
         {
             target.Add(item);
         }
+    }
+
+    private ModuleModel? ResolveTargetModule(string actionLabel)
+    {
+        if (MatchesAction(
+                actionLabel,
+                "Refresh State",
+                "Open Handoff",
+                "View Preview",
+                "Current State",
+                "Release Notes",
+                "Preview Package",
+                "Pin Workspace",
+                "Export State"))
+        {
+            return FindModule("Home");
+        }
+
+        if (MatchesAction(
+                actionLabel,
+                "Open Library",
+                "Overlay Status",
+                "Catalog Rules",
+                "New Format",
+                "Print Preview",
+                "Paste",
+                "Duplicate",
+                "Delete",
+                "Text",
+                "Barcode",
+                "Line",
+                "Box",
+                "Align Left",
+                "Make Same Size",
+                "Snap",
+                "Record Browser",
+                "Query Prompt",
+                "Named Data Sources",
+                "Rust Preview",
+                "Save to Catalog"))
+        {
+            return FindModule("Designer");
+        }
+
+        if (MatchesAction(
+                actionLabel,
+                "Refresh Queue",
+                "Hold",
+                "Release",
+                "Open PDF",
+                "Approve",
+                "Dispatch Batch",
+                "Route Check",
+                "Run Proof",
+                "Print",
+                "Proof"))
+        {
+            return FindModule("Print Console");
+        }
+
+        if (MatchesAction(
+                actionLabel,
+                "Import Workbook",
+                "Retry Failed",
+                "Queue Snapshot",
+                "CSV",
+                "XLSX",
+                "Alias Map",
+                "Submit Ready",
+                "Freeze Row",
+                "Fixture Check",
+                "Unknown Template",
+                "JAN Warnings"))
+        {
+            return FindModule("Batch Jobs");
+        }
+
+        if (MatchesAction(
+                actionLabel,
+                "Approve Proof",
+                "Reject Proof",
+                "Search Ledger",
+                "Export Audit",
+                "Trim Retention",
+                "Pin Artifact",
+                "Retention Dry Run",
+                "List Bundles",
+                "Validate Bundle",
+                "Restore"))
+        {
+            return FindModule("History");
+        }
+
+        if (actionLabel.Contains("Preview", StringComparison.OrdinalIgnoreCase))
+        {
+            return FindModule("Designer");
+        }
+
+        if (actionLabel.Contains("Proof", StringComparison.OrdinalIgnoreCase))
+        {
+            return FindModule("Print Console");
+        }
+
+        return null;
+    }
+
+    private ModuleModel? FindModule(string label)
+    {
+        return Modules.FirstOrDefault((module) => string.Equals(module.Label, label, StringComparison.Ordinal));
+    }
+
+    private static bool MatchesAction(string actionLabel, params string[] candidates)
+    {
+        foreach (var candidate in candidates)
+        {
+            if (string.Equals(actionLabel, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static string BuildActionOutcome(string actionLabel, string targetLabel)
+    {
+        return targetLabel switch
+        {
+            "Home" => "Migration and release context stays visible before touching another operational lane.",
+            "Designer" when string.Equals(actionLabel, "Save to Catalog", StringComparison.OrdinalIgnoreCase)
+                => "Saved catalog state is the only template state this shell treats as proof-safe.",
+            "Designer" => "Authoring state, overlay impact, and rollback remain visible on one screen.",
+            "Print Console" => "Proof lineage and dispatch route should be reviewed before print unlock.",
+            "Batch Jobs" => "Import assumptions, retry eligibility, and queue blockers are now in view.",
+            "History" => "Audit, proof review, and restore safety remain explicit before operator approval.",
+            _ => "Proof and print authority still route through desktop-shell.",
+        };
     }
 
     private bool SetProperty<T>(ref T field, T value, [CallerMemberName] string? propertyName = null)

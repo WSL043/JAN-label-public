@@ -167,20 +167,18 @@ public static class WorkspaceFactory
         model.SessionRows.Add(new PropertyRowModel("Latest preview", "preview-t049-windows-native-shell-main-20260416"));
         model.SessionRows.Add(new PropertyRowModel("Validation", "GitHub Windows runner authoritative"));
         model.SessionRows.Add(new PropertyRowModel("Primary shell", "apps/windows-shell"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("basic-50x30@v2", "local", "default", "Dispatch-safe overlay currently selected"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("basic-50x30@v1", "packaged", "fallback", "Reference version kept for rollback checks"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("shipper-70x50@v1", "packaged", "stable", "Batch import route baseline"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("proof-ticket@v1", "local", "draft", "Save before any proof dispatch"));
+        model.SessionRows.Add(new PropertyRowModel("Effective default", "basic-50x30@v2"));
+        TemplateLibraryCatalog.SeedHomePanel(model.TemplateLibrary);
         model.ActivityRows.Add(new ActivityRowModel("14:22", "release", "Installer prerelease refreshed from successful Windows CI", "done"));
         model.ActivityRows.Add(new ActivityRowModel("14:10", "designer", "Native shell designer frame aligned to practical workstation shape", "done"));
-        model.ActivityRows.Add(new ActivityRowModel("13:58", "catalog", "Overlay authority and single-writer rules remain visible", "watch"));
+        model.ActivityRows.Add(new ActivityRowModel("13:58", "catalog", "Overlay authority and rollback path are now visible without opening another lane", "done"));
         model.ActivityRows.Add(new ActivityRowModel("13:47", "audit", "Desktop-shell restore path remains available for backup recovery", "ok"));
         model.ActivityRows.Add(new ActivityRowModel("13:35", "proof", "Approved lineage still blocks print unlock in native shell", "ok"));
         model.ControlSections.Add(new PropertySectionModel("Shell Ownership", "The shell frame moves to WPF first; backend proof and dispatch authority stays unchanged.", new[] { new PropertyRowModel("Shell language", "native Windows workstation"), new PropertyRowModel("Proof / print gate", "desktop-shell"), new PropertyRowModel("Template save authority", "local catalog overlay") }));
         model.ControlSections.Add(new PropertySectionModel("Immediate Migration Fronts", "These are the next practical lanes to absorb after the designer frame.", new[] { new PropertyRowModel("Print Console", "proof queue and dispatch checklist"), new PropertyRowModel("Batch Jobs", "import queue and retry guardrails"), new PropertyRowModel("History", "audit search, proof review, retention") }));
+        model.NextSteps.Add(new QueueItemModel("Exercise the template library board", "Confirm default / draft / rollback reasoning without leaving Home", "t-042", "Operators should be able to tell which entry wins and which entry is unsafe before entering Designer."));
         model.NextSteps.Add(new QueueItemModel("Exercise the installer preview", "Confirm module switching and pane density on Windows", "preview", "Use the prerelease installer rather than the loose publish output."));
-        model.NextSteps.Add(new QueueItemModel("Map current admin-web lanes", "Check every current operational surface against a native shell lane", "migration", "Keep admin-web usable, but stop inventing shell language there."));
-        model.NextSteps.Add(new QueueItemModel("Wire backend commands later", "Keep Rust/Tauri authority untouched until an explicit backend migration ADR exists", "backend", "This batch stays at practical UI framing and operator flow modeling."));
+        model.NextSteps.Add(new QueueItemModel("Wire backend commands later", "Keep Rust/Tauri authority untouched until an explicit backend migration ADR exists", "backend", "This batch keeps authority text and operator flow aligned while backend parity lands separately."));
         model.StatusItems.Add(new StatusItemModel("Preview packaging", "installer published", "GitHub prerelease can be downloaded directly", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Migration lane", "T-049 active", "shell now carries multi-lane operator views", "MOVE", Brushes.SteelBlue));
         model.StatusItems.Add(new StatusItemModel("Catalog authority", "overlay preserved", "packaged vs local split remains explicit", "WATCH", Brushes.DarkGoldenrod));
@@ -196,7 +194,7 @@ public static class WorkspaceFactory
             MessageSummary = "2 warnings / 0 blockers",
             RecordSummary = "24 active records",
             StatusSummary = "desktop-shell remains the proof/print authority",
-            CatalogSummary = "local override active",
+            CatalogSummary = "authority, route, and rollback visible",
             CanvasWidth = 660,
             CanvasHeight = 410,
             PrimaryDocumentTitle = "basic-50x30",
@@ -205,10 +203,7 @@ public static class WorkspaceFactory
 
         model.ToolboxGroups.Add(new ToolboxGroupModel("Objects", new[] { new ToolboxItemModel("Text", "A"), new ToolboxItemModel("Barcode", "JAN"), new ToolboxItemModel("Counter", "#"), new ToolboxItemModel("Picture", "IMG") }));
         model.ToolboxGroups.Add(new ToolboxGroupModel("Guides", new[] { new ToolboxItemModel("Margins", "4 mm"), new ToolboxItemModel("Grid", "2 mm"), new ToolboxItemModel("Snap", "On") }));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("basic-50x30@v2", "local", "default", "Dispatch target for current workbench"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("basic-50x30@v1", "packaged", "stable", "Fallback for regression checks"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("shipper-70x50@v1", "packaged", "stable", "Available in library browser"));
-        model.TemplateRows.Add(new TemplateCatalogRowModel("proof-ticket@v1", "local", "draft", "Review-only until saved"));
+        TemplateLibraryCatalog.SeedDesignerPanel(model.TemplateLibrary);
         model.ObjectNodes.Add(new ObjectNodeModel("Label Format", "50 x 30 mm", new[] { new ObjectNodeModel("Static Layer", "3 objects", new[] { new ObjectNodeModel("Brand mark", "Text"), new ObjectNodeModel("Frame", "Box"), new ObjectNodeModel("Divider", "Line") }), new ObjectNodeModel("Data Layer", "5 objects", new[] { new ObjectNodeModel("Product name", "{{sku}}"), new ObjectNodeModel("JAN barcode", "{{jan}}"), new ObjectNodeModel("JAN text", "{{jan}}"), new ObjectNodeModel("Quantity", "{{qty}}") }) }));
         model.DataSources.Add(new DataSourceRowModel("sku", "Text", "200-145-3"));
         model.DataSources.Add(new DataSourceRowModel("jan", "JAN", "4901234567894"));
@@ -225,6 +220,7 @@ public static class WorkspaceFactory
         model.CanvasElements.Add(new CanvasElementModel("QTY", "24 PCS", 470, 38, 120, 40, 20, false));
         model.CanvasElements.Add(new CanvasElementModel("STATUS", "Proof lineage locked", 390, 304, 210, 32, 13, false));
         model.SetupRows.Add(new PropertyRowModel("Document", "basic-50x30@v2"));
+        model.SetupRows.Add(new PropertyRowModel("Effective default", "basic-50x30@v2"));
         model.SetupRows.Add(new PropertyRowModel("Printer profile", "pdf-proof / 300 dpi"));
         model.SetupRows.Add(new PropertyRowModel("Catalog authority", "saved local overlay only"));
         model.SetupRows.Add(new PropertyRowModel("Dispatch route", "desktop-shell"));

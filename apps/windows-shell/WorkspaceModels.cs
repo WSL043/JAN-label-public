@@ -84,7 +84,7 @@ public sealed class HomeWorkspaceModel : WorkspaceModel
 
     public ObservableCollection<PropertyRowModel> SessionRows { get; } = new();
 
-    public ObservableCollection<TemplateCatalogRowModel> TemplateRows { get; } = new();
+    public TemplateLibraryPanelModel TemplateLibrary { get; } = new();
 
     public ObservableCollection<ActivityRowModel> ActivityRows { get; } = new();
 
@@ -109,7 +109,7 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
 
     public ObservableCollection<ToolboxGroupModel> ToolboxGroups { get; } = new();
 
-    public ObservableCollection<TemplateCatalogRowModel> TemplateRows { get; } = new();
+    public TemplateLibraryPanelModel TemplateLibrary { get; } = new();
 
     public ObservableCollection<ObjectNodeModel> ObjectNodes { get; } = new();
 
@@ -516,14 +516,161 @@ public sealed class ActivityRowModel
     public string Status { get; }
 }
 
+public sealed class TemplateLibraryPanelModel : BindableModel
+{
+    private TemplateCatalogRowModel? _selectedTemplate;
+    private string _headerDetail = string.Empty;
+    private string _statusSummary = string.Empty;
+    private string _selectionHeading = "Select a template";
+    private string _selectionSummary = "Choose a template to inspect authority, dispatch safety, and rollback intent.";
+
+    public ObservableCollection<SummaryCardModel> SummaryCards { get; } = new();
+
+    public ObservableCollection<TemplateCatalogRowModel> Entries { get; } = new();
+
+    public ObservableCollection<PropertyRowModel> DetailRows { get; } = new();
+
+    public ObservableCollection<PropertySectionModel> GuidanceSections { get; } = new();
+
+    public ObservableCollection<MessageRowModel> AlertRows { get; } = new();
+
+    public string HeaderDetail
+    {
+        get => _headerDetail;
+        set => SetProperty(ref _headerDetail, value);
+    }
+
+    public string StatusSummary
+    {
+        get => _statusSummary;
+        set => SetProperty(ref _statusSummary, value);
+    }
+
+    public string SelectionHeading
+    {
+        get => _selectionHeading;
+        private set => SetProperty(ref _selectionHeading, value);
+    }
+
+    public string SelectionSummary
+    {
+        get => _selectionSummary;
+        private set => SetProperty(ref _selectionSummary, value);
+    }
+
+    public TemplateCatalogRowModel? SelectedTemplate
+    {
+        get => _selectedTemplate;
+        set
+        {
+            if (ReferenceEquals(_selectedTemplate, value))
+            {
+                return;
+            }
+
+            _selectedTemplate = value;
+            RefreshDetailRows();
+            OnPropertyChanged();
+        }
+    }
+
+    public void LoadEntries(IEnumerable<TemplateCatalogRowModel> entries, string? preferredTemplateName = null)
+    {
+        Entries.Clear();
+        foreach (var entry in entries)
+        {
+            Entries.Add(entry);
+        }
+
+        TemplateCatalogRowModel? preferred = null;
+        if (!string.IsNullOrWhiteSpace(preferredTemplateName))
+        {
+            foreach (var entry in Entries)
+            {
+                if (entry.Name == preferredTemplateName)
+                {
+                    preferred = entry;
+                    break;
+                }
+            }
+        }
+
+        SelectedTemplate = preferred ?? (Entries.Count > 0 ? Entries[0] : null);
+    }
+
+    public void ReplaceSummaryCards(IEnumerable<SummaryCardModel> cards)
+    {
+        SummaryCards.Clear();
+        foreach (var card in cards)
+        {
+            SummaryCards.Add(card);
+        }
+    }
+
+    public void ReplaceGuidanceSections(IEnumerable<PropertySectionModel> sections)
+    {
+        GuidanceSections.Clear();
+        foreach (var section in sections)
+        {
+            GuidanceSections.Add(section);
+        }
+    }
+
+    public void ReplaceAlerts(IEnumerable<MessageRowModel> alerts)
+    {
+        AlertRows.Clear();
+        foreach (var alert in alerts)
+        {
+            AlertRows.Add(alert);
+        }
+    }
+
+    private void RefreshDetailRows()
+    {
+        DetailRows.Clear();
+
+        if (SelectedTemplate is null)
+        {
+            SelectionHeading = "Select a template";
+            SelectionSummary = "Choose a template to inspect authority, dispatch safety, and rollback intent.";
+            return;
+        }
+
+        SelectionHeading = SelectedTemplate.Name;
+        SelectionSummary = SelectedTemplate.Note;
+        DetailRows.Add(new PropertyRowModel("Source", SelectedTemplate.Source));
+        DetailRows.Add(new PropertyRowModel("State", SelectedTemplate.State));
+        DetailRows.Add(new PropertyRowModel("Authority", SelectedTemplate.Authority));
+        DetailRows.Add(new PropertyRowModel("Dispatch", SelectedTemplate.Dispatch));
+        DetailRows.Add(new PropertyRowModel("Updated", SelectedTemplate.Updated));
+        DetailRows.Add(new PropertyRowModel("Current use", SelectedTemplate.Note));
+        DetailRows.Add(new PropertyRowModel("Overlay impact", SelectedTemplate.ChangeSummary));
+        DetailRows.Add(new PropertyRowModel("Rollback", SelectedTemplate.Rollback));
+    }
+}
+
 public sealed class TemplateCatalogRowModel
 {
-    public TemplateCatalogRowModel(string name, string source, string state, string note)
+    public TemplateCatalogRowModel(
+        string name,
+        string source,
+        string state,
+        string authority,
+        string dispatch,
+        string updated,
+        string note,
+        string changeSummary,
+        string rollback)
     {
         Name = name;
         Source = source;
         State = state;
+        Authority = authority;
+        Dispatch = dispatch;
+        Updated = updated;
         Note = note;
+        ChangeSummary = changeSummary;
+        Rollback = rollback;
     }
 
     public string Name { get; }
@@ -532,7 +679,17 @@ public sealed class TemplateCatalogRowModel
 
     public string State { get; }
 
+    public string Authority { get; }
+
+    public string Dispatch { get; }
+
+    public string Updated { get; }
+
     public string Note { get; }
+
+    public string ChangeSummary { get; }
+
+    public string Rollback { get; }
 }
 
 public sealed class JobRowModel

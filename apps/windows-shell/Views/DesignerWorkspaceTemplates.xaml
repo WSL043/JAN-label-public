@@ -43,26 +43,7 @@
                 </ScrollViewer>
               </avalonDock:LayoutAnchorable>
               <avalonDock:LayoutAnchorable Title="Template Library" CanClose="False" CanHide="False">
-                <Grid Margin="10">
-                  <Grid.RowDefinitions>
-                    <RowDefinition Height="Auto" />
-                    <RowDefinition Height="*" />
-                  </Grid.RowDefinitions>
-                  <DockPanel>
-                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Template Library" />
-                    <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding CatalogSummary}" />
-                  </DockPanel>
-                  <ListView Grid.Row="1" Margin="0,8,0,0" ItemsSource="{Binding TemplateRows}">
-                    <ListView.View>
-                      <GridView>
-                        <GridViewColumn Width="114" DisplayMemberBinding="{Binding Name}" Header="Template" />
-                        <GridViewColumn Width="68" DisplayMemberBinding="{Binding Source}" Header="Source" />
-                        <GridViewColumn Width="68" DisplayMemberBinding="{Binding State}" Header="State" />
-                        <GridViewColumn Width="190" DisplayMemberBinding="{Binding Note}" Header="Use" />
-                      </GridView>
-                    </ListView.View>
-                  </ListView>
-                </Grid>
+                <ContentControl Margin="10" Content="{Binding TemplateLibrary}" />
               </avalonDock:LayoutAnchorable>
               <avalonDock:LayoutAnchorable Title="Object Browser" CanClose="False" CanHide="False">
                 <Grid Margin="10">

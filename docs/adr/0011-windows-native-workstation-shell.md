@@ -56,6 +56,10 @@ Rules:
   - current authority should be visible without opening another pane
   - blockers should be legible in the current lane
   - route / proof / catalog state should remain visible in shared shell chrome
+- Template-library reasoning should not be hidden behind designer state alone:
+  - `Home` and `Designer` should expose the same packaged-vs-local library board language
+  - the winning default, draft-only state, dispatch eligibility, and rollback path should be visible from a single selection panel
+- Shell actions may route operators to the appropriate lane for review, but that routing must not imply backend authority moved out of `apps/desktop-shell`
 - Formal release automation should validate more than shell compilation:
   - native-shell build
   - self-contained publish

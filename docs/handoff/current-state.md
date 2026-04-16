@@ -46,7 +46,9 @@
   - `Dirkster.AvalonDock` for package-backed tool windows, docked inspectors, and designer document tabs
   - `PropertyTools.Wpf` for the right-side designer property inspector baseline
   - designer canvas selection now drives the property inspector instead of leaving it as static metadata
+  - Home and Designer now share a template-library board that makes winning default, draft-only entries, dispatch safety, authority owner, and rollback path visible from one selection surface
   - ribbon, quick-access, and header actions now write visible shell feedback instead of remaining inert buttons
+  - shell actions now also route operators toward the relevant lane instead of acknowledging clicks without any workspace transition
   - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
   - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - module-aware native workspaces for migration/readiness, designer, print console, batch queue, and history/audit review instead of a single static shell mock
@@ -118,6 +120,8 @@
   - the shell no longer stops at generic chrome; it now carries practical operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - each module now has its own lane-aware surface so operators can evaluate information density and flow before backend command wiring lands
   - shared shell chrome now exposes lane context, authority, route, and blocker-oriented status so the shell is judged against operator decision speed, not only visual density
+  - template-library reasoning is no longer a flat mock list; `Home` and `Designer` now share a library board with selected-template detail, dispatch-safe state, default resolution, and rollback guidance
+  - shell actions now route operators to the appropriate lane for review while still keeping backend authority in `apps/desktop-shell`
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
@@ -143,7 +147,7 @@
 
 ## Validation
 
-Passed on this batch:
+Passed in the latest release-hardening batch:
 
 - `git diff --check`
 - `pnpm fixture:validate`
@@ -157,6 +161,11 @@ Passed on this batch:
 - `pnpm --filter @label/desktop-shell build --ci --no-sign`
 - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - `dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true`
+
+Passed in the latest native-shell UX batch:
+
+- `git diff --check`
+- `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 
 Operational note:
 
@@ -190,7 +199,6 @@ Operational note:
   - pre-release bug hunt must include repeated sub-agent review passes before formal announcement
 - Minimum additional gate beyond the current baseline:
   - `T-049` materially closer to backend parity, with package-backed native shell surfaces replacing obvious hand-built mock chrome
-  - `T-042` template library operator UX moved out of ambiguous mock status
   - audit recovery expectations stay aligned between code, docs, and release readiness artifacts
   - native-shell build / publish / installer checks green on GitHub Windows release runners
   - sub-agent review pass logged before tag / GitHub Release publication
@@ -198,9 +206,8 @@ Operational note:
 ## Next Main Tasks
 
 1. `T-049`: Windows-native workstation shell migration
-2. `T-042`: template library operator UX
-3. `T-045d`: cut `v0.3.0` Windows-native workstation release
-4. `T-012`: self-hosted runner / webhook operations
+2. `T-045d`: cut `v0.3.0` Windows-native workstation release
+3. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 
