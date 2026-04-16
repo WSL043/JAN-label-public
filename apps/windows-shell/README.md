@@ -6,8 +6,13 @@ Current scope:
 
 - traditional Windows menu/ribbon/docking shell
 - module navigation for Home / Designer / Print Console / Batch Jobs / History
-- document tabs, label canvas, toolbox, object browser, and property grid
-- bottom records/messages/status panes so operators can evaluate a full workstation shape instead of placeholder chrome
+- module-specific operator workspaces instead of a single static mock:
+  - Home migration and readiness dashboard
+  - Designer canvas, toolbox, object browser, property grid, and catalog snapshot
+  - Print Console proof queue, dispatch grid, and guardrail inspector
+  - Batch Jobs import sessions, queue table, and retry guardrails
+  - History proof review, audit ledger, retention, and restore visibility
+- shell-level mock data that lets operators evaluate lane density and information architecture before backend wiring lands
 - shell-only scaffolding while Rust dispatch/audit/template commands are still owned by `apps/desktop-shell`
 - GitHub Windows CI publishes both a self-contained preview build artifact and an installer artifact for operator UI review
 

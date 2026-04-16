@@ -40,3 +40,9 @@ Rules:
   - center document tabs and design canvas
   - right property grid
   - bottom records, messages, and operator status
+- The shell should quickly move from a single designer mock to lane-aware workspaces so operators can evaluate the whole workstation shape:
+  - `Home` migration and readiness dashboard
+  - `Designer` authoring surface
+  - `Print Console` proof / dispatch lane
+  - `Batch Jobs` import / queue lane
+  - `History` proof review / audit / retention lane

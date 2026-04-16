@@ -42,6 +42,7 @@
   - WPF operator workstation baseline with native menu / ribbon / docking layout
   - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
   - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
+  - module-aware native workspaces for migration/readiness, designer, print console, batch queue, and history/audit review instead of a single static shell mock
   - Windows-only shell language baseline for future operator UX work
   - GitHub Windows CI now emits both self-contained preview binaries and an installer artifact for native-shell evaluation
   - startup path now opens `MainWindow` directly instead of idling as a background process with no shell window
@@ -97,7 +98,8 @@
   - buttons, tabs, and metric cards now use denser desktop-oriented controls instead of rounded dark cards
 - A new migration front is now in place for the shell itself:
   - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
-  - the shell no longer stops at generic chrome; it now carries a practical label-design workstation structure operators can actually evaluate
+  - the shell no longer stops at generic chrome; it now carries practical operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
+  - each module now has its own lane-aware surface so operators can evaluate information density and flow before backend command wiring lands
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
@@ -130,8 +132,8 @@ Passed on this batch:
 - `pnpm lint`
 - `pnpm typecheck`
 - `pnpm --filter @label/admin-web build`
+- `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - Local Rust/Tauri validation for this branch still depends on a Windows MSVC linker and was not completed on this host
-- Local WPF validation for this branch also depends on a local `.NET` SDK and was not completed on this host
 
 Operational note:
 
@@ -141,8 +143,6 @@ Operational note:
   - `cargo test --workspace`
   - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
   - `pnpm release:readiness --version v0.2.0`
-- This host currently cannot complete native-shell verification because `dotnet` is not available:
-  - `dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release`
 - GitHub Actions has already passed the Windows desktop and native-shell validation path for PR `#33`, so local MSVC and `.NET` toolchain absence is no longer a blocker as long as the remote Windows runners remain green.
 - Native-shell validation should move to the GitHub Actions `windows-shell-native` job until local `.NET` is available or intentionally installed.
 - Native-shell preview packaging should also be taken from the GitHub Actions `jan-label-native-shell-installer` artifact until a dedicated release workflow supersedes the CI path.

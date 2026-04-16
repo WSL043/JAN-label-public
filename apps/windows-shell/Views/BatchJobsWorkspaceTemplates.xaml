@@ -1,0 +1,219 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="clr-namespace:JanLabel.WindowsShell">
+  <DataTemplate DataType="{x:Type local:BatchJobsWorkspaceModel}">
+    <DockPanel LastChildFill="True">
+      <Border DockPanel.Dock="Bottom" Background="#E6EBF1" BorderBrush="#BCC7D2" BorderThickness="1,1,0,0">
+        <Grid Margin="8,6">
+          <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="1.25*" />
+            <ColumnDefinition Width="1*" />
+          </Grid.ColumnDefinitions>
+          <Border Grid.Column="0" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Validation Messages" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding MessageSummary}" />
+              </DockPanel>
+              <ListView Margin="0,8,0,0" Height="156" ItemsSource="{Binding MessageRows}">
+                <ListView.View>
+                  <GridView>
+                    <GridViewColumn Width="70" DisplayMemberBinding="{Binding Level}" Header="Level" />
+                    <GridViewColumn Width="80" DisplayMemberBinding="{Binding Source}" Header="Source" />
+                    <GridViewColumn Width="410" DisplayMemberBinding="{Binding Message}" Header="Message" />
+                  </GridView>
+                </ListView.View>
+              </ListView>
+            </StackPanel>
+          </Border>
+          <Border Grid.Column="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Queue Health" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding FooterDetail}" />
+              </DockPanel>
+              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding StatusItems}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Margin="0,0,0,6" Padding="8" Background="#FCFDFE" BorderBrush="#CFD8E1" BorderThickness="1">
+                      <DockPanel>
+                        <StackPanel>
+                          <TextBlock Style="{StaticResource SectionTitleStyle}" Text="{Binding Label}" />
+                          <TextBlock FontWeight="SemiBold" Text="{Binding Value}" />
+                          <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Detail}" />
+                        </StackPanel>
+                        <TextBlock DockPanel.Dock="Right" Foreground="{Binding Accent}" FontWeight="SemiBold" Text="{Binding Tone}" />
+                      </DockPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Border>
+
+      <Grid>
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="300" />
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="380" />
+        </Grid.ColumnDefinitions>
+
+        <Grid Grid.Column="0" Margin="0,0,8,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <Border Style="{StaticResource PaneBorderStyle}">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Import Sessions" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="xlsx / csv" />
+              </DockPanel>
+              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding ImportSessions}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate>
+                    <Grid>
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                      </Grid.ColumnDefinitions>
+                      <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
+                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Subtext}" />
+                        <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Text="{Binding Note}" />
+                      </StackPanel>
+                      <TextBlock Grid.Column="1" Foreground="#235FA9" FontWeight="SemiBold" Text="{Binding Badge}" />
+                    </Grid>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Mapped Columns" />
+              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ColumnRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,0,0,6">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                      <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Grid Grid.Column="1" Margin="0,0,8,0">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <Border Style="{StaticResource PaneBorderStyle}">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Batch Queue" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding QueueSummary}" />
+              </DockPanel>
+              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding BatchRows}">
+                <ListView.View>
+                  <GridView>
+                    <GridViewColumn Width="110" DisplayMemberBinding="{Binding BatchId}" Header="Batch" />
+                    <GridViewColumn Width="130" DisplayMemberBinding="{Binding Template}" Header="Template" />
+                    <GridViewColumn Width="80" DisplayMemberBinding="{Binding Records}" Header="Records" />
+                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Status}" Header="Status" />
+                    <GridViewColumn Width="210" DisplayMemberBinding="{Binding Note}" Header="Operator note" />
+                  </GridView>
+                </ListView.View>
+              </ListView>
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
+            <StackPanel>
+              <DockPanel>
+                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Queue Mutation Log" />
+                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="retry / submit / hold" />
+              </DockPanel>
+              <ListView Margin="0,8,0,0" ItemsSource="{Binding ActivityRows}">
+                <ListView.View>
+                  <GridView>
+                    <GridViewColumn Width="80" DisplayMemberBinding="{Binding Time}" Header="Time" />
+                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Lane}" Header="Lane" />
+                    <GridViewColumn Width="280" DisplayMemberBinding="{Binding Summary}" Header="Summary" />
+                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Status}" Header="State" />
+                  </GridView>
+                </ListView.View>
+              </ListView>
+            </StackPanel>
+          </Border>
+        </Grid>
+
+        <Grid Grid.Column="2">
+          <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+          </Grid.RowDefinitions>
+          <Border Style="{StaticResource PaneBorderStyle}">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Selected Import Session" />
+              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SessionDetailRows}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Grid Margin="0,0,0,6">
+                      <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="120" />
+                        <ColumnDefinition Width="*" />
+                      </Grid.ColumnDefinitions>
+                      <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                      <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                    </Grid>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
+            <StackPanel>
+              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Retry Guardrails" />
+              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ControlSections}">
+                <ItemsControl.ItemTemplate>
+                  <DataTemplate>
+                    <Border Margin="0,0,0,8" Padding="8" Background="#FCFDFE" BorderBrush="#D0D8E1" BorderThickness="1">
+                      <StackPanel>
+                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                        <TextBlock Margin="0,2,0,6" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Summary}" />
+                        <ItemsControl ItemsSource="{Binding Rows}">
+                          <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                              <Grid Margin="0,0,0,5">
+                                <Grid.ColumnDefinitions>
+                                  <ColumnDefinition Width="118" />
+                                  <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                              </Grid>
+                            </DataTemplate>
+                          </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
+                    </Border>
+                  </DataTemplate>
+                </ItemsControl.ItemTemplate>
+              </ItemsControl>
+            </StackPanel>
+          </Border>
+        </Grid>
+      </Grid>
+    </DockPanel>
+  </DataTemplate>
+</ResourceDictionary>

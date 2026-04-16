@@ -1,0 +1,70 @@
+<ResourceDictionary
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+  <SolidColorBrush x:Key="ChromeBrush" Color="#EDF1F5" />
+  <SolidColorBrush x:Key="RibbonBrush" Color="#E5EAF0" />
+  <SolidColorBrush x:Key="PanelBrush" Color="#F9FBFD" />
+  <SolidColorBrush x:Key="PanelEdgeBrush" Color="#B0BBC7" />
+  <SolidColorBrush x:Key="MutedBrush" Color="#677585" />
+  <SolidColorBrush x:Key="SelectionBrush" Color="#D4E2F5" />
+  <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#2B72C8" />
+
+  <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
+    <Setter Property="FontSize" Value="11" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Foreground" Value="#607081" />
+  </Style>
+
+  <Style x:Key="MenuButtonStyle" TargetType="Button">
+    <Setter Property="Margin" Value="0,0,2,0" />
+    <Setter Property="Padding" Value="10,4" />
+    <Setter Property="BorderBrush" Value="Transparent" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="Transparent" />
+  </Style>
+
+  <Style x:Key="PaneBorderStyle" TargetType="Border">
+    <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource PanelEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="10" />
+    <Setter Property="Margin" Value="0,0,0,8" />
+  </Style>
+
+  <Style x:Key="SelectableItemStyle" TargetType="ListBoxItem">
+    <Setter Property="Padding" Value="8" />
+    <Setter Property="Margin" Value="0,0,0,4" />
+    <Setter Property="Background" Value="#F7F9FB" />
+    <Setter Property="BorderBrush" Value="#CCD5DE" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+    <Setter Property="Template">
+      <Setter.Value>
+        <ControlTemplate TargetType="ListBoxItem">
+          <Border
+              x:Name="Chrome"
+              Padding="{TemplateBinding Padding}"
+              Background="{TemplateBinding Background}"
+              BorderBrush="{TemplateBinding BorderBrush}"
+              BorderThickness="{TemplateBinding BorderThickness}">
+            <ContentPresenter />
+          </Border>
+          <ControlTemplate.Triggers>
+            <Trigger Property="IsSelected" Value="True">
+              <Setter TargetName="Chrome" Property="Background" Value="{StaticResource SelectionBrush}" />
+              <Setter TargetName="Chrome" Property="BorderBrush" Value="{StaticResource SelectionEdgeBrush}" />
+            </Trigger>
+          </ControlTemplate.Triggers>
+        </ControlTemplate>
+      </Setter.Value>
+    </Setter>
+  </Style>
+
+  <Style x:Key="SummaryCardStyle" TargetType="Border">
+    <Setter Property="Padding" Value="12" />
+    <Setter Property="Margin" Value="0,0,8,8" />
+    <Setter Property="Background" Value="#FCFDFE" />
+    <Setter Property="BorderBrush" Value="#C9D3DC" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+</ResourceDictionary>

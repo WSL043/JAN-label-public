@@ -50,7 +50,7 @@ Priority order for post-`v0.1.2` branch work.
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` builds on GitHub Windows runners, installer previews can be published from CI artifacts, and the shell now exposes a practical designer/toolbox/property-grid workstation frame ready to absorb current lanes |
+| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` builds on GitHub Windows runners, installer previews can be published from CI artifacts, and the shell now exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History` while backend command parity is still landing |
 
 ## Next
 
