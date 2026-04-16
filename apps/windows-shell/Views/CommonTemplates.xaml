@@ -8,6 +8,8 @@
   <SolidColorBrush x:Key="MutedBrush" Color="#677585" />
   <SolidColorBrush x:Key="SelectionBrush" Color="#D4E2F5" />
   <SolidColorBrush x:Key="SelectionEdgeBrush" Color="#2B72C8" />
+  <SolidColorBrush x:Key="StatusBarBrush" Color="#E1E7EE" />
+  <SolidColorBrush x:Key="StatusBarEdgeBrush" Color="#AEB9C5" />
 
   <Style x:Key="SectionTitleStyle" TargetType="TextBlock">
     <Setter Property="FontSize" Value="11" />
@@ -66,5 +68,29 @@
     <Setter Property="Background" Value="#FCFDFE" />
     <Setter Property="BorderBrush" Value="#C9D3DC" />
     <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style x:Key="ActionButtonStyle" TargetType="Button">
+    <Setter Property="Padding" Value="12,6" />
+    <Setter Property="Margin" Value="0,0,6,0" />
+    <Setter Property="Background" Value="#F7FAFD" />
+    <Setter Property="BorderBrush" Value="#AEB9C5" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="MinWidth" Value="92" />
+  </Style>
+
+  <Style x:Key="ContextBadgeStyle" TargetType="Border">
+    <Setter Property="Margin" Value="0,0,6,6" />
+    <Setter Property="Padding" Value="8,4" />
+    <Setter Property="CornerRadius" Value="2" />
+    <Setter Property="Background" Value="#F7FAFD" />
+    <Setter Property="BorderBrush" Value="#C6D0DB" />
+    <Setter Property="BorderThickness" Value="1" />
+  </Style>
+
+  <Style x:Key="StatusStripCellStyle" TargetType="Border">
+    <Setter Property="BorderBrush" Value="#C4CED8" />
+    <Setter Property="BorderThickness" Value="0,0,1,0" />
+    <Setter Property="Padding" Value="10,3" />
   </Style>
 </ResourceDictionary>

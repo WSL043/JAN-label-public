@@ -26,6 +26,10 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
     public ObservableCollection<string> CurrentHeaderActions { get; } = new();
 
+    public ObservableCollection<ContextBadgeModel> CurrentContextBadges { get; } = new();
+
+    public ObservableCollection<StatusStripItemModel> CurrentStatusStripItems { get; } = new();
+
     public ModuleModel? SelectedModule
     {
         get => _selectedModule;
@@ -38,9 +42,12 @@ public partial class MainWindow : Window, INotifyPropertyChanged
 
             ReplaceCollection(CurrentRibbonGroups, value?.RibbonGroups);
             ReplaceCollection(CurrentHeaderActions, value?.HeaderActions);
+            ReplaceCollection(CurrentContextBadges, value?.ContextBadges);
+            ReplaceCollection(CurrentStatusStripItems, value?.StatusStripItems);
             OnPropertyChanged(nameof(WindowTitle));
             OnPropertyChanged(nameof(WorkspaceTagline));
             OnPropertyChanged(nameof(CurrentWorkspace));
+            OnPropertyChanged(nameof(CurrentWorkspaceLead));
         }
     }
 
@@ -49,6 +56,8 @@ public partial class MainWindow : Window, INotifyPropertyChanged
     public string WindowTitle => $"JAN Label Workstation - {SelectedModule?.Label ?? "Designer"}";
 
     public string WorkspaceTagline => SelectedModule?.Tagline ?? "Windows-native operator workstation";
+
+    public string CurrentWorkspaceLead => SelectedModule?.Lead ?? "Operator-facing shell context is not available.";
 
     private static void ReplaceCollection<T>(ObservableCollection<T> target, IEnumerable<T>? items)
     {

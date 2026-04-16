@@ -56,7 +56,7 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Button Margin="0,0,6,0" Padding="12,6" Content="{Binding}" />
+              <Button Style="{StaticResource ActionButtonStyle}" Content="{Binding}" />
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>
@@ -127,6 +127,56 @@
           </ItemsControl.ItemTemplate>
         </ItemsControl>
       </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Top" Background="#F4F7FA" BorderBrush="#C6D0DB" BorderThickness="0,0,0,1">
+      <Grid Margin="10,8">
+        <Grid.ColumnDefinitions>
+          <ColumnDefinition Width="*" />
+          <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
+        <StackPanel>
+          <TextBlock FontSize="16" FontWeight="SemiBold" Text="{Binding WindowTitle}" />
+          <TextBlock Margin="0,3,0,0" FontSize="12" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding CurrentWorkspaceLead}" />
+        </StackPanel>
+        <ItemsControl Grid.Column="1" Margin="12,0,0,0" ItemsSource="{Binding CurrentContextBadges}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate>
+              <WrapPanel />
+            </ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate>
+              <Border Style="{StaticResource ContextBadgeStyle}">
+                <StackPanel Orientation="Horizontal">
+                  <TextBlock Margin="0,0,6,0" Foreground="{StaticResource MutedBrush}" Text="{Binding Label}" />
+                  <TextBlock FontWeight="SemiBold" Foreground="{Binding Accent}" Text="{Binding Value}" />
+                </StackPanel>
+              </Border>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </Grid>
+    </Border>
+
+    <Border DockPanel.Dock="Bottom" Background="{StaticResource StatusBarBrush}" BorderBrush="{StaticResource StatusBarEdgeBrush}" BorderThickness="1,1,0,0">
+      <ItemsControl ItemsSource="{Binding CurrentStatusStripItems}">
+        <ItemsControl.ItemsPanel>
+          <ItemsPanelTemplate>
+            <StackPanel Orientation="Horizontal" />
+          </ItemsPanelTemplate>
+        </ItemsControl.ItemsPanel>
+        <ItemsControl.ItemTemplate>
+          <DataTemplate>
+            <Border Style="{StaticResource StatusStripCellStyle}">
+              <StackPanel Orientation="Horizontal">
+                <TextBlock Margin="0,0,6,0" Foreground="{StaticResource MutedBrush}" Text="{Binding Label}" />
+                <TextBlock FontWeight="SemiBold" Text="{Binding Value}" />
+              </StackPanel>
+            </Border>
+          </DataTemplate>
+        </ItemsControl.ItemTemplate>
+      </ItemsControl>
     </Border>
 
     <ContentControl Margin="8" Content="{Binding CurrentWorkspace}" />

@@ -12,6 +12,7 @@ Current scope:
   - Print Console proof queue, dispatch grid, and guardrail inspector
   - Batch Jobs import sessions, queue table, and retry guardrails
   - History proof review, audit ledger, retention, and restore visibility
+- shared context strip and status strip that keep lane purpose, authority, route, and active blocker signals visible in shell chrome
 - shell-level mock data that lets operators evaluate lane density and information architecture before backend wiring lands
 - shell-only scaffolding while Rust dispatch/audit/template commands are still owned by `apps/desktop-shell`
 - GitHub Windows CI publishes both a self-contained preview build artifact and an installer artifact for operator UI review

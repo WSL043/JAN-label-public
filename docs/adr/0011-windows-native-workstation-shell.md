@@ -46,3 +46,7 @@ Rules:
   - `Print Console` proof / dispatch lane
   - `Batch Jobs` import / queue lane
   - `History` proof review / audit / retention lane
+- The shell should also be judged by operational readability:
+  - current authority should be visible without opening another pane
+  - blockers should be legible in the current lane
+  - route / proof / catalog state should remain visible in shared shell chrome

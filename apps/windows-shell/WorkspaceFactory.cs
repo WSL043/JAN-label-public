@@ -13,12 +13,26 @@ public static class WorkspaceFactory
                 "Migration baseline and session status",
                 "overview",
                 "Operational readiness and migration scope for the native shell.",
+                "Native shell migration should be judged by operator comprehension first: authority, current blocker, and next practical move must all be visible without opening another lane.",
                 new[] { "Refresh State", "Open Handoff", "View Preview" },
                 new[]
                 {
                     new RibbonGroupModel("Session", "Refresh", "Pin Workspace", "Export State"),
                     new RibbonGroupModel("Templates", "Open Library", "Overlay Status", "Catalog Rules"),
                     new RibbonGroupModel("Migration", "Current State", "Release Notes", "Preview Package"),
+                },
+                new[]
+                {
+                    new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                    new ContextBadgeModel("Preview", "installer live", Brushes.ForestGreen),
+                    new ContextBadgeModel("Priority", "T-049", Brushes.DarkGoldenrod),
+                },
+                new[]
+                {
+                    new StatusStripItemModel("Mode", "Migration dashboard"),
+                    new StatusStripItemModel("Branch", "main"),
+                    new StatusStripItemModel("Preview", "t049 installer"),
+                    new StatusStripItemModel("Backend", "desktop-shell authority"),
                 },
                 BuildHomeWorkspace()));
 
@@ -28,6 +42,7 @@ public static class WorkspaceFactory
                 "Format authoring and preview",
                 "design",
                 "BarTender-style designer with canvas, toolbox, and property-grid workflow.",
+                "Authoring is only production-safe when saved catalog state, preview output, and proof gating are easy to distinguish from the live draft at a glance.",
                 new[] { "New Format", "Print Preview", "Run Proof" },
                 new[]
                 {
@@ -37,6 +52,19 @@ public static class WorkspaceFactory
                     new RibbonGroupModel("Data", "Record Browser", "Query Prompt", "Named Data Sources"),
                     new RibbonGroupModel("Validate", "Rust Preview", "Save to Catalog", "Run Proof"),
                 },
+                new[]
+                {
+                    new ContextBadgeModel("Draft state", "live preview only", Brushes.Firebrick),
+                    new ContextBadgeModel("Catalog", "local overlay", Brushes.DarkGoldenrod),
+                    new ContextBadgeModel("Output", "SVG / PDF", Brushes.SteelBlue),
+                },
+                new[]
+                {
+                    new StatusStripItemModel("Mode", "Designer"),
+                    new StatusStripItemModel("Template", "basic-50x30@v2"),
+                    new StatusStripItemModel("Catalog", "overlay active"),
+                    new StatusStripItemModel("Proof gate", "external authority"),
+                },
                 BuildDesignerWorkspace()));
 
         modules.Add(
@@ -45,12 +73,26 @@ public static class WorkspaceFactory
                 "Working payload and proof route",
                 "ready",
                 "Proof and dispatch lane with explicit guardrails before print unlock.",
+                "A production print lane must surface the approved proof, blocked jobs, and current route before the operator even thinks about pressing print.",
                 new[] { "Refresh Queue", "Approve Proof", "Dispatch Batch" },
                 new[]
                 {
                     new RibbonGroupModel("Queue", "Refresh", "Hold", "Release"),
                     new RibbonGroupModel("Proof", "Open PDF", "Approve", "Reject"),
                     new RibbonGroupModel("Dispatch", "Route Check", "Run Proof", "Print"),
+                },
+                new[]
+                {
+                    new ContextBadgeModel("Proof gate", "strict match", Brushes.Firebrick),
+                    new ContextBadgeModel("Route", "pdf-proof", Brushes.SteelBlue),
+                    new ContextBadgeModel("Queue", "3 ready / 1 held", Brushes.ForestGreen),
+                },
+                new[]
+                {
+                    new StatusStripItemModel("Mode", "Print Console"),
+                    new StatusStripItemModel("Bridge", "connected"),
+                    new StatusStripItemModel("Printer route", "pdf-proof"),
+                    new StatusStripItemModel("Blocked jobs", "1"),
                 },
                 BuildPrintConsoleWorkspace()));
 
@@ -60,12 +102,26 @@ public static class WorkspaceFactory
                 "Workbook import and queue",
                 "24",
                 "Operator batch staging with queue mutation visibility and retry rules.",
+                "Batch tooling is only usable in production when import assumptions, retry eligibility, and blocked submit reasons are visible on the same screen.",
                 new[] { "Import Workbook", "Retry Failed", "Queue Snapshot" },
                 new[]
                 {
                     new RibbonGroupModel("Import", "CSV", "XLSX", "Alias Map"),
                     new RibbonGroupModel("Queue", "Submit Ready", "Retry Failed", "Freeze Row"),
                     new RibbonGroupModel("Validation", "Fixture Check", "Unknown Template", "JAN Warnings"),
+                },
+                new[]
+                {
+                    new ContextBadgeModel("Import", "csv / xlsx", Brushes.SteelBlue),
+                    new ContextBadgeModel("Retry", "ready / failed only", Brushes.Firebrick),
+                    new ContextBadgeModel("Queue", "186 staged", Brushes.ForestGreen),
+                },
+                new[]
+                {
+                    new StatusStripItemModel("Mode", "Batch staging"),
+                    new StatusStripItemModel("Session lock", "visible"),
+                    new StatusStripItemModel("Template blocker", "enforced"),
+                    new StatusStripItemModel("Rows staged", "186"),
                 },
                 BuildBatchJobsWorkspace()));
 
@@ -75,12 +131,26 @@ public static class WorkspaceFactory
                 "Proof review and audit",
                 "6 pending",
                 "Audit and proof-review lane with retention and restore visibility.",
+                "Operational history must let an operator answer three questions fast: what happened, what still needs review, and whether recovery is safe.",
                 new[] { "Search Ledger", "Export Audit", "Trim Retention" },
                 new[]
                 {
                     new RibbonGroupModel("Review", "Approve Proof", "Reject Proof", "Pin Artifact"),
                     new RibbonGroupModel("Audit", "Search", "Export", "Retention Dry Run"),
                     new RibbonGroupModel("Restore", "List Bundles", "Validate Bundle", "Restore"),
+                },
+                new[]
+                {
+                    new ContextBadgeModel("Pending review", "2 proofs", Brushes.DarkGoldenrod),
+                    new ContextBadgeModel("Audit export", "ready", Brushes.ForestGreen),
+                    new ContextBadgeModel("Restore", "guarded", Brushes.SteelBlue),
+                },
+                new[]
+                {
+                    new StatusStripItemModel("Mode", "History / audit"),
+                    new StatusStripItemModel("Proof inbox", "2 active"),
+                    new StatusStripItemModel("Export", "filtered view"),
+                    new StatusStripItemModel("Restore", "pre-check required"),
                 },
                 BuildHistoryWorkspace()));
     }

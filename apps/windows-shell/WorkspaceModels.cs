@@ -11,16 +11,22 @@ public sealed class ModuleModel
         string description,
         string badge,
         string tagline,
+        string lead,
         IEnumerable<string> headerActions,
         IEnumerable<RibbonGroupModel> ribbonGroups,
+        IEnumerable<ContextBadgeModel> contextBadges,
+        IEnumerable<StatusStripItemModel> statusStripItems,
         WorkspaceModel workspace)
     {
         Label = label;
         Description = description;
         Badge = badge;
         Tagline = tagline;
+        Lead = lead;
         HeaderActions = new ObservableCollection<string>(headerActions);
         RibbonGroups = new ObservableCollection<RibbonGroupModel>(ribbonGroups);
+        ContextBadges = new ObservableCollection<ContextBadgeModel>(contextBadges);
+        StatusStripItems = new ObservableCollection<StatusStripItemModel>(statusStripItems);
         Workspace = workspace;
     }
 
@@ -32,9 +38,15 @@ public sealed class ModuleModel
 
     public string Tagline { get; }
 
+    public string Lead { get; }
+
     public ObservableCollection<string> HeaderActions { get; }
 
     public ObservableCollection<RibbonGroupModel> RibbonGroups { get; }
+
+    public ObservableCollection<ContextBadgeModel> ContextBadges { get; }
+
+    public ObservableCollection<StatusStripItemModel> StatusStripItems { get; }
 
     public WorkspaceModel Workspace { get; }
 }
@@ -209,6 +221,35 @@ public sealed class SummaryCardModel
     public string Value { get; }
 
     public string Detail { get; }
+}
+
+public sealed class ContextBadgeModel
+{
+    public ContextBadgeModel(string label, string value, Brush accent)
+    {
+        Label = label;
+        Value = value;
+        Accent = accent;
+    }
+
+    public string Label { get; }
+
+    public string Value { get; }
+
+    public Brush Accent { get; }
+}
+
+public sealed class StatusStripItemModel
+{
+    public StatusStripItemModel(string label, string value)
+    {
+        Label = label;
+        Value = value;
+    }
+
+    public string Label { get; }
+
+    public string Value { get; }
 }
 
 public sealed class QueueItemModel

@@ -43,6 +43,7 @@
   - BarTender-style document tabs, design canvas, toolbox, object browser, property grid, and record/message panes
   - module navigation for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - module-aware native workspaces for migration/readiness, designer, print console, batch queue, and history/audit review instead of a single static shell mock
+  - shared context strip and status strip that keep lane purpose, current authority, route, and blocker signals visible at shell level
   - Windows-only shell language baseline for future operator UX work
   - GitHub Windows CI now emits both self-contained preview binaries and an installer artifact for native-shell evaluation
   - startup path now opens `MainWindow` directly instead of idling as a background process with no shell window
@@ -100,6 +101,7 @@
   - `apps/windows-shell` establishes the Windows-native workstation frame in WPF
   - the shell no longer stops at generic chrome; it now carries practical operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`
   - each module now has its own lane-aware surface so operators can evaluate information density and flow before backend command wiring lands
+  - shared shell chrome now exposes lane context, authority, route, and blocker-oriented status so the shell is judged against operator decision speed, not only visual density
   - `apps/admin-web` remains the operational path until backend parity lands in the native shell
   - GitHub Windows runners are the authoritative validation path for the native shell on hosts without `.NET`
   - preview packaging for the native shell now includes an installer path instead of requiring operators to launch a loose published `.exe`
