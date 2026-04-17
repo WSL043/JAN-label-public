@@ -48,16 +48,16 @@ Priority order for post-`v0.1.2` branch work.
 | T-044 | P2 | done | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch commits through a recovery marker, stale markers auto-recover on locked audit access, corrupt markers are quarantined for manual reconcile, and command-level proof dispatch coverage exists |
 | T-042 | P2 | done | Codex | Template library operator UX | `apps/windows-shell` now exposes a reusable template-library board where operators can browse, select, and reason about packaged vs local templates, default winner, draft-only state, dispatch safety, and rollback path with less ambiguity |
 | T-049 | P1 | done | Codex | Windows-native workstation shell migration | `apps/windows-shell` uses package-backed Windows shell primitives (`Fluent.Ribbon`, `Dirkster.AvalonDock`, `PropertyTools.Wpf`), builds on GitHub Windows runners, installer previews can be published from CI artifacts, the shell exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`, shell actions land on the relevant template/object/proof/job/batch/bundle context, shared shell chrome follows the active in-lane selection, the shell headline reflects the focused work item, companion-backed read + safe ops are live for bridge/catalog/governance/preview/proof/audit state plus proof approve/reject and audit export, proof-review lanes do not silently truncate pending companion-backed review items, optional shared batch snapshot failures degrade only the Batch Jobs lane instead of the whole shell, companion packaging/validation proves a usable `desktop-shell` binary is present, focused `windows-shell` tests cover companion snapshot isolation and lane mapping, and direct print, restore, retention apply, template write-back, and direct batch mutation remain explicitly outside WPF for `v0.3.0` |
+| T-045d | P1 | done | Codex + Sub-Agent | Cut `v0.3.0` Windows-native workstation release | `main` and tag `v0.3.0` were pushed, the private-repo release attempt was identified as billing-blocked before job start, `WSL043/JAN-label-public` ran the authoritative Release workflow successfully on 2026-04-17, release readiness passed on the public Windows runner, and the desktop-shell installer plus native-shell installer and `.sha256` assets were published |
 
 ## Now
 
-None. `T-049` is complete; the formal release gate now moves to `T-045d`.
+None. `v0.3.0` is published and there is no active formal release gate.
 
 ## Next
 
 | id | priority | status | owner | task | done when |
 | --- | --- | --- | --- | --- | --- |
-| T-045d | P1 | pending | Codex + Sub-Agent | Cut `v0.3.0` Windows-native workstation release | `v0.3.0` tag is published only after native-shell operator UX, template-library clarity, audit recovery expectations, native-shell release asset wiring, and repeated sub-agent pre-release review passes are all recorded |
 | T-012 | P3 | pending | Codex + Infra | Self-hosted runner / webhook operations | GitHub-side Codex automation can run with predictable local/remote coordination |
 
 ## Blocked

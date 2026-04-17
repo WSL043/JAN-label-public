@@ -131,6 +131,11 @@
 - impact: `apps/admin-web` now publishes a desktop-shell-owned local batch snapshot that `apps/windows-shell` can read, but import, retry, and submit still remain outside WPF and the snapshot is still single-machine local state rather than multi-host coordination
 - response: treat Batch Jobs as a live review lane for queued rows and blockers, but keep actual batch mutation in `apps/admin-web` until a follow-up backend expansion intentionally moves that authority
 
+## K-040 private-repo GitHub Release workflow can be billing-blocked before jobs start
+- status: open
+- impact: tagged release runs on `WSL043/JAN-label` may fail before any step executes if the private repository account hits a billing or spending-limit block, even when release code and workflow wiring are healthy
+- response: use `WSL043/JAN-label-public` as the authoritative packaging mirror for tagged release runs until private-repo billing is restored; treat the public mirror's Release workflow and readiness artifact as the release truth in that case
+
 ## K-035 native-shell startup window was missing
 - status: resolved
 - resolution: `apps/windows-shell/App.xaml` now declares `StartupUri="MainWindow.xaml"`, so the preview installer launches the operator shell window instead of leaving a background process with no visible UI

@@ -2,10 +2,10 @@
 
 - Updated: 2026-04-17
 - Branch: `main`
-- Release base: `v0.2.0` (`0b6827e`)
-- Next formal release target: `v0.3.0`
+- Release base: `v0.3.0` (`1c0f166`)
+- Next formal release target: `TBD`
 - Active PR: `none`
-- Branch relation to `origin/main` on 2026-04-17: `main` includes the merged `T-041` governance batch from PR `#33`, including local template catalog diagnostics, repair guidance, single-writer operating rules, and the initial native WPF workstation shell baseline under `apps/windows-shell`
+- Branch relation to `origin/main` on 2026-04-17: `main` contains the released `v0.3.0` Windows-native workstation batch; the formal tag was published through `WSL043/JAN-label-public` after the private-repo Release workflow was billing-blocked before job start
 
 ## Shipping Now
 
@@ -86,7 +86,8 @@
 - tagged formal releases now build and upload the native-shell installer asset in addition to the desktop-shell installer asset
 - GitHub release publishing
   - `v0.2.0` tag published through the Release workflow
-  - Windows installer asset uploaded successfully
+  - `v0.3.0` tag published on 2026-04-17 through `WSL043/JAN-label-public`
+  - desktop-shell and native-shell Windows installer assets uploaded successfully
 
 ## Landed In This Batch
 
@@ -278,6 +279,15 @@ Passed in the latest `v0.3.0` gate-check batch:
 - `cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml`
 - `pnpm release:readiness --version v0.3.0` (expected `blocked` on this host because local native-shell installer generation still depends on `ISCC.exe`)
 
+Passed in the authoritative tagged public-mirror release batch:
+
+- `Release` workflow run `24557904646` on `WSL043/JAN-label-public`
+- `verify-release-ready`
+- `publish-windows-release`
+- downloaded `release-readiness` artifact reports `Overall status: pass`
+- native-shell publish output contains staged `desktop-shell.exe`
+- desktop-shell installer asset, native-shell installer asset, and native-shell installer `.sha256` asset are published
+
 Passed in the latest desktop-shell release-metadata batch:
 
 - `pnpm --filter @label/desktop-shell build --ci --no-sign`
@@ -290,6 +300,8 @@ Operational note:
 - The remaining local packaging blocker is native-shell installer generation because `ISCC.exe` is not installed:
   - `pnpm release:readiness --version v0.3.0` reports the native-shell installer step as `blocked`
   - GitHub Windows runners remain the authoritative packaging path for native-shell installers until Inno Setup is intentionally installed on the local workstation
+- The private-repo `Release` workflow for tag `v0.3.0` did not start any steps because GitHub billing/spending-limit enforcement blocked the job before runner execution.
+- `WSL043/JAN-label-public` is currently the authoritative packaging mirror for formal releases when that private-repo billing block is present.
 - `docs/release/v0.3.0.md` and `artifacts/release-readiness.{json,md}` are generated locally; the current readiness report should now settle at `blocked` on this host because `T-049` is complete but the local workstation still lacks Inno Setup for native-shell installer generation.
 - the latest readiness artifact now also confirms that native-shell publish output includes `desktop-shell.exe`; companion packaging is no longer an implicit side effect
 - the latest readiness artifact now also verifies that `apps/desktop-shell/package.json`, `apps/desktop-shell/src-tauri/tauri.conf.json`, and `apps/desktop-shell/src-tauri/Cargo.toml` all match the requested release version before tag
@@ -298,34 +310,31 @@ Operational note:
 
 - `v0.1.3` was tagged and published on `2026-04-15`.
 - `v0.2.0` was tagged and published on `2026-04-15`.
-- The next formal release target is `v0.3.0`.
+- `v0.3.0` was tagged and published on `2026-04-17`.
 - `apps/desktop-shell/package.json`, `apps/desktop-shell/src-tauri/tauri.conf.json`, and `apps/desktop-shell/src-tauri/Cargo.toml` are now aligned to `0.3.0` ahead of the release tag.
 - GitHub `Release` workflow run `24474516998` succeeded and published the Windows installer asset.
-- Release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
-- Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
+- `v0.2.0` release URL: `https://github.com/WSL043/JAN-label/releases/tag/v0.2.0`
+- `v0.2.0` Windows installer asset: `JAN-Label_0.2.0_windows_x64-setup.exe`
+- Public mirror release workflow run `24557904646` succeeded and published the `v0.3.0` assets after the private-repo run `24557600949` was blocked before job start by GitHub billing.
+- `v0.3.0` release URL: `https://github.com/WSL043/JAN-label-public/releases/tag/v0.3.0`
+- Desktop-shell installer asset: `JAN-Label_0.3.0_windows_x64-setup.exe`
+- Native-shell installer asset: `JAN-Label_windows-native-shell_v0.3.0.exe`
+- Native-shell checksum asset: `JAN-Label_windows-native-shell_v0.3.0.exe.sha256`
 - The operator workstation redesign, audit restore flow, and release automation artifacts are now in the published baseline.
 - PR `#33` was merged on `2026-04-16`, adding local template catalog governance diagnostics and the first native shell baseline on top of the `v0.2.0` release state.
 - Deferred non-PDF milestones:
   - `T-030` GitHub Actions secret setup
   - `T-031` physical printer matrix and scan confirmation
 
-## v0.3.0 Gate
+## Post-v0.3.0 Follow-Up
 
-- `v0.3.0` is the next formal release target for the Windows-native workstation direction.
-- Release intent:
-  - native shell should look and read like a real Windows operator application
-  - template library reasoning should be clearer than the transitional web path
-  - pre-release bug hunt must include repeated sub-agent review passes before formal announcement
-- `T-049` is now complete in the working tree and validation/docs baseline.
-- Minimum additional gate beyond the current baseline:
-  - audit recovery expectations stay aligned between code, docs, and release readiness artifacts
-  - native-shell build / publish / installer checks stay green on GitHub Windows release runners, including staged `desktop-shell.exe` companion availability in publish output, explicit CI assertions for that companion binary, and focused `windows-shell` companion/lane tests
-  - sub-agent review pass logged before tag / GitHub Release publication
+- `T-045d` is complete.
+- The next unscheduled work starts after `v0.3.0`, with `T-012` still pending for self-hosted runner / webhook operations.
+- If the private repository's GitHub billing block remains, future formal releases should continue to run through `WSL043/JAN-label-public` until private-repo Actions capacity is restored.
 
 ## Next Main Tasks
 
-1. `T-045d`: cut `v0.3.0` Windows-native workstation release
-2. `T-012`: self-hosted runner / webhook operations
+1. `T-012`: self-hosted runner / webhook operations
 
 ## External Deferrals
 
