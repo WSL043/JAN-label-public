@@ -1,4 +1,4 @@
-import type { DispatchRequest, PrintDispatchResult } from "@label/job-schema";
+import type { DispatchRequest, PrintDispatchResult, PrintJobDraft } from "@label/job-schema";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
 const DISPATCH_PRINT_JOB_COMMAND = "dispatch_print_job";
@@ -14,6 +14,9 @@ const PREVIEW_TEMPLATE_DRAFT_COMMAND = "preview_template_draft";
 const TEMPLATE_CATALOG_COMMAND = "template_catalog_command";
 const TEMPLATE_CATALOG_GOVERNANCE_COMMAND = "template_catalog_governance_command";
 const SAVE_TEMPLATE_TO_LOCAL_CATALOG_COMMAND = "save_template_to_local_catalog";
+const LOAD_BATCH_QUEUE_SNAPSHOT_COMMAND = "load_batch_queue_snapshot";
+const SAVE_BATCH_QUEUE_SNAPSHOT_COMMAND = "save_batch_queue_snapshot";
+const CLEAR_BATCH_QUEUE_SNAPSHOT_COMMAND = "clear_batch_queue_snapshot";
 const VALIDATE_LEGACY_PROOF_SEED_COMMAND = "validate_legacy_proof_seed";
 const SEED_LEGACY_PROOFS_COMMAND = "seed_legacy_proofs";
 
@@ -280,6 +283,36 @@ export type TemplateCatalogGovernanceResult = {
   singleWriterGuidance: string[];
 };
 
+export type BatchQueueSnapshotSubmitPhase = "idle" | "submitting" | "success" | "error";
+
+export type BatchQueueSnapshotRow = {
+  rowIndex: number;
+  draft: PrintJobDraft;
+  submissionStatus: "ready" | "submitting" | "submitted" | "failed";
+  retryLineageJobId: string | null;
+  dispatchError: string | null;
+  dispatchResult: PrintDispatchResult | null;
+};
+
+export type BatchQueueSnapshotRecord = {
+  schemaVersion: string;
+  snapshotId: string;
+  capturedAt: string;
+  updatedAt: string;
+  sourceFileName?: string;
+  sourceKind?: "csv" | "xlsx";
+  actor: string;
+  submitPhase: BatchQueueSnapshotSubmitPhase;
+  submitMessage: string;
+  queueRows: BatchQueueSnapshotRow[];
+};
+
+export type BatchQueueSnapshotState = {
+  filePath: string;
+  present: boolean;
+  snapshot?: BatchQueueSnapshotRecord;
+};
+
 export function isTauriConnected(): boolean {
   return isTauri();
 }
@@ -411,6 +444,35 @@ export async function saveTemplateToLocalCatalog(
   return invoke<SaveTemplateToLocalCatalogResult>(SAVE_TEMPLATE_TO_LOCAL_CATALOG_COMMAND, {
     request,
   });
+}
+
+export async function loadBatchQueueSnapshot(): Promise<BatchQueueSnapshotState> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to load batch snapshots.",
+    );
+  }
+  return invoke<BatchQueueSnapshotState>(LOAD_BATCH_QUEUE_SNAPSHOT_COMMAND, {});
+}
+
+export async function saveBatchQueueSnapshot(
+  request: BatchQueueSnapshotRecord,
+): Promise<BatchQueueSnapshotState> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to save batch snapshots.",
+    );
+  }
+  return invoke<BatchQueueSnapshotState>(SAVE_BATCH_QUEUE_SNAPSHOT_COMMAND, { request });
+}
+
+export async function clearBatchQueueSnapshot(): Promise<BatchQueueSnapshotState> {
+  if (!isTauriConnected()) {
+    throw new Error(
+      "Browser preview mode: desktop bridge unavailable. Connect to desktop shell to clear batch snapshots.",
+    );
+  }
+  return invoke<BatchQueueSnapshotState>(CLEAR_BATCH_QUEUE_SNAPSHOT_COMMAND, {});
 }
 
 export async function validateLegacyProofSeed(

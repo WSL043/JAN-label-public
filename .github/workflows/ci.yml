@@ -114,6 +114,7 @@ jobs:
           corepack install
       - uses: dtolnay/rust-toolchain@stable
       - run: pnpm install --frozen-lockfile
+      - run: cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -131,11 +132,22 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
       - uses: actions/setup-dotnet@v5
         with:
           dotnet-version: 8.0.x
+      - name: Build desktop-shell companion
+        run: cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release
       - run: dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
+      - run: dotnet test apps/windows-shell-tests/JanLabel.WindowsShell.Tests.csproj -c Release
       - run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      - name: Assert companion binary in publish output
+        shell: powershell
+        run: |
+          $companion = "apps/windows-shell/bin/Release/net8.0-windows/win-x64/publish/desktop-shell.exe"
+          if (-not (Test-Path $companion)) {
+            Write-Error "Expected companion binary in native-shell publish output: $companion"
+          }
       - name: Install Inno Setup
         run: choco install innosetup --no-progress -y
       - name: Build native shell installer

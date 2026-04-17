@@ -4,8 +4,10 @@ public static class TemplateLibraryCatalog
 {
     public static void SeedHomePanel(TemplateLibraryPanelModel panel)
     {
+        var entries = BuildEntries();
         panel.HeaderDetail = "packaged manifest + desktop local overlay";
         panel.StatusSummary = "2 dispatch-safe / 1 draft / 1 rollback path";
+        panel.EntrySummary = BuildEntrySummary(entries);
         panel.ReplaceSummaryCards(
             new[]
             {
@@ -14,7 +16,7 @@ public static class TemplateLibraryCatalog
                 new SummaryCardModel("Save Required", "1", "One draft still needs a catalog save before any proof route."),
                 new SummaryCardModel("Rollback", "packaged v1", "Fallback remains explicit instead of hidden behind the overlay."),
             });
-        panel.LoadEntries(BuildEntries(), "basic-50x30@v2");
+        panel.LoadEntries(entries, "basic-50x30@v2");
         panel.ReplaceGuidanceSections(
             new[]
             {
@@ -48,8 +50,10 @@ public static class TemplateLibraryCatalog
 
     public static void SeedDesignerPanel(TemplateLibraryPanelModel panel)
     {
+        var entries = BuildEntries();
         panel.HeaderDetail = "selection must stay proof-safe";
         panel.StatusSummary = "overlay delta, save boundary, rollback all visible";
+        panel.EntrySummary = BuildEntrySummary(entries);
         panel.ReplaceSummaryCards(
             new[]
             {
@@ -58,7 +62,7 @@ public static class TemplateLibraryCatalog
                 new SummaryCardModel("Proof Impact", "re-proof", "Any saved overlay change still expects a fresh proof lineage."),
                 new SummaryCardModel("Rollback", "basic-50x30@v1", "Packaged baseline is one explicit selection away."),
             });
-        panel.LoadEntries(BuildEntries(), "basic-50x30@v2");
+        panel.LoadEntries(entries, "basic-50x30@v2");
         panel.ReplaceGuidanceSections(
             new[]
             {
@@ -135,5 +139,12 @@ public static class TemplateLibraryCatalog
                 "No local overlay is winning for this version, so packaged behavior remains authoritative.",
                 "Continue using the packaged entry or introduce a saved local override with a fresh proof."),
         };
+    }
+
+    private static string BuildEntrySummary(IReadOnlyCollection<TemplateCatalogRowModel> entries)
+    {
+        var localCount = entries.Count((entry) => string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase));
+        var draftCount = entries.Count((entry) => string.Equals(entry.State, "draft", StringComparison.OrdinalIgnoreCase));
+        return $"{entries.Count} visible / {localCount} local / {draftCount} draft";
     }
 }

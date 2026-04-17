@@ -36,6 +36,7 @@ pnpm lint
 pnpm typecheck
 pnpm --filter @label/admin-web build
 dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release
+dotnet test apps/windows-shell-tests/JanLabel.WindowsShell.Tests.csproj -c Release
 cargo fmt --all --check
 cargo clippy --workspace --all-targets -- -D warnings
 cargo test --workspace

@@ -16,15 +16,13 @@
                 <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Dispatch Messages" />
                 <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding MessageSummary}" />
               </DockPanel>
-              <ListView Margin="0,8,0,0" Height="156" ItemsSource="{Binding MessageRows}">
-                <ListView.View>
-                  <GridView>
-                    <GridViewColumn Width="70" DisplayMemberBinding="{Binding Level}" Header="Level" />
-                    <GridViewColumn Width="80" DisplayMemberBinding="{Binding Source}" Header="Source" />
-                    <GridViewColumn Width="410" DisplayMemberBinding="{Binding Message}" Header="Message" />
-                  </GridView>
-                </ListView.View>
-              </ListView>
+              <DataGrid Style="{StaticResource OperatorDataGridStyle}" ItemsSource="{Binding MessageRows}">
+                <DataGrid.Columns>
+                  <DataGridTextColumn Width="70" Binding="{Binding Level}" Header="Level" />
+                  <DataGridTextColumn Width="90" Binding="{Binding Source}" Header="Source" />
+                  <DataGridTextColumn Width="*" Binding="{Binding Message}" Header="Message" />
+                </DataGrid.Columns>
+              </DataGrid>
             </StackPanel>
           </Border>
           <Border Grid.Column="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
@@ -56,165 +54,177 @@
 
       <Grid>
         <Grid.ColumnDefinitions>
-          <ColumnDefinition Width="300" />
-          <ColumnDefinition Width="*" />
-          <ColumnDefinition Width="380" />
+          <ColumnDefinition Width="320" MinWidth="260" />
+          <ColumnDefinition Width="6" />
+          <ColumnDefinition Width="*" MinWidth="420" />
+          <ColumnDefinition Width="6" />
+          <ColumnDefinition Width="400" MinWidth="320" />
         </Grid.ColumnDefinitions>
 
-        <Grid Grid.Column="0" Margin="0,0,8,0">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-          </Grid.RowDefinitions>
-          <Border Style="{StaticResource PaneBorderStyle}">
-            <StackPanel>
-              <DockPanel>
-                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Proof Queue" />
-                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="pending review" />
-              </DockPanel>
-              <ListBox Margin="0,8,0,0" Background="Transparent" BorderThickness="0" ItemsSource="{Binding ProofQueue}" SelectedItem="{Binding SelectedProof, Mode=TwoWay}" ItemContainerStyle="{StaticResource SelectableItemStyle}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate>
-                    <Grid>
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="*" />
-                        <ColumnDefinition Width="Auto" />
-                      </Grid.ColumnDefinitions>
-                      <StackPanel>
-                        <TextBlock FontWeight="SemiBold" Text="{Binding Label}" />
-                        <TextBlock FontSize="11" Foreground="{StaticResource MutedBrush}" Text="{Binding Subtext}" />
-                        <TextBlock Margin="0,4,0,0" FontSize="11" TextWrapping="Wrap" Text="{Binding Note}" />
-                      </StackPanel>
-                      <TextBlock Grid.Column="1" Foreground="#235FA9" FontWeight="SemiBold" Text="{Binding Badge}" />
-                    </Grid>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </StackPanel>
-          </Border>
-          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
-            <StackPanel>
-              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Route Presets" />
-              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding RouteRows}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,0,0,6">
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="110" />
-                        <ColumnDefinition Width="*" />
-                      </Grid.ColumnDefinitions>
-                      <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
-                      <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{Binding Value}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
-        </Grid>
+        <Border Grid.Column="0" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
+          <TabControl Style="{StaticResource WorksurfaceTabControlStyle}">
+            <TabItem Header="Proof Queue">
+              <Grid Margin="10">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <DockPanel>
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Proof Queue" />
+                  <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding ProofQueueSummary}" />
+                </DockPanel>
+                <DataGrid
+                    Grid.Row="1"
+                    Style="{StaticResource OperatorDataGridStyle}"
+                    ItemsSource="{Binding ProofQueue}"
+                    SelectedItem="{Binding SelectedProof, Mode=TwoWay}">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Width="170" Binding="{Binding Label}" Header="Proof" />
+                    <DataGridTextColumn Width="90" Binding="{Binding Badge}" Header="State" />
+                    <DataGridTextColumn Width="150" Binding="{Binding Subtext}" Header="Subject" />
+                    <DataGridTextColumn Width="*" Binding="{Binding Note}" Header="Operator note" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Grid>
+            </TabItem>
+            <TabItem Header="Route Presets">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="10">
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Route Presets" />
+                  <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding RouteRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="0,0,0,6">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="110" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                          <TextBlock Grid.Column="1" FontFamily="Consolas" Text="{Binding Value}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+          </TabControl>
+        </Border>
 
-        <Grid Grid.Column="1" Margin="0,0,8,0">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-          </Grid.RowDefinitions>
-          <Border Style="{StaticResource PaneBorderStyle}">
-            <StackPanel>
-              <DockPanel>
-                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Ready Dispatch Jobs" />
-                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding JobSummary}" />
-              </DockPanel>
-              <ListView Margin="0,8,0,0" Height="250" ItemsSource="{Binding JobRows}" SelectedItem="{Binding SelectedJob, Mode=TwoWay}">
-                <ListView.View>
-                  <GridView>
-                    <GridViewColumn Width="120" DisplayMemberBinding="{Binding Subject}" Header="Subject" />
-                    <GridViewColumn Width="120" DisplayMemberBinding="{Binding Proof}" Header="Proof" />
-                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Route}" Header="Route" />
-                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Status}" Header="Status" />
-                    <GridViewColumn Width="220" DisplayMemberBinding="{Binding Note}" Header="Operator note" />
-                  </GridView>
-                </ListView.View>
-              </ListView>
-            </StackPanel>
-          </Border>
-          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
-            <StackPanel>
-              <DockPanel>
-                <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Proof and Print Timeline" />
-                <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="current session" />
-              </DockPanel>
-              <ListView Margin="0,8,0,0" ItemsSource="{Binding TimelineRows}">
-                <ListView.View>
-                  <GridView>
-                    <GridViewColumn Width="80" DisplayMemberBinding="{Binding Time}" Header="Time" />
-                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Lane}" Header="Lane" />
-                    <GridViewColumn Width="280" DisplayMemberBinding="{Binding Summary}" Header="Summary" />
-                    <GridViewColumn Width="90" DisplayMemberBinding="{Binding Status}" Header="State" />
-                  </GridView>
-                </ListView.View>
-              </ListView>
-            </StackPanel>
-          </Border>
-        </Grid>
+        <GridSplitter Grid.Column="1" Style="{StaticResource PaneGridSplitterStyle}" ResizeDirection="Columns" />
 
-        <Grid Grid.Column="2">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition Height="*" />
-          </Grid.RowDefinitions>
-          <Border Style="{StaticResource PaneBorderStyle}">
-            <StackPanel>
-              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Current Dispatch Focus" />
-              <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding SelectionHeading}" />
-              <TextBlock Margin="0,2,0,8" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding SelectionSummary}" />
-              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SelectedJobRows}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Grid Margin="0,0,0,6">
-                      <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="120" />
-                        <ColumnDefinition Width="*" />
-                      </Grid.ColumnDefinitions>
-                      <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
-                      <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
-                    </Grid>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
-          <Border Grid.Row="1" Style="{StaticResource PaneBorderStyle}" Margin="0">
-            <StackPanel>
-              <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Dispatch Guardrails" />
-              <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ControlSections}">
-                <ItemsControl.ItemTemplate>
-                  <DataTemplate>
-                    <Border Margin="0,0,0,8" Padding="8" Background="#FCFDFE" BorderBrush="#D0D8E1" BorderThickness="1">
-                      <StackPanel>
-                        <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
-                        <TextBlock Margin="0,2,0,6" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Summary}" />
-                        <ItemsControl ItemsSource="{Binding Rows}">
-                          <ItemsControl.ItemTemplate>
-                            <DataTemplate>
-                              <Grid Margin="0,0,0,5">
-                                <Grid.ColumnDefinitions>
-                                  <ColumnDefinition Width="118" />
-                                  <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
-                                <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
-                              </Grid>
-                            </DataTemplate>
-                          </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                      </StackPanel>
-                    </Border>
-                  </DataTemplate>
-                </ItemsControl.ItemTemplate>
-              </ItemsControl>
-            </StackPanel>
-          </Border>
-        </Grid>
+        <Border Grid.Column="2" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
+          <TabControl Style="{StaticResource WorksurfaceTabControlStyle}">
+            <TabItem Header="Subjects">
+              <Grid Margin="10">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <DockPanel>
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Proof / Dispatch Subjects" />
+                  <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding JobSummary}" />
+                </DockPanel>
+                <DataGrid
+                    Grid.Row="1"
+                    Style="{StaticResource OperatorDataGridStyle}"
+                    ItemsSource="{Binding JobRows}"
+                    SelectedItem="{Binding SelectedJob, Mode=TwoWay}">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Width="120" Binding="{Binding Subject}" Header="Subject" />
+                    <DataGridTextColumn Width="120" Binding="{Binding Proof}" Header="Proof" />
+                    <DataGridTextColumn Width="90" Binding="{Binding Route}" Header="Route" />
+                    <DataGridTextColumn Width="90" Binding="{Binding Status}" Header="State" />
+                    <DataGridTextColumn Width="*" Binding="{Binding Note}" Header="Operator note" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Grid>
+            </TabItem>
+            <TabItem Header="Activity">
+              <Grid Margin="10">
+                <Grid.RowDefinitions>
+                  <RowDefinition Height="Auto" />
+                  <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+                <DockPanel>
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Recent Companion Activity" />
+                  <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding TimelineSummary}" />
+                </DockPanel>
+                <DataGrid Grid.Row="1" Style="{StaticResource OperatorDataGridStyle}" ItemsSource="{Binding TimelineRows}">
+                  <DataGrid.Columns>
+                    <DataGridTextColumn Width="80" Binding="{Binding Time}" Header="Time" />
+                    <DataGridTextColumn Width="90" Binding="{Binding Lane}" Header="Lane" />
+                    <DataGridTextColumn Width="*" Binding="{Binding Summary}" Header="Summary" />
+                    <DataGridTextColumn Width="90" Binding="{Binding Status}" Header="State" />
+                  </DataGrid.Columns>
+                </DataGrid>
+              </Grid>
+            </TabItem>
+          </TabControl>
+        </Border>
+
+        <GridSplitter Grid.Column="3" Style="{StaticResource PaneGridSplitterStyle}" ResizeDirection="Columns" />
+
+        <Border Grid.Column="4" Style="{StaticResource PaneBorderStyle}" Margin="0">
+          <TabControl Style="{StaticResource WorksurfaceTabControlStyle}">
+            <TabItem Header="Current Focus">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="10">
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Current Dispatch Focus" />
+                  <TextBlock Margin="0,4,0,0" FontWeight="SemiBold" Text="{Binding SelectionHeading}" />
+                  <TextBlock Margin="0,2,0,8" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding SelectionSummary}" />
+                  <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SelectedJobRows}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Grid Margin="0,0,0,6">
+                          <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="120" />
+                            <ColumnDefinition Width="*" />
+                          </Grid.ColumnDefinitions>
+                          <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                          <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+            <TabItem Header="Guardrails">
+              <ScrollViewer VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="10">
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Dispatch Guardrails" />
+                  <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ControlSections}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate>
+                        <Border Margin="0,0,0,8" Padding="8" Background="#FCFDFE" BorderBrush="#D0D8E1" BorderThickness="1">
+                          <StackPanel>
+                            <TextBlock FontWeight="SemiBold" Text="{Binding Title}" />
+                            <TextBlock Margin="0,2,0,6" FontSize="11" Foreground="{StaticResource MutedBrush}" TextWrapping="Wrap" Text="{Binding Summary}" />
+                            <ItemsControl ItemsSource="{Binding Rows}">
+                              <ItemsControl.ItemTemplate>
+                                <DataTemplate>
+                                  <Grid Margin="0,0,0,5">
+                                    <Grid.ColumnDefinitions>
+                                      <ColumnDefinition Width="118" />
+                                      <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Foreground="{StaticResource MutedBrush}" Text="{Binding Name}" />
+                                    <TextBlock Grid.Column="1" TextWrapping="Wrap" Text="{Binding Value}" />
+                                  </Grid>
+                                </DataTemplate>
+                              </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                          </StackPanel>
+                        </Border>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </StackPanel>
+              </ScrollViewer>
+            </TabItem>
+          </TabControl>
+        </Border>
       </Grid>
     </DockPanel>
   </DataTemplate>

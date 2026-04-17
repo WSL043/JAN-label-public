@@ -14,12 +14,29 @@ public static class WorkspaceFactory
                 "overview",
                 "Operational readiness and migration scope for the native shell.",
                 "Native shell migration should be judged by operator comprehension first: authority, current blocker, and next practical move must all be visible without opening another lane.",
-                new[] { "Refresh State", "Open Handoff", "View Preview" },
                 new[]
                 {
-                    new RibbonGroupModel("Session", "Refresh", "Pin Workspace", "Export State"),
-                    new RibbonGroupModel("Templates", "Open Library", "Overlay Status", "Catalog Rules"),
-                    new RibbonGroupModel("Migration", "Current State", "Release Notes", "Preview Package"),
+                    ShellActionModel.Enabled(ShellActions.RefreshState),
+                    ShellActionModel.Disabled(ShellActions.OpenHandoff, "Handoff notes stay in the repo until a native-shell document opener is wired."),
+                    ShellActionModel.Enabled(ShellActions.ViewPreview),
+                },
+                new[]
+                {
+                    new RibbonGroupModel(
+                        "Session",
+                        ShellActionModel.Enabled(ShellActions.RefreshState),
+                        ShellActionModel.Disabled(ShellActions.PinWorkspace, "Workspace pinning is not yet implemented in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.ExportState, "State export is not yet implemented in the native shell.")),
+                    new RibbonGroupModel(
+                        "Templates",
+                        ShellActionModel.Enabled(ShellActions.OpenLibrary, "Refresh and focus the template-library board in the current shell lane."),
+                        ShellActionModel.Enabled(ShellActions.OverlayStatus, "Refresh and focus overlay winner, source, and dispatch-safety state."),
+                        ShellActionModel.Enabled(ShellActions.CatalogRules, "Refresh and focus catalog-governance context from desktop-shell.")),
+                    new RibbonGroupModel(
+                        "Migration",
+                        ShellActionModel.Disabled(ShellActions.CurrentState, "This migration readout is not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.ReleaseNotes, "Release-note viewing is not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.PreviewPackage, "Preview package inspection is not yet wired in the native shell.")),
                 },
                 new[]
                 {
@@ -43,14 +60,40 @@ public static class WorkspaceFactory
                 "design",
                 "BarTender-style designer with canvas, toolbox, and property-grid workflow.",
                 "Authoring is only production-safe when saved catalog state, preview output, and proof gating are easy to distinguish from the live draft at a glance.",
-                new[] { "New Format", "Print Preview", "Run Proof" },
                 new[]
                 {
-                    new RibbonGroupModel("Clipboard", "Paste", "Duplicate", "Delete"),
-                    new RibbonGroupModel("Insert", "Text", "Barcode", "Line", "Box"),
-                    new RibbonGroupModel("Arrange", "Align Left", "Make Same Size", "Snap"),
-                    new RibbonGroupModel("Data", "Record Browser", "Query Prompt", "Named Data Sources"),
-                    new RibbonGroupModel("Validate", "Rust Preview", "Save to Catalog", "Run Proof"),
+                    ShellActionModel.Disabled(ShellActions.NewFormat, "Designer authoring stays local to the shell frame in v0.3.0."),
+                    ShellActionModel.Enabled(ShellActions.PrintPreview),
+                    ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0."),
+                },
+                new[]
+                {
+                    new RibbonGroupModel(
+                        "Clipboard",
+                        ShellActionModel.Disabled(ShellActions.Paste, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Duplicate, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Delete, "Designer editing commands are not yet wired in the native shell.")),
+                    new RibbonGroupModel(
+                        "Insert",
+                        ShellActionModel.Disabled(ShellActions.Text, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Barcode, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Line, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Box, "Designer editing commands are not yet wired in the native shell.")),
+                    new RibbonGroupModel(
+                        "Arrange",
+                        ShellActionModel.Disabled(ShellActions.AlignLeft, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.MakeSameSize, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.Snap, "Designer editing commands are not yet wired in the native shell.")),
+                    new RibbonGroupModel(
+                        "Data",
+                        ShellActionModel.Disabled(ShellActions.RecordBrowser, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.QueryPrompt, "Designer editing commands are not yet wired in the native shell."),
+                        ShellActionModel.Disabled(ShellActions.NamedDataSources, "Designer editing commands are not yet wired in the native shell.")),
+                    new RibbonGroupModel(
+                        "Validate",
+                        ShellActionModel.Enabled(ShellActions.RustPreview),
+                        ShellActionModel.Disabled(ShellActions.SaveToCatalog, "Template write-back remains owned by apps/desktop-shell in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0.")),
                 },
                 new[]
                 {
@@ -74,12 +117,29 @@ public static class WorkspaceFactory
                 "ready",
                 "Proof and dispatch lane with explicit guardrails before print unlock.",
                 "A production print lane must surface the approved proof, blocked jobs, and current route before the operator even thinks about pressing print.",
-                new[] { "Refresh Queue", "Approve Proof", "Dispatch Batch" },
                 new[]
                 {
-                    new RibbonGroupModel("Queue", "Refresh", "Hold", "Release"),
-                    new RibbonGroupModel("Proof", "Open PDF", "Approve", "Reject"),
-                    new RibbonGroupModel("Dispatch", "Route Check", "Run Proof", "Print"),
+                    ShellActionModel.Enabled(ShellActions.RefreshSubjects),
+                    ShellActionModel.Enabled(ShellActions.ApproveProof),
+                    ShellActionModel.Disabled(ShellActions.DispatchBatch, "Direct print dispatch remains owned by apps/desktop-shell in v0.3.0."),
+                },
+                new[]
+                {
+                    new RibbonGroupModel(
+                        "Subjects",
+                        ShellActionModel.Enabled(ShellActions.RefreshSubjects),
+                        ShellActionModel.Disabled(ShellActions.Hold, "Queue mutation is not exposed directly from the native shell in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.Release, "Queue mutation is not exposed directly from the native shell in v0.3.0.")),
+                    new RibbonGroupModel(
+                        "Proof",
+                        ShellActionModel.Disabled(ShellActions.OpenPdf, "Artifact opening is not yet wired directly from the native shell."),
+                        ShellActionModel.Enabled(ShellActions.Approve),
+                        ShellActionModel.Enabled(ShellActions.Reject)),
+                    new RibbonGroupModel(
+                        "Dispatch",
+                        ShellActionModel.Enabled(ShellActions.RouteCheck, "Refresh and focus the current proof subject, bridge route, and print guardrails."),
+                        ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.Print, "Direct print dispatch remains owned by apps/desktop-shell in v0.3.0.")),
                 },
                 new[]
                 {
@@ -101,27 +161,44 @@ public static class WorkspaceFactory
                 "Batch Jobs",
                 "Workbook import and queue",
                 "24",
-                "Operator batch staging with queue mutation visibility and retry rules.",
-                "Batch tooling is only usable in production when import assumptions, retry eligibility, and blocked submit reasons are visible on the same screen.",
-                new[] { "Import Workbook", "Retry Failed", "Queue Snapshot" },
+                "Seeded shared batch snapshot fallback",
+                "Seeded fallback keeps batch-shell language visible until the desktop-shell shared snapshot is available.",
                 new[]
                 {
-                    new RibbonGroupModel("Import", "CSV", "XLSX", "Alias Map"),
-                    new RibbonGroupModel("Queue", "Submit Ready", "Retry Failed", "Freeze Row"),
-                    new RibbonGroupModel("Validation", "Fixture Check", "Unknown Template", "JAN Warnings"),
+                    ShellActionModel.Disabled(ShellActions.ImportWorkbook, "Batch submission remains transitional in v0.3.0."),
+                    ShellActionModel.Disabled(ShellActions.RetryFailed, "Retry remains outside the native shell in v0.3.0."),
+                    ShellActionModel.Disabled(ShellActions.QueueSnapshot, "Shared batch snapshot refresh requires the desktop-shell companion."),
+                },
+                new[]
+                {
+                    new RibbonGroupModel(
+                        "Import",
+                        ShellActionModel.Disabled(ShellActions.Csv, "Batch import authority remains transitional in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.Xlsx, "Batch import authority remains transitional in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.AliasMap, "Batch import authority remains transitional in v0.3.0.")),
+                    new RibbonGroupModel(
+                        "Queue",
+                        ShellActionModel.Disabled(ShellActions.SubmitReady, "Direct batch submission is not exposed from the native shell in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.RetryFailed, "Retry remains outside the native shell in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.FreezeRow, "Batch queue mutation remains transitional in v0.3.0.")),
+                    new RibbonGroupModel(
+                        "Validation",
+                        ShellActionModel.Disabled(ShellActions.FixtureCheck, "Batch validation remains transitional in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.UnknownTemplate, "Batch validation remains transitional in v0.3.0."),
+                        ShellActionModel.Disabled(ShellActions.JanWarnings, "Batch validation remains transitional in v0.3.0.")),
                 },
                 new[]
                 {
                     new ContextBadgeModel("Import", "csv / xlsx", Brushes.SteelBlue),
-                    new ContextBadgeModel("Retry", "ready / failed only", Brushes.Firebrick),
-                    new ContextBadgeModel("Queue", "186 staged", Brushes.ForestGreen),
+                    new ContextBadgeModel("Snapshot", "seeded fallback", Brushes.DarkGoldenrod),
+                    new ContextBadgeModel("Queue", "seeded", Brushes.ForestGreen),
                 },
                 new[]
                 {
-                    new StatusStripItemModel("Mode", "Batch staging"),
-                    new StatusStripItemModel("Session lock", "visible"),
-                    new StatusStripItemModel("Template blocker", "enforced"),
-                    new StatusStripItemModel("Rows staged", "186"),
+                    new StatusStripItemModel("Mode", "Batch fallback"),
+                    new StatusStripItemModel("Snapshot", "seeded"),
+                    new StatusStripItemModel("Authority", "desktop-shell"),
+                    new StatusStripItemModel("Mutation", "disabled"),
                 },
                 BuildBatchJobsWorkspace()));
 
@@ -132,12 +209,29 @@ public static class WorkspaceFactory
                 "6 pending",
                 "Audit and proof-review lane with retention and restore visibility.",
                 "Operational history must let an operator answer three questions fast: what happened, what still needs review, and whether recovery is safe.",
-                new[] { "Search Ledger", "Export Audit", "Trim Retention" },
                 new[]
                 {
-                    new RibbonGroupModel("Review", "Approve Proof", "Reject Proof", "Pin Artifact"),
-                    new RibbonGroupModel("Audit", "Search", "Export", "Retention Dry Run"),
-                    new RibbonGroupModel("Restore", "List Bundles", "Validate Bundle", "Restore"),
+                    ShellActionModel.Enabled(ShellActions.RefreshAudit),
+                    ShellActionModel.Enabled(ShellActions.ExportAudit),
+                    ShellActionModel.Disabled(ShellActions.TrimRetention, "Destructive retention apply is not exposed from the native shell in v0.3.0."),
+                },
+                new[]
+                {
+                    new RibbonGroupModel(
+                        "Review",
+                        ShellActionModel.Enabled(ShellActions.ApproveProof),
+                        ShellActionModel.Enabled(ShellActions.RejectProof),
+                        ShellActionModel.Disabled(ShellActions.PinArtifact, "Artifact pinning is not yet wired directly from the native shell.")),
+                    new RibbonGroupModel(
+                        "Audit",
+                        ShellActionModel.Enabled(ShellActions.RefreshAudit),
+                        ShellActionModel.Enabled(ShellActions.ExportAudit),
+                        ShellActionModel.Disabled(ShellActions.RetentionDryRun, "Retention commands remain owned by apps/desktop-shell in v0.3.0.")),
+                    new RibbonGroupModel(
+                        "Restore",
+                        ShellActionModel.Enabled(ShellActions.ListBundles, "Refresh and focus desktop-shell audit backup bundle inventory."),
+                        ShellActionModel.Disabled(ShellActions.ValidateBundle, "Restore validation stays guarded in apps/desktop-shell."),
+                        ShellActionModel.Disabled(ShellActions.Restore, "Audit restore remains owned by apps/desktop-shell in v0.3.0.")),
                 },
                 new[]
                 {
@@ -157,7 +251,12 @@ public static class WorkspaceFactory
 
     private static HomeWorkspaceModel BuildHomeWorkspace()
     {
-        var model = new HomeWorkspaceModel { HeaderDetail = "native shell absorbing operator lanes" };
+        var model = new HomeWorkspaceModel
+        {
+            HeaderDetail = "native shell absorbing operator lanes",
+            StatusSummary = "seeded workstation baseline",
+            ActivitySummary = "latest 5 seeded events",
+        };
         model.SummaryCards.Add(new SummaryCardModel("Modules", "5", "Home, Designer, Print Console, Batch Jobs, History"));
         model.SummaryCards.Add(new SummaryCardModel("Preview", "installer", "CI artifacts now produce an installer prerelease"));
         model.SummaryCards.Add(new SummaryCardModel("Authority", "desktop-shell", "Proof, audit, and catalog resolution stay authoritative there"));
@@ -187,30 +286,56 @@ public static class WorkspaceFactory
 
     private static DesignerWorkspaceModel BuildDesignerWorkspace()
     {
+        var toolboxGroups = new[]
+        {
+            new ToolboxGroupModel("Objects", new[] { new ToolboxItemModel("Text", "A"), new ToolboxItemModel("Barcode", "JAN"), new ToolboxItemModel("Counter", "#"), new ToolboxItemModel("Picture", "IMG") }),
+            new ToolboxGroupModel("Guides", new[] { new ToolboxItemModel("Margins", "4 mm"), new ToolboxItemModel("Grid", "2 mm"), new ToolboxItemModel("Snap", "On") }),
+        };
+        var objectNodes = new[]
+        {
+            new ObjectNodeModel("Label Format", "50 x 30 mm", new[] { new ObjectNodeModel("Static Layer", "3 objects", new[] { new ObjectNodeModel("Brand mark", "Text"), new ObjectNodeModel("Frame", "Box"), new ObjectNodeModel("Divider", "Line") }), new ObjectNodeModel("Data Layer", "4 objects", new[] { new ObjectNodeModel("Product name", "{{sku}}"), new ObjectNodeModel("JAN barcode", "{{jan}}"), new ObjectNodeModel("JAN text", "{{jan}}"), new ObjectNodeModel("Quantity", "{{qty}}") }) }),
+        };
+        var dataSources = new[]
+        {
+            new DataSourceRowModel("sku", "Text", "200-145-3"),
+            new DataSourceRowModel("jan", "JAN", "4901234567894"),
+            new DataSourceRowModel("qty", "Number", "24"),
+            new DataSourceRowModel("brand", "Text", "JAN-LAB"),
+            new DataSourceRowModel("template_version", "Text", "basic-50x30@v2"),
+            new DataSourceRowModel("proof_mode", "Expr", "proof"),
+        };
         var model = new DesignerWorkspaceModel
         {
             CanvasMeta = "basic-50x30@v2 | pdf-proof | record 12 / 24",
             CanvasHint = "Select objects on the canvas, adjust properties on the right, then save to catalog before proof.",
-            MessageSummary = "2 warnings / 0 blockers",
+            MessageSummary = "1 warning / 2 informative checks",
             RecordSummary = "24 active records",
             StatusSummary = "desktop-shell remains the proof/print authority",
             CatalogSummary = "authority, route, and rollback visible",
+            ToolboxSummary = $"{toolboxGroups.Length} groups / {toolboxGroups.Sum((group) => group.Items.Count)} tools",
+            ObjectBrowserSummary = $"{CountDesignerLeafNodes(objectNodes)} design objects / {CountDesignerLayerNodes(objectNodes)} layers",
+            DataSourceSummary = $"{dataSources.Length} mapped fields",
             CanvasWidth = 660,
             CanvasHeight = 410,
             PrimaryDocumentTitle = "basic-50x30",
             SecondaryDocumentTitle = "proof-preview",
+            PreviewSvg = "<svg><!-- mock preview --></svg>",
         };
 
-        model.ToolboxGroups.Add(new ToolboxGroupModel("Objects", new[] { new ToolboxItemModel("Text", "A"), new ToolboxItemModel("Barcode", "JAN"), new ToolboxItemModel("Counter", "#"), new ToolboxItemModel("Picture", "IMG") }));
-        model.ToolboxGroups.Add(new ToolboxGroupModel("Guides", new[] { new ToolboxItemModel("Margins", "4 mm"), new ToolboxItemModel("Grid", "2 mm"), new ToolboxItemModel("Snap", "On") }));
+        foreach (var toolboxGroup in toolboxGroups)
+        {
+            model.ToolboxGroups.Add(toolboxGroup);
+        }
         TemplateLibraryCatalog.SeedDesignerPanel(model.TemplateLibrary);
-        model.ObjectNodes.Add(new ObjectNodeModel("Label Format", "50 x 30 mm", new[] { new ObjectNodeModel("Static Layer", "3 objects", new[] { new ObjectNodeModel("Brand mark", "Text"), new ObjectNodeModel("Frame", "Box"), new ObjectNodeModel("Divider", "Line") }), new ObjectNodeModel("Data Layer", "5 objects", new[] { new ObjectNodeModel("Product name", "{{sku}}"), new ObjectNodeModel("JAN barcode", "{{jan}}"), new ObjectNodeModel("JAN text", "{{jan}}"), new ObjectNodeModel("Quantity", "{{qty}}") }) }));
-        model.DataSources.Add(new DataSourceRowModel("sku", "Text", "200-145-3"));
-        model.DataSources.Add(new DataSourceRowModel("jan", "JAN", "4901234567894"));
-        model.DataSources.Add(new DataSourceRowModel("qty", "Number", "24"));
-        model.DataSources.Add(new DataSourceRowModel("brand", "Text", "JAN-LAB"));
-        model.DataSources.Add(new DataSourceRowModel("template_version", "Text", "basic-50x30@v2"));
-        model.DataSources.Add(new DataSourceRowModel("proof_mode", "Expr", "proof"));
+        foreach (var objectNode in objectNodes)
+        {
+            model.ObjectNodes.Add(objectNode);
+        }
+
+        foreach (var dataSource in dataSources)
+        {
+            model.DataSources.Add(dataSource);
+        }
         model.DocumentTabs.Add(new DocumentTabModel(model.PrimaryDocumentTitle, "record-linked format"));
         model.DocumentTabs.Add(new DocumentTabModel(model.SecondaryDocumentTitle, "validation surface"));
         model.CanvasElements.Add(new CanvasElementModel("BRAND", "JAN-LAB", 30, 22, 120, 32, 14, false));
@@ -233,6 +358,11 @@ public static class WorkspaceFactory
         model.RecordRows.Add(new PropertyRowModel("Brand", "JAN-LAB"));
         model.RecordRows.Add(new PropertyRowModel("Qty", "24"));
         model.RecordRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
+        model.PreviewRows.Add(new PropertyRowModel("Template", "basic-50x30@v2"));
+        model.PreviewRows.Add(new PropertyRowModel("Label", "proof-preview"));
+        model.PreviewRows.Add(new PropertyRowModel("JAN", "4901234567894"));
+        model.PreviewRows.Add(new PropertyRowModel("Page", "50 x 30 mm"));
+        model.PreviewRows.Add(new PropertyRowModel("Fields", "6"));
         model.MessageRows.Add(new MessageRowModel("Info", "renderer", "Rust preview and canvas geometry are aligned for the selected format."));
         model.MessageRows.Add(new MessageRowModel("Warn", "catalog", "Local catalog override is active. Save before proof if this draft should dispatch."));
         model.MessageRows.Add(new MessageRowModel("Info", "proof", "Approved proof lineage will be required before print route unlocks."));
@@ -247,7 +377,14 @@ public static class WorkspaceFactory
 
     private static PrintConsoleWorkspaceModel BuildPrintConsoleWorkspace()
     {
-        var model = new PrintConsoleWorkspaceModel { MessageSummary = "1 blocker / 2 informative checks", FooterDetail = "proof lineage and bridge route visible", JobSummary = "3 ready / 1 held / 0 misrouted" };
+        var model = new PrintConsoleWorkspaceModel
+        {
+            MessageSummary = "1 blocker / 2 informative checks",
+            FooterDetail = "proof lineage and bridge route visible",
+            JobSummary = "3 ready / 1 held / 0 misrouted",
+            ProofQueueSummary = "seeded desktop-shell review lane",
+            TimelineSummary = "seeded audit-derived timeline",
+        };
         model.ProofQueue.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 4901234567894", "pending", "Needs operator approval before dispatch lane unlocks.", "desktop-shell proof review", "artifact valid / lineage pending", "Pending review blocks 200-145-4 dispatch.", "Approve or reject after confirming saved overlay and subject."));
         model.ProofQueue.Add(new QueueItemModel("proof-240416-018", "shipper-70x50@v1 | 4901234567801", "approved", "Current approved lineage available for print.", "desktop-shell approved lineage", "artifact pinned / route open", "No blocker. Ready jobs can use this proof.", "Use as the approved reference before dispatch."));
         model.ProofQueue.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 4901234567818", "rejected", "Mismatch between saved overlay and proof subject.", "desktop-shell review archive", "artifact retained / route closed", "Rejected proof cannot unlock print.", "Correct the subject mismatch and re-run proof."));
@@ -277,38 +414,45 @@ public static class WorkspaceFactory
 
     private static BatchJobsWorkspaceModel BuildBatchJobsWorkspace()
     {
-        var model = new BatchJobsWorkspaceModel { MessageSummary = "3 warnings / 0 fatal", FooterDetail = "retry only for ready or failed rows", QueueSummary = "4 sessions / 186 staged records" };
-        model.ImportSessions.Add(new QueueItemModel("import-240416-a", "sales-apr16.xlsx", "42 rows", "Alias map resolved; 2 JAN warnings surfaced before queueing.", "batch operator", "desktop-shell submit route", "Two rows still need manual JAN review.", "Review warned rows, then submit ready rows."));
-        model.ImportSessions.Add(new QueueItemModel("import-240416-b", "proof-fixes.csv", "18 rows", "Template version verified against local overlay.", "catalog-aware import", "desktop-shell submit route", "No blocker. Session is clean.", "Submit after confirming the queue window."));
-        model.ImportSessions.Add(new QueueItemModel("import-240416-c", "legacy-seed.xlsx", "126 rows", "Pending proof seed only; cannot auto-approve.", "migration intake", "pending-proof staging only", "Legacy seed rows cannot auto-approve or print.", "Seed as pending, then route through proof review."));
-        model.ColumnRows.Add(new PropertyRowModel("sku", "Column B -> product_code"));
-        model.ColumnRows.Add(new PropertyRowModel("jan", "Column D -> jan13"));
-        model.ColumnRows.Add(new PropertyRowModel("qty", "Column F -> pack_qty"));
-        model.ColumnRows.Add(new PropertyRowModel("template_version", "Derived from operator selection"));
-        model.ColumnRows.Add(new PropertyRowModel("brand", "Fallback to workbook constant"));
-        model.BatchRows.Add(new BatchRowModel("batch-014", "basic-50x30@v2", "42", "ready", "Two rows require JAN review before submit", "40", "2", "desktop-shell submit", "Ambiguous JAN rows block full submit.", "Retry only for rows that remain ready or failed."));
-        model.BatchRows.Add(new BatchRowModel("batch-015", "shipper-70x50@v1", "18", "submitted", "Locked against retry while in flight", "18", "0", "desktop-shell submit", "Submitted rows are immutable until completion.", "No retry while submitted."));
-        model.BatchRows.Add(new BatchRowModel("batch-016", "basic-50x30@v2", "126", "failed", "Pending-proof seed rows blocked from dispatch", "0", "126", "pending-proof only", "Pending proof seeds cannot dispatch.", "Retry after proof review converts eligible rows."));
-        model.BatchRows.Add(new BatchRowModel("batch-017", "proof-ticket@v1", "0", "draft", "Catalog save still missing", "0", "0", "blocked", "Unsaved template cannot enter queue.", "Save the template to the local catalog first."));
-        model.ActivityRows.Add(new ActivityRowModel("14:28", "queue", "batch-014 revalidated after alias map adjustment", "ok"));
-        model.ActivityRows.Add(new ActivityRowModel("14:24", "retry", "batch-016 kept eligible because rows remain in failed state", "watch"));
-        model.ActivityRows.Add(new ActivityRowModel("14:20", "submit", "batch-015 locked while submitted rows are active", "done"));
-        model.ActivityRows.Add(new ActivityRowModel("14:17", "validation", "12-digit numeric JAN blocked before staging", "done"));
-        model.ControlSections.Add(new PropertySectionModel("Retry Rule", "Retry is intentionally narrow to avoid mutating rows that are already submitted.", new[] { new PropertyRowModel("Eligible states", "ready / failed"), new PropertyRowModel("Locked state", "submitted"), new PropertyRowModel("Current held batch", "batch-015") }));
-        model.ControlSections.Add(new PropertySectionModel("Workbook Safety", "Import remains usable without a strict external database schema.", new[] { new PropertyRowModel("JAN hardening", "12-digit numeric blocked"), new PropertyRowModel("Template mismatch", "unknown template blocks queue"), new PropertyRowModel("Legacy proof seed", "pending only") }));
-        model.MessageRows.Add(new MessageRowModel("Warn", "import", "sales-apr16.xlsx contains two rows with ambiguous numeric JAN values."));
-        model.MessageRows.Add(new MessageRowModel("Warn", "queue", "batch-017 cannot submit because proof-ticket@v1 is still unsaved in the local catalog."));
-        model.MessageRows.Add(new MessageRowModel("Info", "retry", "Failed-only rows remain eligible for controlled retry."));
-        model.StatusItems.Add(new StatusItemModel("Queue session lock", "visible", "submit-time mutation guard active", "OK", Brushes.ForestGreen));
-        model.StatusItems.Add(new StatusItemModel("Template mismatch blocker", "enforced", "unknown template_version is stopped", "LOCK", Brushes.Firebrick));
-        model.StatusItems.Add(new StatusItemModel("Import mode", "csv/xlsx", "external schema remains optional", "OPEN", Brushes.SteelBlue));
-        model.SelectedBatch = model.BatchRows[0];
+        var model = new BatchJobsWorkspaceModel
+        {
+            MessageSummary = "seeded fallback / shared snapshot unavailable",
+            FooterDetail = "desktop-shell shared batch snapshot is not loaded in seeded mode",
+            QueueSummary = "seeded batch examples only",
+            ImportSummary = "shared snapshot fallback",
+            ActivitySummary = "batch shell language preview",
+        };
+        model.ImportSessions.Add(new QueueItemModel("shared-batch-snapshot", "desktop-shell companion required", "seeded", "Seeded fallback keeps the Batch Jobs lane readable even when the shared snapshot is unavailable.", "windows-shell fallback", "desktop-shell shared snapshot", "No live snapshot is currently loaded.", "Refresh after desktop-shell publishes a batch snapshot."));
+        model.ColumnRows.Add(new PropertyRowModel("Snapshot route", "desktop-shell shared batch snapshot"));
+        model.ColumnRows.Add(new PropertyRowModel("Authority", "apps/admin-web + apps/desktop-shell"));
+        model.ColumnRows.Add(new PropertyRowModel("Seeded mode", "no live queue rows loaded"));
+        model.ColumnRows.Add(new PropertyRowModel("Direct mutation", "disabled in WPF"));
+        model.BatchRows.Add(new BatchRowModel("seeded-batch-ready", "basic-50x30@v2", "1 row", "ready", "Seeded example row for workstation layout review.", "1", "0", "desktop-shell shared snapshot", "Live row not loaded yet.", "Refresh after admin-web publishes a queue."));
+        model.BatchRows.Add(new BatchRowModel("seeded-batch-failed", "proof-ticket@v1", "1 row", "failed", "Seeded blocker example so the focus pane keeps realistic copy in fallback mode.", "0", "1", "desktop-shell shared snapshot", "Live row not loaded yet.", "Handle the real retry from admin-web once the shared snapshot is available."));
+        model.ActivityRows.Add(new ActivityRowModel("seeded", "batch", "Batch Jobs is waiting on the desktop-shell shared snapshot.", "watch"));
+        model.ActivityRows.Add(new ActivityRowModel("scope", "guardrail", "Import, retry, and submit remain disabled in WPF.", "lock"));
+        model.ControlSections.Add(new PropertySectionModel("Shared Snapshot Contract", "Batch Jobs now expects a desktop-shell-owned shared snapshot instead of hardcoded queue authority.", new[] { new PropertyRowModel("Published by", "apps/admin-web"), new PropertyRowModel("Read by", "apps/windows-shell"), new PropertyRowModel("Mutation path", "apps/admin-web") }));
+        model.ControlSections.Add(new PropertySectionModel("Seeded Fallback", "This fallback keeps the lane readable until the companion can load the real shared snapshot.", new[] { new PropertyRowModel("Use this lane for", "layout review and shell wording"), new PropertyRowModel("Do not use this lane for", "actual import or submit"), new PropertyRowModel("Refresh source", "desktop-shell companion") }));
+        model.MessageRows.Add(new MessageRowModel("Info", "batch", "Batch Jobs now expects a shared snapshot published by admin-web through desktop-shell."));
+        model.MessageRows.Add(new MessageRowModel("Warn", "scope", "Seeded fallback is visible because no live shared batch snapshot is loaded."));
+        model.StatusItems.Add(new StatusItemModel("Snapshot", "seeded", "No live shared batch snapshot is currently loaded.", "WAIT", Brushes.DarkGoldenrod));
+        model.StatusItems.Add(new StatusItemModel("Authority", "desktop-shell", "Batch mutation remains outside the native shell.", "LOCK", Brushes.Firebrick));
+        model.StatusItems.Add(new StatusItemModel("Mode", "fallback", "Refresh from desktop-shell once a queue snapshot exists.", "INFO", Brushes.SteelBlue));
+        model.SelectedImportSession = model.ImportSessions[0];
         return model;
     }
 
     private static HistoryWorkspaceModel BuildHistoryWorkspace()
     {
-        var model = new HistoryWorkspaceModel { MessageSummary = "1 attention item / 2 clean", FooterDetail = "restore stays conflict-safe", LedgerSummary = "last 5 ledger events" };
+        var model = new HistoryWorkspaceModel
+        {
+            MessageSummary = "1 attention item / 2 clean",
+            FooterDetail = "restore stays conflict-safe",
+            LedgerSummary = "last 5 ledger events",
+            PendingProofSummary = "approve / reject review lane",
+            BundleSummary = "restore-safe bundle inventory",
+            FilterSummary = "current operator filter set",
+        };
         model.PendingProofs.Add(new QueueItemModel("proof-240416-017", "basic-50x30@v2 | 200-145-4", "pending", "Operator needs to confirm overlay save and subject match.", "desktop-shell proof review", "PDF artifact valid / approval pending", "Pending proof blocks related dispatch lane.", "Approve or reject after checking subject and saved overlay."));
         model.PendingProofs.Add(new QueueItemModel("proof-240416-020", "shipper-70x50@v1 | 200-145-9", "pending", "PDF artifact validated; waiting for manual approval.", "desktop-shell proof review", "PDF artifact valid / approval pending", "No technical blocker. Awaiting human decision.", "Approve if the subject and artifact still match the request."));
         model.PendingProofs.Add(new QueueItemModel("proof-240416-019", "basic-50x30@v2 | 200-145-5", "rejected", "Retained for audit visibility and retry follow-up.", "audit history", "artifact retained / route closed", "Rejected proofs cannot unlock print.", "Use as audit reference when preparing a corrected retry."));
@@ -354,5 +498,37 @@ public static class WorkspaceFactory
         sideMarks.Add("20");
         sideMarks.Add("25");
         sideMarks.Add("30");
+    }
+
+    private static int CountDesignerLeafNodes(IEnumerable<ObjectNodeModel> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            if (node.Children.Count == 0)
+            {
+                count += 1;
+                continue;
+            }
+
+            count += CountDesignerLeafNodes(node.Children);
+        }
+
+        return count;
+    }
+
+    private static int CountDesignerLayerNodes(IEnumerable<ObjectNodeModel> nodes)
+    {
+        var count = 0;
+        foreach (var node in nodes)
+        {
+            if (node.Children.Count > 0)
+            {
+                count += 1;
+                count += CountDesignerLayerNodes(node.Children);
+            }
+        }
+
+        return count;
     }
 }

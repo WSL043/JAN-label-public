@@ -5,7 +5,7 @@ mod audit_store;
 use std::collections::{HashMap, HashSet};
 use std::env;
 use std::fs;
-use std::io::Read;
+use std::io::{self, BufRead, Read, Write};
 use std::path::{Path, PathBuf};
 
 use audit_log::{
@@ -27,7 +27,8 @@ use render::{
     template_catalog, template_catalog_with_overlay, RenderLabelRequest, TemplateManifest,
     TemplateManifestEntry,
 };
-use serde::Serialize;
+use serde::{de::DeserializeOwned, Serialize};
+use serde_json::Value;
 use tauri::command;
 
 const ENV_PRINT_OUTPUT_DIR: &str = "JAN_LABEL_PRINT_OUTPUT_DIR";
@@ -38,6 +39,7 @@ const ENV_WINDOWS_PRINTER_NAME: &str = "JAN_LABEL_WINDOWS_PRINTER_NAME";
 const ENV_ALLOW_PRINT_WITHOUT_PROOF: &str = "JAN_LABEL_ALLOW_PRINT_WITHOUT_PROOF";
 const ENV_AUDIT_LOG_DIR: &str = "JAN_LABEL_AUDIT_LOG_DIR";
 const ENV_TEMPLATE_OVERLAY_DIR: &str = "JAN_LABEL_TEMPLATE_OVERLAY_DIR";
+const ENV_BATCH_QUEUE_SNAPSHOT_PATH: &str = "JAN_LABEL_BATCH_QUEUE_SNAPSHOT_PATH";
 
 const DEFAULT_ZINT_BINARY_PATH: &str = "zint";
 const DEFAULT_WINDOWS_PRINTER_NAME: &str = "Default Printer";
@@ -316,6 +318,49 @@ fn save_template_to_local_catalog(
 }
 
 #[command]
+fn load_batch_queue_snapshot() -> Result<BatchQueueSnapshotState, String> {
+    let path = batch_queue_snapshot_path();
+    let snapshot = read_batch_queue_snapshot_from_disk(&path)?;
+    Ok(BatchQueueSnapshotState {
+        file_path: path.to_string_lossy().into_owned(),
+        present: snapshot.is_some(),
+        snapshot,
+    })
+}
+
+#[command]
+fn save_batch_queue_snapshot(
+    request: BatchQueueSnapshotRecord,
+) -> Result<BatchQueueSnapshotState, String> {
+    let path = batch_queue_snapshot_path();
+    let snapshot = normalize_batch_queue_snapshot(request)?;
+    write_batch_queue_snapshot_to_disk(&path, &snapshot)?;
+    Ok(BatchQueueSnapshotState {
+        file_path: path.to_string_lossy().into_owned(),
+        present: true,
+        snapshot: Some(snapshot),
+    })
+}
+
+#[command]
+fn clear_batch_queue_snapshot() -> Result<BatchQueueSnapshotState, String> {
+    let path = batch_queue_snapshot_path();
+    if path.exists() {
+        fs::remove_file(&path).map_err(|error| {
+            format!(
+                "failed to clear batch queue snapshot '{}': {error}",
+                path.display()
+            )
+        })?;
+    }
+    Ok(BatchQueueSnapshotState {
+        file_path: path.to_string_lossy().into_owned(),
+        present: false,
+        snapshot: None,
+    })
+}
+
+#[command]
 fn preview_template_draft(
     request: TemplateDraftPreviewRequest,
 ) -> Result<TemplateDraftPreviewResult, String> {
@@ -580,6 +625,52 @@ struct TemplateCatalogWritebackResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+struct BatchQueueSnapshotState {
+    file_path: String,
+    present: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    snapshot: Option<BatchQueueSnapshotRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchQueueSnapshotRecord {
+    #[serde(default = "batch_queue_snapshot_schema_version")]
+    schema_version: String,
+    snapshot_id: String,
+    captured_at: String,
+    updated_at: String,
+    #[serde(default)]
+    source_file_name: Option<String>,
+    #[serde(default)]
+    source_kind: Option<String>,
+    actor: String,
+    submit_phase: String,
+    submit_message: String,
+    #[serde(default)]
+    queue_rows: Vec<BatchQueueRowRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct BatchQueueRowRecord {
+    row_index: usize,
+    draft: Value,
+    submission_status: String,
+    #[serde(default)]
+    retry_lineage_job_id: Option<String>,
+    #[serde(default)]
+    dispatch_error: Option<String>,
+    #[serde(default)]
+    dispatch_result: Option<PrintDispatchResult>,
+}
+
+fn batch_queue_snapshot_schema_version() -> String {
+    "batch-queue-snapshot-v1".to_string()
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 struct AuditBackupEntry {
     file_name: String,
     file_path: String,
@@ -606,6 +697,33 @@ struct AuditBackupRestoreResult {
 #[serde(rename_all = "camelCase")]
 struct AuditBundleEnvelope {
     artifact: AuditArtifactInfo,
+}
+
+#[derive(Debug, Clone, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct CompanionRequest {
+    request_id: String,
+    command: String,
+    #[serde(default)]
+    payload: Option<Value>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompanionResponse {
+    request_id: String,
+    ok: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    result: Option<Value>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<CompanionError>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CompanionError {
+    code: &'static str,
+    message: String,
 }
 
 impl AuditBackupRestoreResult {
@@ -1205,6 +1323,114 @@ fn template_catalog_manifest_path_if_exists() -> Option<PathBuf> {
     } else {
         None
     }
+}
+
+fn batch_queue_snapshot_path() -> PathBuf {
+    resolve_output_dir(
+        ENV_BATCH_QUEUE_SNAPSHOT_PATH,
+        env::temp_dir().join("jan-label").join("batch-queue-snapshot.json"),
+    )
+}
+
+fn normalize_batch_queue_snapshot(
+    mut snapshot: BatchQueueSnapshotRecord,
+) -> Result<BatchQueueSnapshotRecord, String> {
+    if snapshot.snapshot_id.trim().is_empty() {
+        return Err("snapshotId must not be empty".to_string());
+    }
+    if snapshot.captured_at.trim().is_empty() {
+        return Err("capturedAt must not be empty".to_string());
+    }
+    if snapshot.updated_at.trim().is_empty() {
+        return Err("updatedAt must not be empty".to_string());
+    }
+
+    snapshot.schema_version = batch_queue_snapshot_schema_version();
+    snapshot.snapshot_id = snapshot.snapshot_id.trim().to_string();
+    snapshot.captured_at = snapshot.captured_at.trim().to_string();
+    snapshot.updated_at = snapshot.updated_at.trim().to_string();
+    snapshot.actor = snapshot.actor.trim().to_string();
+    snapshot.submit_phase = snapshot.submit_phase.trim().to_string();
+    snapshot.submit_message = snapshot.submit_message.trim().to_string();
+    snapshot.source_file_name = snapshot
+        .source_file_name
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+    snapshot.source_kind = snapshot
+        .source_kind
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+
+    for row in &mut snapshot.queue_rows {
+        if !row.draft.is_object() {
+            return Err(format!(
+                "batch queue row {} must include a draft object",
+                row.row_index
+            ));
+        }
+        row.submission_status = row.submission_status.trim().to_string();
+        row.retry_lineage_job_id = row
+            .retry_lineage_job_id
+            .take()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        row.dispatch_error = row
+            .dispatch_error
+            .take()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+    }
+
+    Ok(snapshot)
+}
+
+fn read_batch_queue_snapshot_from_disk(
+    path: &Path,
+) -> Result<Option<BatchQueueSnapshotRecord>, String> {
+    if !path.exists() {
+        return Ok(None);
+    }
+
+    let raw = fs::read_to_string(path).map_err(|error| {
+        format!(
+            "failed to read batch queue snapshot '{}': {error}",
+            path.display()
+        )
+    })?;
+    let snapshot = serde_json::from_str::<BatchQueueSnapshotRecord>(&raw).map_err(|error| {
+        format!(
+            "failed to parse batch queue snapshot '{}': {error}",
+            path.display()
+        )
+    })?;
+    normalize_batch_queue_snapshot(snapshot).map(Some)
+}
+
+fn write_batch_queue_snapshot_to_disk(
+    path: &Path,
+    snapshot: &BatchQueueSnapshotRecord,
+) -> Result<(), String> {
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).map_err(|error| {
+            format!(
+                "failed to create batch queue snapshot directory '{}': {error}",
+                parent.display()
+            )
+        })?;
+    }
+
+    let serialized = serde_json::to_string_pretty(snapshot).map_err(|error| {
+        format!(
+            "failed to serialize batch queue snapshot '{}': {error}",
+            path.display()
+        )
+    })?;
+    fs::write(path, serialized).map_err(|error| {
+        format!(
+            "failed to write batch queue snapshot '{}': {error}",
+            path.display()
+        )
+    })
 }
 
 fn collect_audit_backup_bundles(backup_dir: &Path) -> Result<Vec<AuditBackupEntry>, String> {
@@ -1808,7 +2034,7 @@ fn validate_legacy_proof_seed_rows(
     rows.into_iter()
         .enumerate()
         .map(|(row_index, row)| {
-            match validate_legacy_proof_seed_row(
+            validate_legacy_proof_seed_row(
                 config,
                 row_index,
                 row,
@@ -1816,13 +2042,7 @@ fn validate_legacy_proof_seed_rows(
                 &existing_lineages,
                 &mut batch_job_ids,
                 &mut batch_lineages,
-            ) {
-                Ok(validated) => validated,
-                Err(result) => ValidatedLegacyProofSeedRow {
-                    record: None,
-                    result,
-                },
-            }
+            )
         })
         .collect()
 }
@@ -1835,20 +2055,23 @@ fn validate_legacy_proof_seed_row(
     existing_lineages: &HashSet<String>,
     batch_job_ids: &mut HashSet<String>,
     batch_lineages: &mut HashSet<String>,
-) -> Result<ValidatedLegacyProofSeedRow, LegacyProofSeedRowResult> {
+) -> ValidatedLegacyProofSeedRow {
     let proof_job_id = row.proof_job_id.trim().to_string();
-    let error = |message: String| LegacyProofSeedRowResult {
-        row_index,
-        proof_job_id: proof_job_id.clone(),
-        status: LegacyProofSeedRowStatus::Error,
-        message,
-        normalized_jan: None,
-        resolved_job_lineage_id: None,
-        artifact_path: None,
+    let error = |message: String| ValidatedLegacyProofSeedRow {
+        record: None,
+        result: LegacyProofSeedRowResult {
+            row_index,
+            proof_job_id: proof_job_id.clone(),
+            status: LegacyProofSeedRowStatus::Error,
+            message,
+            normalized_jan: None,
+            resolved_job_lineage_id: None,
+            artifact_path: None,
+        },
     };
 
     if proof_job_id.is_empty() {
-        return Err(error("proofJobId is required.".to_string()));
+        return error("proofJobId is required.".to_string());
     }
 
     let resolved_job_lineage_id = row
@@ -1859,41 +2082,60 @@ fn validate_legacy_proof_seed_row(
         .unwrap_or(&proof_job_id)
         .to_string();
     if existing_job_ids.contains(&proof_job_id) {
-        return Err(error(format!(
+        return error(format!(
             "proofJobId '{}' already exists in the audit ledger.",
             proof_job_id
-        )));
+        ));
     }
     if existing_lineages.contains(&resolved_job_lineage_id) {
-        return Err(error(format!(
+        return error(format!(
             "jobLineageId '{}' already exists in the audit ledger.",
             resolved_job_lineage_id
-        )));
+        ));
     }
     if !batch_job_ids.insert(proof_job_id.clone()) {
-        return Err(error(format!(
+        return error(format!(
             "proofJobId '{}' is duplicated in this seed batch.",
             proof_job_id
-        )));
+        ));
     }
     if !batch_lineages.insert(resolved_job_lineage_id.clone()) {
-        return Err(error(format!(
+        return error(format!(
             "jobLineageId '{}' is duplicated in this seed batch.",
             resolved_job_lineage_id
-        )));
+        ));
     }
 
-    let template_version = require_trimmed_non_empty("templateVersion", &row.template_version)
-        .map_err(error)?;
-    let requested_by = validate_legacy_seed_actor(&row.requested_by).map_err(error)?;
-    let requested_at = validate_legacy_seed_requested_at(&row.requested_at).map_err(error)?;
+    let template_version = match require_trimmed_non_empty("templateVersion", &row.template_version) {
+        Ok(value) => value,
+        Err(message) => return error(message),
+    };
+    let requested_by = match validate_legacy_seed_actor(&row.requested_by) {
+        Ok(value) => value,
+        Err(message) => return error(message),
+    };
+    let requested_at = match validate_legacy_seed_requested_at(&row.requested_at) {
+        Ok(value) => value,
+        Err(message) => return error(message),
+    };
     let notes = optional_trimmed_non_empty(row.notes);
-    let match_subject =
-        validate_legacy_seed_match_subject(&row.match_subject).map_err(error)?;
-    let artifact_path = validate_legacy_seed_artifact_path(config, &row.artifact_path).map_err(error)?;
-    let artifact_size = fs::metadata(&artifact_path)
-        .map_err(|err| error(format!("failed to stat artifactPath '{}': {err}", artifact_path.display())))?
-        .len() as usize;
+    let match_subject = match validate_legacy_seed_match_subject(&row.match_subject) {
+        Ok(value) => value,
+        Err(message) => return error(message),
+    };
+    let artifact_path = match validate_legacy_seed_artifact_path(config, &row.artifact_path) {
+        Ok(value) => value,
+        Err(message) => return error(message),
+    };
+    let artifact_size = match fs::metadata(&artifact_path) {
+        Ok(metadata) => metadata.len() as usize,
+        Err(err) => {
+            return error(format!(
+                "failed to stat artifactPath '{}': {err}",
+                artifact_path.display()
+            ))
+        }
+    };
 
     let proof_record = ProofRecord::pending(
         PrintJobId(proof_job_id.clone()),
@@ -1921,7 +2163,7 @@ fn validate_legacy_proof_seed_row(
         submission_external_job_id: format!("legacy-seed:{proof_job_id}"),
     };
 
-    Ok(ValidatedLegacyProofSeedRow {
+    ValidatedLegacyProofSeedRow {
         record: Some(LegacyProofSeedRecord {
             dispatch: dispatch_record,
             proof: proof_record,
@@ -1935,7 +2177,7 @@ fn validate_legacy_proof_seed_row(
             resolved_job_lineage_id: Some(resolved_job_lineage_id),
             artifact_path: Some(artifact_path.to_string_lossy().into_owned()),
         },
-    })
+    }
 }
 
 fn validate_legacy_seed_actor(actor: &AuditActor) -> Result<AuditActor, String> {
@@ -2173,7 +2415,204 @@ fn require_non_empty_preview_field(field: &str, value: &str) -> Result<String, S
     }
 }
 
+fn run_native_shell_companion() -> Result<(), String> {
+    let stdin = io::stdin();
+    let stdout = io::stdout();
+    let reader = stdin.lock();
+    let mut writer = stdout.lock();
+    run_native_shell_companion_with_io(reader, &mut writer)
+}
+
+fn run_native_shell_companion_with_io<R: BufRead, W: Write>(
+    reader: R,
+    writer: &mut W,
+) -> Result<(), String> {
+    for line in reader.lines() {
+        let line = line.map_err(|error| format!("failed to read companion request: {error}"))?;
+        if line.trim().is_empty() {
+            continue;
+        }
+
+        let response = match parse_companion_request(&line) {
+            Ok(request) => dispatch_companion_request(request),
+            Err(response) => response,
+        };
+
+        serde_json::to_writer(&mut *writer, &response)
+            .map_err(|error| format!("failed to serialize companion response: {error}"))?;
+        writer
+            .write_all(b"\n")
+            .and_then(|()| writer.flush())
+            .map_err(|error| format!("failed to write companion response: {error}"))?;
+    }
+
+    Ok(())
+}
+
+fn parse_companion_request(line: &str) -> Result<CompanionRequest, CompanionResponse> {
+    let value: Value = serde_json::from_str(line).map_err(|error| {
+        companion_error_response(
+            "unknown".to_string(),
+            "invalid_request",
+            format!("failed to parse companion request: {error}"),
+        )
+    })?;
+
+    let request_id = value
+        .get("requestId")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            companion_error_response(
+                "unknown".to_string(),
+                "invalid_request",
+                "requestId must be a non-empty string".to_string(),
+            )
+        })?;
+
+    let object = value.as_object().ok_or_else(|| {
+        companion_error_response(
+            request_id.clone(),
+            "invalid_request",
+            "companion request must be a JSON object".to_string(),
+        )
+    })?;
+
+    let command = object
+        .get("command")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(ToOwned::to_owned)
+        .ok_or_else(|| {
+            companion_error_response(
+                request_id.clone(),
+                "invalid_request",
+                "command must be a non-empty string".to_string(),
+            )
+        })?;
+
+    Ok(CompanionRequest {
+        request_id,
+        command,
+        payload: object.get("payload").cloned(),
+    })
+}
+
+fn dispatch_companion_request(request: CompanionRequest) -> CompanionResponse {
+    let CompanionRequest {
+        request_id,
+        command,
+        payload,
+    } = request;
+
+    let result = match command.as_str() {
+        "print_bridge_status" => serialize_companion_result(Ok(print_bridge_status())),
+        "search_audit_log" => serialize_companion_result(
+            parse_optional_payload(payload).and_then(search_audit_log),
+        ),
+        "export_audit_ledger" => serialize_companion_result(
+            parse_optional_payload(payload).and_then(export_audit_ledger),
+        ),
+        "list_audit_backup_bundles" => serialize_companion_result(list_audit_backup_bundles()),
+        "load_batch_queue_snapshot" => serialize_companion_result(load_batch_queue_snapshot()),
+        "approve_proof" => serialize_companion_result(parse_required_payload(payload).and_then(
+            approve_proof,
+        )),
+        "reject_proof" => serialize_companion_result(parse_required_payload(payload).and_then(
+            reject_proof,
+        )),
+        "preview_template_draft" => serialize_companion_result(parse_required_payload(payload).and_then(
+            preview_template_draft,
+        )),
+        "template_catalog_command" => serialize_companion_result(template_catalog_command()),
+        "template_catalog_governance_command" => {
+            serialize_companion_result(template_catalog_governance_command())
+        }
+        _ => Err(CompanionError {
+            code: "unknown_command",
+            message: format!("unsupported companion command '{command}'"),
+        }),
+    };
+
+    match result {
+        Ok(value) => CompanionResponse {
+            request_id,
+            ok: true,
+            result: Some(value),
+            error: None,
+        },
+        Err(error) => CompanionResponse {
+            request_id,
+            ok: false,
+            result: None,
+            error: Some(error),
+        },
+    }
+}
+
+fn serialize_companion_result<T>(result: Result<T, String>) -> Result<Value, CompanionError>
+where
+    T: Serialize,
+{
+    result
+        .map_err(|message| CompanionError {
+            code: "command_failed",
+            message,
+        })
+        .and_then(|value| {
+            serde_json::to_value(value).map_err(|error| CompanionError {
+                code: "serialization_failed",
+                message: format!("failed to serialize companion result: {error}"),
+            })
+        })
+}
+
+fn parse_optional_payload<T>(payload: Option<Value>) -> Result<Option<T>, String>
+where
+    T: DeserializeOwned,
+{
+    match payload {
+        Some(Value::Null) => Ok(None),
+        Some(value) => serde_json::from_value(value)
+            .map(Some)
+            .map_err(|error| format!("invalid payload: {error}")),
+        None => Ok(None),
+    }
+}
+
+fn parse_required_payload<T>(payload: Option<Value>) -> Result<T, String>
+where
+    T: DeserializeOwned,
+{
+    let value = payload.ok_or_else(|| "payload is required".to_string())?;
+    serde_json::from_value(value).map_err(|error| format!("invalid payload: {error}"))
+}
+
+fn companion_error_response(
+    request_id: String,
+    code: &'static str,
+    message: String,
+) -> CompanionResponse {
+    CompanionResponse {
+        request_id,
+        ok: false,
+        result: None,
+        error: Some(CompanionError { code, message }),
+    }
+}
+
 fn main() {
+    if env::args().any(|argument| argument == "--native-shell-companion") {
+        if let Err(error) = run_native_shell_companion() {
+            eprintln!("desktop-shell companion failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+
     tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             dispatch_print_job,
@@ -2183,6 +2622,9 @@ fn main() {
             trim_audit_ledger,
             list_audit_backup_bundles,
             restore_audit_backup_bundle,
+            load_batch_queue_snapshot,
+            save_batch_queue_snapshot,
+            clear_batch_queue_snapshot,
             approve_proof,
             reject_proof,
             template_catalog_command,
@@ -2199,14 +2641,17 @@ fn main() {
 #[cfg(test)]
 mod tests {
     use super::{
-        available_adapters_for_host, dispatch_print_job, export_audit_ledger,
-        list_audit_backup_bundles, preview_template_draft, resolve_optional_env, resolve_output_dir,
+        available_adapters_for_host, clear_batch_queue_snapshot, dispatch_companion_request,
+        dispatch_print_job, export_audit_ledger, list_audit_backup_bundles,
+        load_batch_queue_snapshot, preview_template_draft, resolve_optional_env, resolve_output_dir,
         resolve_print_adapter_for_host, resolve_print_adapter_with_warning_for_host,
-        sanitize_path_component, save_template_to_local_catalog, template_catalog_command,
+        parse_companion_request, run_native_shell_companion_with_io, sanitize_path_component,
+        save_batch_queue_snapshot, save_template_to_local_catalog, template_catalog_command,
         template_catalog_governance_command, trim_audit_ledger, TemplateCatalogWritebackRequest,
-        BridgePrintAdapter, PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
-        TemplateDraftPreviewSample,
-        ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR, ENV_PRINT_ADAPTER,
+        BatchQueueSnapshotRecord, BatchQueueRowRecord, BridgePrintAdapter, CompanionRequest,
+        PrintBridgeConfig, PrintBridgeStatus, TemplateDraftPreviewRequest,
+        TemplateDraftPreviewSample, ENV_ALLOW_PRINT_WITHOUT_PROOF, ENV_AUDIT_LOG_DIR,
+        ENV_BATCH_QUEUE_SNAPSHOT_PATH, ENV_PRINT_ADAPTER,
         ENV_PRINT_OUTPUT_DIR, ENV_SPOOL_OUTPUT_DIR, ENV_TEMPLATE_OVERLAY_DIR,
         ENV_WINDOWS_PRINTER_NAME, ENV_ZINT_BINARY_PATH,
     };
@@ -2219,6 +2664,7 @@ mod tests {
     use print_agent::{DispatchPrinterProfile, DispatchRequest, ExecutionIntent, PrintExecution};
     #[cfg(unix)]
     use std::os::unix::fs::PermissionsExt;
+    use std::io::Cursor;
     use std::{env, fs, path::{Path, PathBuf}, sync::Mutex};
 
     static TEST_MUTEX: Mutex<()> = Mutex::new(());
@@ -2227,6 +2673,438 @@ mod tests {
     fn sanitize_path_component_replaces_path_controls() {
         let sanitized = sanitize_path_component("A/B\\C\0D");
         assert_eq!(sanitized, "A_B_C_D");
+    }
+
+    #[test]
+    fn companion_dispatches_print_bridge_status_with_camel_case_result() {
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-1".to_string(),
+            command: "print_bridge_status".to_string(),
+            payload: None,
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-1");
+        let result = response.result.expect("companion result should be present");
+        assert!(result.get("resolvedZintPath").is_some());
+        assert!(result.get("resolved_zint_path").is_none());
+    }
+
+    #[test]
+    fn companion_rejects_unknown_command_with_structured_error() {
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-2".to_string(),
+            command: "unsupported".to_string(),
+            payload: None,
+        });
+
+        assert!(!response.ok);
+        let error = response.error.expect("error should be present");
+        assert_eq!(error.code, "unknown_command");
+        assert!(error.message.contains("unsupported"));
+    }
+
+    #[test]
+    fn companion_parse_preserves_request_id_for_contract_errors() {
+        let response = parse_companion_request(r#"{"requestId":"req-parse","payload":{}}"#)
+            .expect_err("missing command should fail validation");
+
+        assert_eq!(response.request_id, "req-parse");
+        let error = response.error.expect("validation error should be present");
+        assert_eq!(error.code, "invalid_request");
+        assert!(error.message.contains("command"));
+    }
+
+    #[test]
+    fn companion_parse_requires_non_empty_request_id() {
+        let response = parse_companion_request(r#"{"requestId":"","command":"print_bridge_status"}"#)
+            .expect_err("empty request id should fail validation");
+
+        assert_eq!(response.request_id, "unknown");
+        let error = response.error.expect("validation error should be present");
+        assert_eq!(error.code, "invalid_request");
+        assert!(error.message.contains("requestId"));
+    }
+
+    #[test]
+    fn companion_parse_rejects_invalid_json() {
+        let response = parse_companion_request("{")
+            .expect_err("invalid json should fail validation");
+
+        assert_eq!(response.request_id, "unknown");
+        let error = response.error.expect("validation error should be present");
+        assert_eq!(error.code, "invalid_request");
+        assert!(error.message.contains("failed to parse"));
+    }
+
+    #[test]
+    fn companion_parse_rejects_non_string_command() {
+        let response = parse_companion_request(r#"{"requestId":"req-type","command":42}"#)
+            .expect_err("non-string command should fail validation");
+
+        assert_eq!(response.request_id, "req-type");
+        let error = response.error.expect("validation error should be present");
+        assert_eq!(error.code, "invalid_request");
+        assert!(error.message.contains("command"));
+    }
+
+    #[test]
+    fn companion_stdio_round_trip_returns_print_bridge_status() {
+        let request = r#"{"requestId":"req-3","command":"print_bridge_status"}"#;
+        let reader = Cursor::new(format!("{request}\n"));
+        let mut writer = Vec::new();
+
+        run_native_shell_companion_with_io(reader, &mut writer)
+            .expect("companion stdio loop should process the request");
+
+        let response_text = String::from_utf8(writer).expect("response should be valid utf-8");
+        let response_line = response_text
+            .lines()
+            .next()
+            .expect("response should include a json line");
+        let response: serde_json::Value =
+            serde_json::from_str(response_line).expect("response line should parse as json");
+
+        assert_eq!(response.get("requestId").and_then(|value| value.as_str()), Some("req-3"));
+        assert_eq!(response.get("ok").and_then(|value| value.as_bool()), Some(true));
+        assert!(response
+            .get("result")
+            .and_then(|value| value.get("printAdapterKind"))
+            .is_some());
+    }
+
+    #[test]
+    fn companion_stdio_round_trip_preserves_order_for_multiple_requests() {
+        let requests = [
+            r#"{"requestId":"req-a","command":"print_bridge_status"}"#,
+            r#"{"requestId":"req-b","command":"template_catalog_command"}"#,
+        ]
+        .join("\n");
+        let reader = Cursor::new(format!("{requests}\n"));
+        let mut writer = Vec::new();
+
+        run_native_shell_companion_with_io(reader, &mut writer)
+            .expect("companion stdio loop should process multiple requests");
+
+        let response_lines = String::from_utf8(writer)
+            .expect("response should be valid utf-8")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("line should parse"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(response_lines.len(), 2);
+        assert_eq!(
+            response_lines[0].get("requestId").and_then(|value| value.as_str()),
+            Some("req-a")
+        );
+        assert_eq!(
+            response_lines[1].get("requestId").and_then(|value| value.as_str()),
+            Some("req-b")
+        );
+        assert!(response_lines[1]
+            .get("result")
+            .and_then(|value| value.get("defaultTemplateVersion"))
+            .is_some());
+    }
+
+    #[test]
+    fn companion_stdio_round_trip_preserves_order_with_interleaved_parse_failure() {
+        let requests = [
+            r#"{"requestId":"req-good-a","command":"print_bridge_status"}"#,
+            r#"{"requestId":"req-bad","command":99}"#,
+            r#"{"requestId":"req-good-b","command":"template_catalog_governance_command"}"#,
+        ]
+        .join("\n");
+        let reader = Cursor::new(format!("{requests}\n"));
+        let mut writer = Vec::new();
+
+        run_native_shell_companion_with_io(reader, &mut writer)
+            .expect("companion stdio loop should process mixed-validity requests");
+
+        let response_lines = String::from_utf8(writer)
+            .expect("response should be valid utf-8")
+            .lines()
+            .map(|line| serde_json::from_str::<serde_json::Value>(line).expect("line should parse"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(response_lines.len(), 3);
+        assert_eq!(
+            response_lines[0].get("requestId").and_then(|value| value.as_str()),
+            Some("req-good-a")
+        );
+        assert_eq!(
+            response_lines[1].get("requestId").and_then(|value| value.as_str()),
+            Some("req-bad")
+        );
+        assert_eq!(
+            response_lines[2].get("requestId").and_then(|value| value.as_str()),
+            Some("req-good-b")
+        );
+        assert_eq!(response_lines[1].get("ok").and_then(|value| value.as_bool()), Some(false));
+        assert_eq!(
+            response_lines[1]
+                .get("error")
+                .and_then(|value| value.get("code"))
+                .and_then(|value| value.as_str()),
+            Some("invalid_request")
+        );
+        assert!(response_lines[2]
+            .get("result")
+            .and_then(|value| value.get("manifestStatus"))
+            .is_some());
+    }
+
+    #[test]
+    fn companion_required_payload_command_returns_request_scoped_error() {
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-4".to_string(),
+            command: "preview_template_draft".to_string(),
+            payload: None,
+        });
+
+        assert!(!response.ok);
+        assert_eq!(response.request_id, "req-4");
+        let error = response.error.expect("error should be present");
+        assert_eq!(error.code, "command_failed");
+        assert!(error.message.contains("payload is required"));
+    }
+
+    #[test]
+    fn companion_dispatches_search_audit_log_with_optional_payload() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-companion-search-command");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-SEARCH-COMPANION-001",
+                "print",
+                "2026-04-17T09:00:00Z",
+                None,
+            ))
+            .expect("dispatch should persist");
+
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-search".to_string(),
+            command: "search_audit_log".to_string(),
+            payload: Some(serde_json::json!({
+                "searchText": "JOB-SEARCH-COMPANION-001",
+                "limit": 1
+            })),
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-search");
+        let result = response.result.expect("search result should be present");
+        assert_eq!(
+            result
+                .get("entries")
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
+        );
+        assert_eq!(
+            result["entries"][0]["dispatch"]["audit"]["jobId"].as_str(),
+            Some("JOB-SEARCH-COMPANION-001")
+        );
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn companion_dispatches_export_audit_ledger_with_scope_payload() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-companion-export-command");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .register_pending_proof(sample_pending_proof_record("JOB-EXPORT-COMPANION-001"))
+            .expect("proof should persist");
+        store
+            .record_dispatch(sample_dispatch_record(
+                "JOB-EXPORT-COMPANION-001",
+                "proof",
+                "2026-04-17T09:05:00Z",
+                None,
+            ))
+            .expect("proof dispatch should persist");
+
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-export".to_string(),
+            command: "export_audit_ledger".to_string(),
+            payload: Some(serde_json::json!({
+                "scope": "proof"
+            })),
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-export");
+        let result = response.result.expect("export result should be present");
+        assert_eq!(result.get("scope").and_then(|value| value.as_str()), Some("proof"));
+        assert_eq!(result.get("dispatchCount").and_then(|value| value.as_u64()), Some(0));
+        assert_eq!(result.get("proofCount").and_then(|value| value.as_u64()), Some(1));
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn companion_dispatches_approve_proof_with_review_payload() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[
+            ENV_AUDIT_LOG_DIR,
+            ENV_PRINT_OUTPUT_DIR,
+            ENV_SPOOL_OUTPUT_DIR,
+        ]);
+        let root = env::temp_dir().join("jan-label-companion-approve-command");
+        let _ = fs::remove_dir_all(&root);
+        let audit_log_dir = root.join("audit");
+        env::set_var(ENV_AUDIT_LOG_DIR, &audit_log_dir);
+        env::set_var(ENV_PRINT_OUTPUT_DIR, root.join("proofs"));
+        env::set_var(ENV_SPOOL_OUTPUT_DIR, root.join("spool"));
+
+        let store = AuditStore::new(audit_log_dir.clone());
+        store
+            .register_pending_proof(sample_pending_proof_record("JOB-APPROVE-COMPANION-001"))
+            .expect("proof should persist");
+
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-approve".to_string(),
+            command: "approve_proof".to_string(),
+            payload: Some(serde_json::json!({
+                "proofJobId": "JOB-APPROVE-COMPANION-001",
+                "actorUserId": "native-shell",
+                "actorDisplayName": "Native Shell",
+                "decidedAt": "2026-04-17T09:10:00Z",
+                "notes": "approve via companion"
+            })),
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-approve");
+        let result = response.result.expect("proof result should be present");
+        assert_eq!(result.get("status").and_then(|value| value.as_str()), Some("approved"));
+        assert_eq!(
+            result["decision"]["actor"]["userId"].as_str(),
+            Some("native-shell")
+        );
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn companion_dispatches_template_catalog_governance_command() {
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-governance".to_string(),
+            command: "template_catalog_governance_command".to_string(),
+            payload: None,
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-governance");
+        let result = response.result.expect("governance result should be present");
+        assert!(result.get("manifestStatus").is_some());
+        assert!(result.get("overlayDirectoryPath").is_some());
+    }
+
+    #[test]
+    fn batch_queue_snapshot_commands_round_trip_shared_snapshot() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_BATCH_QUEUE_SNAPSHOT_PATH]);
+        let root = env::temp_dir().join("jan-label-batch-queue-snapshot-round-trip");
+        let _ = fs::remove_dir_all(&root);
+        let snapshot_path = root.join("batch-queue-snapshot.json");
+        env::set_var(ENV_BATCH_QUEUE_SNAPSHOT_PATH, &snapshot_path);
+
+        let saved = save_batch_queue_snapshot(sample_batch_queue_snapshot())
+            .expect("save batch queue snapshot should succeed");
+        assert!(saved.present);
+        assert_eq!(saved.file_path, snapshot_path.to_string_lossy());
+        assert_eq!(
+            saved.snapshot
+                .as_ref()
+                .expect("saved snapshot should be present")
+                .queue_rows
+                .len(),
+            1
+        );
+
+        let loaded = load_batch_queue_snapshot().expect("load batch queue snapshot should succeed");
+        assert!(loaded.present);
+        let snapshot = loaded.snapshot.expect("loaded snapshot should be present");
+        assert_eq!(snapshot.snapshot_id, "batch-session-001");
+        assert_eq!(snapshot.queue_rows[0].submission_status, "ready");
+        assert_eq!(
+            snapshot.queue_rows[0]
+                .draft
+                .get("jobId")
+                .and_then(|value| value.as_str()),
+            Some("BATCH-JOB-001")
+        );
+
+        let cleared = clear_batch_queue_snapshot().expect("clear batch queue snapshot should succeed");
+        assert!(!cleared.present);
+        assert!(!snapshot_path.exists());
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn companion_dispatches_load_batch_queue_snapshot() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let backup = backup_env_vars(&[ENV_BATCH_QUEUE_SNAPSHOT_PATH]);
+        let root = env::temp_dir().join("jan-label-companion-batch-snapshot");
+        let _ = fs::remove_dir_all(&root);
+        let snapshot_path = root.join("batch-queue-snapshot.json");
+        env::set_var(ENV_BATCH_QUEUE_SNAPSHOT_PATH, &snapshot_path);
+
+        save_batch_queue_snapshot(sample_batch_queue_snapshot())
+            .expect("save batch queue snapshot should succeed");
+
+        let response = dispatch_companion_request(CompanionRequest {
+            request_id: "req-batch-snapshot".to_string(),
+            command: "load_batch_queue_snapshot".to_string(),
+            payload: None,
+        });
+
+        assert!(response.ok);
+        assert_eq!(response.request_id, "req-batch-snapshot");
+        let result = response.result.expect("batch snapshot result should be present");
+        assert_eq!(result.get("present").and_then(|value| value.as_bool()), Some(true));
+        assert_eq!(
+            result
+                .get("snapshot")
+                .and_then(|value| value.get("queueRows"))
+                .and_then(|value| value.as_array())
+                .map(Vec::len),
+            Some(1)
+        );
+
+        restore_env_vars(backup);
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]
@@ -2401,8 +3279,8 @@ mod tests {
         assert_eq!(created.default_template_version, "overlay-writeback@v1");
         assert!(catalog.templates.iter().any(|entry| entry.version == "overlay-writeback@v1"));
         assert_eq!(catalog.default_template_version, "overlay-writeback@v1");
-        assert_eq!(Path::new(&created.template_path).exists(), true);
-        assert_eq!(Path::new(&created.manifest_path).exists(), true);
+        assert!(Path::new(&created.template_path).exists());
+        assert!(Path::new(&created.manifest_path).exists());
 
         let updated = save_template_to_local_catalog(TemplateCatalogWritebackRequest {
             template_source: r##"
@@ -3677,6 +4555,59 @@ mod tests {
             format!("proofs/{job_id}-proof.pdf"),
             Some("review".to_string()),
         )
+    }
+
+    fn sample_batch_queue_snapshot() -> BatchQueueSnapshotRecord {
+        BatchQueueSnapshotRecord {
+            schema_version: "batch-queue-snapshot-v1".to_string(),
+            snapshot_id: "batch-session-001".to_string(),
+            captured_at: "2026-04-17T10:00:00Z".to_string(),
+            updated_at: "2026-04-17T10:05:00Z".to_string(),
+            source_file_name: Some("batch.xlsx".to_string()),
+            source_kind: Some("xlsx".to_string()),
+            actor: "ops.user".to_string(),
+            submit_phase: "idle".to_string(),
+            submit_message: "Ready to submit.".to_string(),
+            queue_rows: vec![BatchQueueRowRecord {
+                row_index: 0,
+                draft: serde_json::json!({
+                    "jobId": "BATCH-JOB-001",
+                    "parentSku": "PARENT-001",
+                    "sku": "SKU-001",
+                    "jan": {
+                        "raw": "4901234567894",
+                        "normalized": "4901234567894",
+                        "source": "import"
+                    },
+                    "qty": 24,
+                    "brand": "JAN-LAB",
+                    "template": {
+                        "id": "basic-50x30",
+                        "version": "v1"
+                    },
+                    "printerProfile": {
+                        "id": "pdf-proof",
+                        "adapter": "pdf",
+                        "paperSize": "50x30mm",
+                        "dpi": 300,
+                        "scalePolicy": "fixed-100"
+                    },
+                    "execution": {
+                        "mode": "print",
+                        "approvedBy": "ops.manager",
+                        "approvedAt": "2026-04-17T09:59:00Z",
+                        "sourceProofJobId": "PROOF-BATCH-001",
+                        "allowWithoutProof": false
+                    },
+                    "actor": "ops.user",
+                    "requestedAt": "2026-04-17T10:00:00Z"
+                }),
+                submission_status: "ready".to_string(),
+                retry_lineage_job_id: None,
+                dispatch_error: None,
+                dispatch_result: None,
+            }],
+        }
     }
 
     fn create_fake_zint(root: &Path) -> PathBuf {

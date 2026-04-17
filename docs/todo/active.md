@@ -47,12 +47,11 @@ Priority order for post-`v0.1.2` branch work.
 | T-041 | P2 | done | Codex + Sub-Agent | Local template catalog governance hardening | Catalog lane exposes backup/restore guidance, manifest repair guidance, local overlay diagnostics, and explicit single-writer operating rules |
 | T-044 | P2 | done | Codex + Sub-Agent | Audit transaction hardening | Proof dispatch commits through a recovery marker, stale markers auto-recover on locked audit access, corrupt markers are quarantined for manual reconcile, and command-level proof dispatch coverage exists |
 | T-042 | P2 | done | Codex | Template library operator UX | `apps/windows-shell` now exposes a reusable template-library board where operators can browse, select, and reason about packaged vs local templates, default winner, draft-only state, dispatch safety, and rollback path with less ambiguity |
+| T-049 | P1 | done | Codex | Windows-native workstation shell migration | `apps/windows-shell` uses package-backed Windows shell primitives (`Fluent.Ribbon`, `Dirkster.AvalonDock`, `PropertyTools.Wpf`), builds on GitHub Windows runners, installer previews can be published from CI artifacts, the shell exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History`, shell actions land on the relevant template/object/proof/job/batch/bundle context, shared shell chrome follows the active in-lane selection, the shell headline reflects the focused work item, companion-backed read + safe ops are live for bridge/catalog/governance/preview/proof/audit state plus proof approve/reject and audit export, proof-review lanes do not silently truncate pending companion-backed review items, optional shared batch snapshot failures degrade only the Batch Jobs lane instead of the whole shell, companion packaging/validation proves a usable `desktop-shell` binary is present, focused `windows-shell` tests cover companion snapshot isolation and lane mapping, and direct print, restore, retention apply, template write-back, and direct batch mutation remain explicitly outside WPF for `v0.3.0` |
 
 ## Now
 
-| id | priority | status | owner | task | done when |
-| --- | --- | --- | --- | --- | --- |
-| T-049 | P1 | in-progress | Codex | Windows-native workstation shell migration | `apps/windows-shell` uses package-backed Windows shell primitives (`Fluent.Ribbon`, `Dirkster.AvalonDock`, `PropertyTools.Wpf`), builds on GitHub Windows runners, installer previews can be published from CI artifacts, and the shell now exposes module-aware operator workspaces for `Home`, `Designer`, `Print Console`, `Batch Jobs`, and `History` while backend command parity is still landing |
+None. `T-049` is complete; the formal release gate now moves to `T-045d`.
 
 ## Next
 

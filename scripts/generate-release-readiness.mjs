@@ -110,6 +110,21 @@ function runCommandWithArtifact(command, artifactPath, options) {
   };
 }
 
+function requireArtifact(result, artifactPath, missingMessage) {
+  if (result.ok && !fs.existsSync(artifactPath)) {
+    return {
+      ...result,
+      ok: false,
+      output: `${result.output}\n${missingMessage}: ${artifactPath}`.trim(),
+    };
+  }
+
+  return {
+    ...result,
+    artifactPath,
+  };
+}
+
 function skippedCheck(command, output) {
   return {
     command,
@@ -162,6 +177,62 @@ function releaseNotesStatus(notesPath, version) {
   };
 }
 
+function versionCheck(command, ok, output) {
+  return {
+    command,
+    ok,
+    code: ok ? 0 : 1,
+    output,
+    retryAttempted: false,
+    blocked: null,
+  };
+}
+
+function readJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, "utf8"));
+}
+
+function desktopShellVersionAlignment(expectedVersion) {
+  const normalizedExpectedVersion = expectedVersion.startsWith("v")
+    ? expectedVersion.slice(1)
+    : expectedVersion;
+  const packageJsonPath = path.join(process.cwd(), "apps", "desktop-shell", "package.json");
+  const tauriConfigPath = path.join(
+    process.cwd(),
+    "apps",
+    "desktop-shell",
+    "src-tauri",
+    "tauri.conf.json",
+  );
+  const cargoTomlPath = path.join(
+    process.cwd(),
+    "apps",
+    "desktop-shell",
+    "src-tauri",
+    "Cargo.toml",
+  );
+
+  const packageVersion = readJson(packageJsonPath).version;
+  const tauriVersion = readJson(tauriConfigPath).version;
+  const cargoToml = fs.readFileSync(cargoTomlPath, "utf8");
+  const cargoVersionMatch = cargoToml.match(/^version = "([^"]+)"$/m);
+  const cargoVersion = cargoVersionMatch?.[1] ?? "<missing>";
+  const ok =
+    packageVersion === normalizedExpectedVersion &&
+    tauriVersion === normalizedExpectedVersion &&
+    cargoVersion === normalizedExpectedVersion;
+
+  return versionCheck(
+    `desktop-shell version metadata matches ${expectedVersion}`,
+    ok,
+    [
+      `package.json: ${packageVersion}`,
+      `tauri.conf.json: ${tauriVersion}`,
+      `Cargo.toml: ${cargoVersion}`,
+    ].join("\n"),
+  );
+}
+
 function statusLabel(check) {
   if (check.ok) {
     return "pass";
@@ -180,6 +251,7 @@ const args = parseArgs(process.argv.slice(2));
 const version = normalizeVersion(args.get("version"));
 const readinessOutputDir = path.join(process.cwd(), "artifacts");
 fs.mkdirSync(readinessOutputDir, { recursive: true });
+const desktopShellVersionStatus = desktopShellVersionAlignment(version);
 
 const validations = [
   "pnpm fixture:validate",
@@ -197,6 +269,16 @@ const validations = [
   }),
 );
 
+const nativeShellTests =
+  process.platform === "win32"
+    ? runCommand(
+        "dotnet test apps/windows-shell-tests/JanLabel.WindowsShell.Tests.csproj -c Release",
+      )
+    : skippedCheck(
+        "dotnet test apps/windows-shell-tests/JanLabel.WindowsShell.Tests.csproj -c Release",
+        "Windows native shell tests are only available on Windows hosts.",
+      );
+
 const desktopBuild =
   process.platform === "win32"
     ? runCommand("pnpm --filter @label/desktop-shell build --ci --no-sign")
@@ -209,6 +291,20 @@ const nativeShellBuildCommand =
   "dotnet build apps/windows-shell/JanLabel.WindowsShell.csproj -c Release";
 const nativeShellPublishCommand =
   "dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true";
+const nativeShellPublishOutputDir = path.join(
+  process.cwd(),
+  "apps",
+  "windows-shell",
+  "bin",
+  "Release",
+  "net8.0-windows",
+  "win-x64",
+  "publish",
+);
+const nativeShellCompanionArtifactPath = path.join(
+  nativeShellPublishOutputDir,
+  "desktop-shell.exe",
+);
 const nativeShellInstallerOutputDir = path.join(process.cwd(), "apps", "windows-shell", "dist");
 const nativeShellInstallerBaseFilename = `JAN-Label_windows-native-shell_${version}`;
 const nativeShellInstallerArtifactPath = path.join(
@@ -227,7 +323,11 @@ const nativeShellBuild =
 
 const nativeShellPublish =
   process.platform === "win32"
-    ? runCommand(nativeShellPublishCommand)
+    ? requireArtifact(
+        runCommand(nativeShellPublishCommand),
+        nativeShellCompanionArtifactPath,
+        "Expected companion binary was not staged into the native-shell publish output",
+      )
     : skippedCheck(
         nativeShellPublishCommand,
         "Windows native shell publish check is only available on Windows hosts.",
@@ -253,7 +353,9 @@ const nowRows = sectionNowRows(activeTodo);
 const nowTasksEmpty = nowRows.length === 0;
 
 const requiredChecks = [
+  desktopShellVersionStatus,
   ...validations,
+  nativeShellTests,
   desktopBuild,
   nativeShellBuild,
   nativeShellPublish,
@@ -275,6 +377,11 @@ const report = {
   nowTasksEmpty,
   nowTaskCount: nowRows.length,
   releaseNotesDraft: notes,
+  desktopShellVersionAlignment: {
+    command: desktopShellVersionStatus.command,
+    ok: desktopShellVersionStatus.ok,
+    output: desktopShellVersionStatus.output,
+  },
   validations: validations.map((item) => ({
     command: item.command,
     ok: item.ok,
@@ -282,6 +389,13 @@ const report = {
     retryAttempted: item.retryAttempted,
     output: item.output,
   })),
+  windowsNativeShellTests: {
+    command: nativeShellTests.command,
+    ok: Boolean(nativeShellTests.ok),
+    blocked: nativeShellTests.blocked,
+    skipped: Boolean(nativeShellTests.skipped),
+    output: nativeShellTests.output,
+  },
   windowsDesktopBuild: {
     command: desktopBuild.command,
     ok: Boolean(desktopBuild.ok),
@@ -302,6 +416,7 @@ const report = {
       ok: Boolean(nativeShellPublish.ok),
       blocked: nativeShellPublish.blocked,
       skipped: Boolean(nativeShellPublish.skipped),
+      artifactPath: nativeShellPublish.artifactPath ?? nativeShellCompanionArtifactPath,
       output: nativeShellPublish.output,
     },
     installer: {
@@ -329,12 +444,14 @@ const markdown = `# Release Readiness ${version}
 
 ## Validation Commands
 
+- ${desktopShellVersionStatus.ok ? "[pass]" : "[fail]"} \`${desktopShellVersionStatus.command}\`
 ${report.validations
   .map(
     (item) =>
       `- ${item.ok ? "[pass]" : item.blocked ? "[blocked]" : "[fail]"} \`${item.command}\`${item.retryAttempted ? " (retried once)" : ""}${item.blocked ? ` - ${item.blocked}` : ""}`,
   )
   .join("\n")}
+- ${nativeShellTests.ok ? "[pass]" : nativeShellTests.blocked ? "[blocked]" : "[fail]"} \`${nativeShellTests.command}\`${nativeShellTests.blocked ? ` - ${nativeShellTests.blocked}` : ""}
 
 ## Release Notes Draft
 
@@ -350,7 +467,9 @@ ${report.validations
 
 - Build: ${statusLabel(nativeShellBuild)}${nativeShellBuild.blocked ? ` (${nativeShellBuild.blocked})` : ""}
 - Publish: ${statusLabel(nativeShellPublish)}${nativeShellPublish.blocked ? ` (${nativeShellPublish.blocked})` : ""}
+- Companion binary in publish output: ${nativeShellPublish.ok ? "pass" : "fail"}
 - Installer: ${statusLabel(nativeShellInstaller)}${nativeShellInstaller.blocked ? ` (${nativeShellInstaller.blocked})` : ""}
+- Companion artifact: ${nativeShellPublish.artifactPath ?? nativeShellCompanionArtifactPath}
 - Installer artifact: ${nativeShellInstaller.artifactPath ?? nativeShellInstallerArtifactPath}
 
 ## Remaining Now Tasks

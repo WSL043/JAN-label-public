@@ -36,6 +36,10 @@ Rules:
   - transitional web/Tauri operator path
   - Windows-native WPF shell path
 - Release packaging remains on the current `desktop-shell` path until the native shell is wired into backend commands.
+- Backend parity for `v0.3.0` should use the existing `desktop-shell` binary as a host:
+  - add a `--native-shell-companion` stdio JSON mode on the same Rust/Tauri executable
+  - keep `apps/desktop-shell` as the sole authority for proof/print gate, audit restore, and template catalog resolution
+  - expose read + safe operations to WPF first instead of forking business logic into a second backend path
 - Future operator UX work should target the WPF shell first for shell language decisions, then backport only what is required to keep the transitional web path usable.
 - The native shell should not remain a placeholder chrome mock. Its baseline should include a practical label-designer frame:
   - left toolbox and object browser
@@ -56,6 +60,8 @@ Rules:
   - current authority should be visible without opening another pane
   - blockers should be legible in the current lane
   - route / proof / catalog state should remain visible in shared shell chrome
+  - shared shell chrome should follow the current in-lane selection, not only the active module default
+  - the shell title and lead text should describe the current focused work item when a lane selection exists
 - Template-library reasoning should not be hidden behind designer state alone:
   - `Home` and `Designer` should expose the same packaged-vs-local library board language
   - the winning default, draft-only state, dispatch eligibility, and rollback path should be visible from a single selection panel
@@ -63,6 +69,15 @@ Rules:
   - selecting a proof, dispatch job, import session, backup bundle, or ledger row should update blocker, route, and next-action context in place
   - lane focus should help an operator decide what to do next without scanning a separate document or modal first
 - Shell actions may route operators to the appropriate lane for review, but that routing must not imply backend authority moved out of `apps/desktop-shell`
+- Shell actions should also prefer landing on the relevant in-lane object, not only the target module:
+  - template and overlay actions should focus the relevant template entry
+  - proof, queue, and restore actions should focus the relevant proof, job, batch, bundle, or audit row
+  - designer actions should focus the relevant canvas object when a reasonable default exists
+- Native-shell parity should move through explicit release scope instead of silently implying full backend ownership:
+  - `Home`, `Designer`, `Print Console`, and `History` may read live desktop-shell state through the companion path
+  - `Print Console` should describe an audit-derived proof / dispatch subject view, not imply a native-shell-owned live queue
+  - safe mutations for `v0.3.0` are limited to proof approve/reject and audit export
+  - direct print dispatch, audit restore, destructive retention apply, and template write-back remain out of scope for direct WPF execution in `v0.3.0`
 - Formal release automation should validate more than shell compilation:
   - native-shell build
   - self-contained publish

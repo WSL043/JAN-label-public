@@ -34,6 +34,53 @@
     <Setter Property="Margin" Value="0,0,0,8" />
   </Style>
 
+  <Style x:Key="WorksurfaceTabControlStyle" TargetType="TabControl">
+    <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+    <Setter Property="BorderBrush" Value="{StaticResource PanelEdgeBrush}" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Padding" Value="0" />
+  </Style>
+
+  <Style x:Key="PaneGridSplitterStyle" TargetType="GridSplitter">
+    <Setter Property="Background" Value="#D0D8E1" />
+    <Setter Property="ShowsPreview" Value="True" />
+    <Setter Property="HorizontalAlignment" Value="Stretch" />
+    <Setter Property="VerticalAlignment" Value="Stretch" />
+  </Style>
+
+  <Style x:Key="OperatorDataGridStyle" TargetType="DataGrid">
+    <Setter Property="AutoGenerateColumns" Value="False" />
+    <Setter Property="IsReadOnly" Value="True" />
+    <Setter Property="CanUserAddRows" Value="False" />
+    <Setter Property="CanUserDeleteRows" Value="False" />
+    <Setter Property="CanUserResizeRows" Value="False" />
+    <Setter Property="HeadersVisibility" Value="Column" />
+    <Setter Property="SelectionMode" Value="Single" />
+    <Setter Property="SelectionUnit" Value="FullRow" />
+    <Setter Property="AlternatingRowBackground" Value="#F7FAFD" />
+    <Setter Property="GridLinesVisibility" Value="Horizontal" />
+    <Setter Property="BorderBrush" Value="#CCD5DE" />
+    <Setter Property="BorderThickness" Value="1" />
+    <Setter Property="Background" Value="#FFFFFF" />
+    <Setter Property="RowHeaderWidth" Value="0" />
+    <Setter Property="Margin" Value="0,8,0,0" />
+  </Style>
+
+  <Style TargetType="DataGridColumnHeader">
+    <Setter Property="Background" Value="#EEF3F8" />
+    <Setter Property="BorderBrush" Value="#D0D8E1" />
+    <Setter Property="BorderThickness" Value="0,0,1,1" />
+    <Setter Property="Foreground" Value="#607081" />
+    <Setter Property="FontWeight" Value="SemiBold" />
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
+  <Style TargetType="DataGridCell">
+    <Setter Property="BorderBrush" Value="#E1E7EE" />
+    <Setter Property="BorderThickness" Value="0,0,0,1" />
+    <Setter Property="Padding" Value="8,6" />
+  </Style>
+
   <Style x:Key="SelectableItemStyle" TargetType="ListBoxItem">
     <Setter Property="Padding" Value="8" />
     <Setter Property="Margin" Value="0,0,0,4" />
@@ -140,7 +187,7 @@
           <StackPanel>
             <DockPanel>
               <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Entries" />
-              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="packaged / local / draft" />
+              <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding EntrySummary}" />
             </DockPanel>
             <ListBox
                 Margin="0,8,0,0"

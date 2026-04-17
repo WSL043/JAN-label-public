@@ -117,6 +117,20 @@
 - impact: `pnpm release:readiness --version <version>` can classify native-shell installer generation as `blocked` on hosts that can build/publish WPF but do not have `ISCC.exe`
 - response: use GitHub Actions Windows runners or install Inno Setup locally only when native-shell installer generation must run on the workstation
 
+## K-037 native-shell live parity now depends on a desktop-shell binary being available locally
+- status: watch
+- impact: `apps/windows-shell` now launches `apps/desktop-shell --native-shell-companion` for live bridge/catalog/governance/preview/proof/audit/bundle/shared-batch state; if no recent `desktop-shell.exe` is available, WPF falls back to seeded shell state and reports companion refresh failure
+- response: build `apps/desktop-shell/src-tauri` locally or set `JAN_LABEL_DESKTOP_SHELL_BINARY` explicitly when validating native-shell live parity; publish/install outputs now stage `desktop-shell.exe` when the companion has been built, but GitHub runner validation still needs to keep that packaging path green
+
+## K-038 native-shell designer actions still overstate editing parity
+- status: resolved
+- resolution: placeholder `apps/windows-shell` designer commands are now explicitly disabled until real editor handlers exist, and unsupported shell actions report that state instead of silently reading as parity-complete
+
+## K-039 shared batch snapshot is live in WPF, but mutation still lives outside the native shell
+- status: watch
+- impact: `apps/admin-web` now publishes a desktop-shell-owned local batch snapshot that `apps/windows-shell` can read, but import, retry, and submit still remain outside WPF and the snapshot is still single-machine local state rather than multi-host coordination
+- response: treat Batch Jobs as a live review lane for queued rows and blockers, but keep actual batch mutation in `apps/admin-web` until a follow-up backend expansion intentionally moves that authority
+
 ## K-035 native-shell startup window was missing
 - status: resolved
 - resolution: `apps/windows-shell/App.xaml` now declares `StartupUri="MainWindow.xaml"`, so the preview installer launches the operator shell window instead of leaving a background process with no visible UI

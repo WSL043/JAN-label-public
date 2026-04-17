@@ -42,7 +42,14 @@
                 <ItemsControl ItemsSource="{Binding CurrentHeaderActions}">
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Button Style="{StaticResource ActionButtonStyle}" Margin="0,0,0,8" Content="{Binding}" Tag="{Binding}" Click="ShellActionButton_Click" />
+                      <Button
+                          Style="{StaticResource ActionButtonStyle}"
+                          Margin="0,0,0,8"
+                          Content="{Binding Label}"
+                          IsEnabled="{Binding IsEnabled}"
+                          Tag="{Binding}"
+                          ToolTip="{Binding Summary}"
+                          Click="ShellActionButton_Click" />
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -71,9 +78,24 @@
       </Fluent:Ribbon.Menu>
 
       <Fluent:Ribbon.QuickAccessItems>
-        <Fluent:Button Header="Refresh" Click="QuickAccessButton_Click" />
-        <Fluent:Button Header="Preview" Click="QuickAccessButton_Click" />
-        <Fluent:Button Header="Proof" Click="QuickAccessButton_Click" />
+        <Fluent:Button
+            Header="{Binding QuickAccessRefreshAction.Label}"
+            IsEnabled="{Binding QuickAccessRefreshAction.IsEnabled}"
+            Tag="{Binding QuickAccessRefreshAction}"
+            ToolTip="{Binding QuickAccessRefreshAction.Summary}"
+            Click="QuickAccessButton_Click" />
+        <Fluent:Button
+            Header="{Binding QuickAccessPreviewAction.Label}"
+            IsEnabled="{Binding QuickAccessPreviewAction.IsEnabled}"
+            Tag="{Binding QuickAccessPreviewAction}"
+            ToolTip="{Binding QuickAccessPreviewAction.Summary}"
+            Click="QuickAccessButton_Click" />
+        <Fluent:Button
+            Header="{Binding QuickAccessApproveAction.Label}"
+            IsEnabled="{Binding QuickAccessApproveAction.IsEnabled}"
+            Tag="{Binding QuickAccessApproveAction}"
+            ToolTip="{Binding QuickAccessApproveAction.Summary}"
+            Click="QuickAccessButton_Click" />
       </Fluent:Ribbon.QuickAccessItems>
 
       <Fluent:RibbonTabItem Header="Workspace">
@@ -94,7 +116,14 @@
                   </ItemsControl.ItemsPanel>
                   <ItemsControl.ItemTemplate>
                     <DataTemplate>
-                      <Fluent:Button Header="{Binding}" Tag="{Binding}" SizeDefinition="Large" Margin="0,0,6,0" Click="RibbonActionButton_Click" />
+                      <Fluent:Button
+                          Header="{Binding Label}"
+                          IsEnabled="{Binding IsEnabled}"
+                          Tag="{Binding}"
+                          ToolTip="{Binding Summary}"
+                          SizeDefinition="Large"
+                          Margin="0,0,6,0"
+                          Click="RibbonActionButton_Click" />
                     </DataTemplate>
                   </ItemsControl.ItemTemplate>
                 </ItemsControl>
@@ -147,7 +176,13 @@
           </ItemsControl.ItemsPanel>
           <ItemsControl.ItemTemplate>
             <DataTemplate>
-              <Button Style="{StaticResource ActionButtonStyle}" Content="{Binding}" Tag="{Binding}" Click="ShellActionButton_Click" />
+              <Button
+                  Style="{StaticResource ActionButtonStyle}"
+                  Content="{Binding Label}"
+                  IsEnabled="{Binding IsEnabled}"
+                  Tag="{Binding}"
+                  ToolTip="{Binding Summary}"
+                  Click="ShellActionButton_Click" />
             </DataTemplate>
           </ItemsControl.ItemTemplate>
         </ItemsControl>

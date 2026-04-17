@@ -78,6 +78,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: pnpm release:notes --version $env:GITHUB_REF_NAME
+      - name: Build desktop-shell companion
+        run: cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release
       - name: Generate release readiness report
         run: pnpm release:readiness --version $env:GITHUB_REF_NAME
       - name: Upload release readiness artifacts
@@ -90,6 +92,13 @@ jobs:
             docs/release/${{ github.ref_name }}.md
       - name: Publish native shell
         run: dotnet publish apps/windows-shell/JanLabel.WindowsShell.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true
+      - name: Assert companion binary in publish output
+        shell: powershell
+        run: |
+          $companion = "apps/windows-shell/bin/Release/net8.0-windows/win-x64/publish/desktop-shell.exe"
+          if (-not (Test-Path $companion)) {
+            Write-Error "Expected companion binary in native-shell publish output: $companion"
+          }
       - name: Build native shell installer
         shell: powershell
         run: |

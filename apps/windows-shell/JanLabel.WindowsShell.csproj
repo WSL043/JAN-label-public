@@ -7,10 +7,17 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>JanLabel.WindowsShell</RootNamespace>
     <AssemblyName>JanLabel.WindowsShell</AssemblyName>
+    <DesktopShellCompanionPath>..\desktop-shell\src-tauri\target\release\desktop-shell.exe</DesktopShellCompanionPath>
   </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="Dirkster.AvalonDock" Version="4.73.0" />
     <PackageReference Include="Fluent.Ribbon" Version="11.0.2" />
     <PackageReference Include="PropertyTools.Wpf" Version="3.1.0" />
   </ItemGroup>
+  <Target Name="CopyDesktopShellCompanionToOutput" AfterTargets="Build" Condition="Exists('$(DesktopShellCompanionPath)')">
+    <Copy SourceFiles="$(DesktopShellCompanionPath)" DestinationFiles="$(TargetDir)desktop-shell.exe" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="CopyDesktopShellCompanionToPublish" AfterTargets="Publish" Condition="Exists('$(DesktopShellCompanionPath)')">
+    <Copy SourceFiles="$(DesktopShellCompanionPath)" DestinationFiles="$(PublishDir)desktop-shell.exe" SkipUnchangedFiles="true" />
+  </Target>
 </Project>

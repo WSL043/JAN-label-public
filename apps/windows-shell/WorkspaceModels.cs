@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Windows.Media;
 
@@ -20,13 +21,38 @@ public sealed class ModuleModel
         IEnumerable<ContextBadgeModel> contextBadges,
         IEnumerable<StatusStripItemModel> statusStripItems,
         WorkspaceModel workspace)
+        : this(
+            label,
+            description,
+            badge,
+            tagline,
+            lead,
+            headerActions.Select(ShellActionModel.Enabled),
+            ribbonGroups,
+            contextBadges,
+            statusStripItems,
+            workspace)
+    {
+    }
+
+    public ModuleModel(
+        string label,
+        string description,
+        string badge,
+        string tagline,
+        string lead,
+        IEnumerable<ShellActionModel> headerActions,
+        IEnumerable<RibbonGroupModel> ribbonGroups,
+        IEnumerable<ContextBadgeModel> contextBadges,
+        IEnumerable<StatusStripItemModel> statusStripItems,
+        WorkspaceModel workspace)
     {
         Label = label;
         Description = description;
         Badge = badge;
         Tagline = tagline;
         Lead = lead;
-        HeaderActions = new ObservableCollection<string>(headerActions);
+        HeaderActions = new ObservableCollection<ShellActionModel>(headerActions);
         RibbonGroups = new ObservableCollection<RibbonGroupModel>(ribbonGroups);
         ContextBadges = new ObservableCollection<ContextBadgeModel>(contextBadges);
         StatusStripItems = new ObservableCollection<StatusStripItemModel>(statusStripItems);
@@ -43,7 +69,7 @@ public sealed class ModuleModel
 
     public string Lead { get; }
 
-    public ObservableCollection<string> HeaderActions { get; }
+    public ObservableCollection<ShellActionModel> HeaderActions { get; }
 
     public ObservableCollection<RibbonGroupModel> RibbonGroups { get; }
 
@@ -95,6 +121,20 @@ public sealed class HomeWorkspaceModel : WorkspaceModel
     public ObservableCollection<StatusItemModel> StatusItems { get; } = new();
 
     public string HeaderDetail { get; init; } = string.Empty;
+
+    public string StatusSummary { get; init; } = string.Empty;
+
+    public string ActivitySummary { get; init; } = string.Empty;
+
+    public bool FocusTemplateEntry(string templateName)
+    {
+        return TemplateLibrary.TrySelectTemplate(templateName);
+    }
+
+    public bool FocusTemplateByState(string state)
+    {
+        return TemplateLibrary.TrySelectFirst((entry) => string.Equals(entry.State, state, StringComparison.OrdinalIgnoreCase));
+    }
 }
 
 public sealed class DesignerWorkspaceModel : WorkspaceModel
@@ -126,6 +166,8 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
     public ObservableCollection<PropertyRowModel> SelectionRows { get; } = new();
 
     public ObservableCollection<PropertyRowModel> RecordRows { get; } = new();
+
+    public ObservableCollection<PropertyRowModel> PreviewRows { get; } = new();
 
     public ObservableCollection<MessageRowModel> MessageRows { get; } = new();
 
@@ -191,6 +233,12 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
 
     public string CatalogSummary { get; init; } = string.Empty;
 
+    public string ToolboxSummary { get; init; } = string.Empty;
+
+    public string ObjectBrowserSummary { get; init; } = string.Empty;
+
+    public string DataSourceSummary { get; init; } = string.Empty;
+
     public double CanvasWidth { get; init; }
 
     public double CanvasHeight { get; init; }
@@ -199,9 +247,33 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
 
     public string SecondaryDocumentTitle { get; init; } = "Proof Preview";
 
+    public string PreviewSvg { get; init; } = string.Empty;
+
     public void SelectCanvasElement(CanvasElementModel? element)
     {
         SelectedCanvasElement = element;
+    }
+
+    public bool FocusTemplateEntry(string templateName)
+    {
+        return TemplateLibrary.TrySelectTemplate(templateName);
+    }
+
+    public bool FocusTemplateByState(string state)
+    {
+        return TemplateLibrary.TrySelectFirst((entry) => string.Equals(entry.State, state, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusCanvasElement(string caption)
+    {
+        var match = CanvasElements.FirstOrDefault((element) => string.Equals(element.Caption, caption, StringComparison.OrdinalIgnoreCase));
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectCanvasElement(match);
+        return true;
     }
 
     private void SelectedElementPropertiesChanged(object? sender, PropertyChangedEventArgs e)
@@ -430,6 +502,35 @@ public sealed class PrintConsoleWorkspaceModel : WorkspaceModel
 
     public string JobSummary { get; init; } = string.Empty;
 
+    public string ProofQueueSummary { get; init; } = string.Empty;
+
+    public string TimelineSummary { get; init; } = string.Empty;
+
+    public bool FocusPendingProof()
+    {
+        return TrySelectProof((proof) => string.Equals(proof.Badge, "pending", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusApprovedProof()
+    {
+        return TrySelectProof((proof) => string.Equals(proof.Badge, "approved", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusReadyJob()
+    {
+        return TrySelectJob((job) => string.Equals(job.Status, "ready", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusHeldJob()
+    {
+        return TrySelectJob((job) => string.Equals(job.Status, "held", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusBlockedJob()
+    {
+        return TrySelectJob((job) => string.Equals(job.Status, "blocked", StringComparison.OrdinalIgnoreCase));
+    }
+
     private void RefreshSelectionFromProof(QueueItemModel? proof)
     {
         SelectedJobRows.Clear();
@@ -473,6 +574,30 @@ public sealed class PrintConsoleWorkspaceModel : WorkspaceModel
         SelectedJobRows.Add(new PropertyRowModel("Lineage", job.Lineage));
         SelectedJobRows.Add(new PropertyRowModel("Blocker", job.Blocker));
         SelectedJobRows.Add(new PropertyRowModel("Next action", job.NextAction));
+    }
+
+    private bool TrySelectProof(Func<QueueItemModel, bool> predicate)
+    {
+        var match = ProofQueue.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedProof = match;
+        return true;
+    }
+
+    private bool TrySelectJob(Func<JobRowModel, bool> predicate)
+    {
+        var match = JobRows.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedJob = match;
+        return true;
     }
 }
 
@@ -561,6 +686,48 @@ public sealed class BatchJobsWorkspaceModel : WorkspaceModel
 
     public string QueueSummary { get; init; } = string.Empty;
 
+    public string ImportSummary { get; init; } = string.Empty;
+
+    public string ActivitySummary { get; init; } = string.Empty;
+
+    public bool FocusImportSessionWithWarnings()
+    {
+        return TrySelectImportSession(
+            (session) =>
+                session.Note.Contains("warning", StringComparison.OrdinalIgnoreCase) ||
+                session.Blocker.Contains("JAN", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusImportSession(string sessionLabel)
+    {
+        return TrySelectImportSession((session) => string.Equals(session.Label, sessionLabel, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusFirstImportSession()
+    {
+        return TrySelectImportSession((_) => true);
+    }
+
+    public bool FocusReadyBatch()
+    {
+        return TrySelectBatch((batch) => string.Equals(batch.CanonicalStatus, "ready", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusSubmittedBatch()
+    {
+        return TrySelectBatch((batch) => string.Equals(batch.CanonicalStatus, "submitted", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusFailedBatch()
+    {
+        return TrySelectBatch((batch) => string.Equals(batch.CanonicalStatus, "failed", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusDraftBatch()
+    {
+        return TrySelectBatch((batch) => string.Equals(batch.CanonicalStatus, "draft", StringComparison.OrdinalIgnoreCase));
+    }
+
     private void RefreshSelectionFromImportSession(QueueItemModel? session)
     {
         SessionDetailRows.Clear();
@@ -603,6 +770,30 @@ public sealed class BatchJobsWorkspaceModel : WorkspaceModel
         SessionDetailRows.Add(new PropertyRowModel("Submit route", batch.SubmitRoute));
         SessionDetailRows.Add(new PropertyRowModel("Blocker", batch.Blocker));
         SessionDetailRows.Add(new PropertyRowModel("Retry rule", batch.RetryRule));
+    }
+
+    private bool TrySelectImportSession(Func<QueueItemModel, bool> predicate)
+    {
+        var match = ImportSessions.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedImportSession = match;
+        return true;
+    }
+
+    private bool TrySelectBatch(Func<BatchRowModel, bool> predicate)
+    {
+        var match = BatchRows.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedBatch = match;
+        return true;
     }
 }
 
@@ -720,6 +911,45 @@ public sealed class HistoryWorkspaceModel : WorkspaceModel
 
     public string LedgerSummary { get; init; } = string.Empty;
 
+    public string PendingProofSummary { get; init; } = string.Empty;
+
+    public string BundleSummary { get; init; } = string.Empty;
+
+    public string FilterSummary { get; init; } = string.Empty;
+
+    public bool FocusPendingProof()
+    {
+        return TrySelectPendingProof((proof) => string.Equals(proof.Badge, "pending", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusRejectedProof()
+    {
+        return TrySelectPendingProof((proof) => string.Equals(proof.Badge, "rejected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusLatestBundle()
+    {
+        return TrySelectBundle((bundle) => true);
+    }
+
+    public bool FocusLatestAudit()
+    {
+        return TrySelectAudit((audit) => true);
+    }
+
+    public bool FocusApprovedAudit()
+    {
+        return TrySelectAudit((audit) => string.Equals(audit.Status, "approved", StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool FocusRetentionAudit()
+    {
+        return TrySelectAudit(
+            (audit) =>
+                string.Equals(audit.Lane, "retention", StringComparison.OrdinalIgnoreCase) ||
+                audit.Subject.Contains("trim", StringComparison.OrdinalIgnoreCase));
+    }
+
     private void RefreshSelectionFromPendingProof(QueueItemModel? proof)
     {
         SelectedEntryRows.Clear();
@@ -782,19 +1012,96 @@ public sealed class HistoryWorkspaceModel : WorkspaceModel
         SelectedEntryRows.Add(new PropertyRowModel("Action", auditRow.ActionRequired));
         SelectedEntryRows.Add(new PropertyRowModel("When", auditRow.Time));
     }
+
+    private bool TrySelectPendingProof(Func<QueueItemModel, bool> predicate)
+    {
+        var match = PendingProofs.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedPendingProof = match;
+        return true;
+    }
+
+    private bool TrySelectBundle(Func<QueueItemModel, bool> predicate)
+    {
+        var match = BundleRows.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedBundle = match;
+        return true;
+    }
+
+    private bool TrySelectAudit(Func<AuditRowModel, bool> predicate)
+    {
+        var match = AuditRows.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedAuditRow = match;
+        return true;
+    }
 }
 
 public sealed class RibbonGroupModel
 {
     public RibbonGroupModel(string title, params string[] commands)
+        : this(title, commands.Select(ShellActionModel.Enabled))
+    {
+    }
+
+    public RibbonGroupModel(string title, params ShellActionModel[] commands)
+        : this(title, (IEnumerable<ShellActionModel>)commands)
+    {
+    }
+
+    public RibbonGroupModel(string title, IEnumerable<ShellActionModel> commands)
     {
         Title = title;
-        Commands = new ObservableCollection<string>(commands);
+        Commands = new ObservableCollection<ShellActionModel>(commands);
     }
 
     public string Title { get; }
 
-    public ObservableCollection<string> Commands { get; }
+    public ObservableCollection<ShellActionModel> Commands { get; }
+}
+
+public sealed class ShellActionModel
+{
+    public ShellActionModel(string label, bool isEnabled, string summary = "")
+    {
+        Label = label;
+        IsEnabled = isEnabled;
+        Summary = summary;
+    }
+
+    public string Label { get; }
+
+    public bool IsEnabled { get; }
+
+    public string Summary { get; }
+
+    public static ShellActionModel Enabled(string label)
+    {
+        return new(label, true);
+    }
+
+    public static ShellActionModel Enabled(string label, string summary)
+    {
+        return new(label, true, summary);
+    }
+
+    public static ShellActionModel Disabled(string label, string summary)
+    {
+        return new(label, false, summary);
+    }
 }
 
 public sealed class SummaryCardModel
@@ -905,6 +1212,7 @@ public sealed class TemplateLibraryPanelModel : BindableModel
     private TemplateCatalogRowModel? _selectedTemplate;
     private string _headerDetail = string.Empty;
     private string _statusSummary = string.Empty;
+    private string _entrySummary = string.Empty;
     private string _selectionHeading = "Select a template";
     private string _selectionSummary = "Choose a template to inspect authority, dispatch safety, and rollback intent.";
 
@@ -928,6 +1236,12 @@ public sealed class TemplateLibraryPanelModel : BindableModel
     {
         get => _statusSummary;
         set => SetProperty(ref _statusSummary, value);
+    }
+
+    public string EntrySummary
+    {
+        get => _entrySummary;
+        set => SetProperty(ref _entrySummary, value);
     }
 
     public string SelectionHeading
@@ -1007,6 +1321,23 @@ public sealed class TemplateLibraryPanelModel : BindableModel
         {
             AlertRows.Add(alert);
         }
+    }
+
+    public bool TrySelectTemplate(string templateName)
+    {
+        return TrySelectFirst((entry) => string.Equals(entry.Name, templateName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    public bool TrySelectFirst(Func<TemplateCatalogRowModel, bool> predicate)
+    {
+        var match = Entries.FirstOrDefault(predicate);
+        if (match is null)
+        {
+            return false;
+        }
+
+        SelectedTemplate = match;
+        return true;
     }
 
     private void RefreshDetailRows()
@@ -1139,7 +1470,8 @@ public sealed class BatchRowModel
         string warnRows = "",
         string submitRoute = "",
         string blocker = "",
-        string retryRule = "")
+        string retryRule = "",
+        string? canonicalStatus = null)
     {
         BatchId = batchId;
         Template = template;
@@ -1151,6 +1483,7 @@ public sealed class BatchRowModel
         SubmitRoute = submitRoute;
         Blocker = blocker;
         RetryRule = retryRule;
+        CanonicalStatus = canonicalStatus ?? status;
     }
 
     public string BatchId { get; }
@@ -1172,6 +1505,8 @@ public sealed class BatchRowModel
     public string Blocker { get; }
 
     public string RetryRule { get; }
+
+    public string CanonicalStatus { get; }
 }
 
 public sealed class AuditRowModel

@@ -21,6 +21,9 @@ import {
   type AuditLedgerScope,
   type AuditRetentionResult,
   type AuditSearchEntry,
+  type BatchQueueSnapshotRecord,
+  type BatchQueueSnapshotRow,
+  type BatchQueueSnapshotState,
   type BridgeWarning,
   type LegacyProofSeedRequest,
   type LegacyProofSeedResult,
@@ -31,6 +34,7 @@ import {
   type TemplateDraftPreviewRequest,
   type TemplateDraftPreviewResult,
   approveProof,
+  clearBatchQueueSnapshot,
   dispatchPrintJob,
   exportAuditLedger,
   fetchPrintBridgeStatus,
@@ -38,9 +42,11 @@ import {
   fetchTemplateCatalogGovernance,
   isTauriConnected,
   listAuditBackupBundles,
+  loadBatchQueueSnapshot,
   previewTemplateDraft,
   rejectProof,
   restoreAuditBackupBundle,
+  saveBatchQueueSnapshot,
   saveTemplateToLocalCatalog,
   searchAuditLog,
   seedLegacyProofs,
@@ -346,12 +352,20 @@ type QueuedRow = PreparedRow & {
   dispatchError: string | null;
   retryLineageJobId: string | null;
 };
+type DesktopBatchSnapshotMeta = {
+  snapshotId: string;
+  capturedAt: string;
+  sourceFileName: string | null;
+  sourceKind: DataSource["source"] | null;
+};
 type LabelTemplateMeta = {
   schemaVersion: string;
   templateVersion: string;
   labelName: string;
   description: string;
 };
+
+const BATCH_QUEUE_SNAPSHOT_SCHEMA_VERSION = "batch-queue-snapshot-v1";
 
 const defaultTemplateSpec: TemplateSpec = {
   schema_version: "template-spec-v1",
@@ -1214,6 +1228,81 @@ function formatQueuedRowResult(row: QueuedRow): string {
     return "Submitting...";
   }
   return "Not submitted";
+}
+
+function createDesktopBatchSnapshotMeta(sourceData: DataSource | null): DesktopBatchSnapshotMeta {
+  const capturedAt = new Date().toISOString();
+  return {
+    snapshotId: `batch-${createSession().jobId}`,
+    capturedAt,
+    sourceFileName: sourceData?.fileName ?? null,
+    sourceKind: sourceData?.source ?? null,
+  };
+}
+
+function toBatchQueueSnapshotRow(row: QueuedRow): BatchQueueSnapshotRow {
+  if (!row.draft) {
+    throw new Error(`Queued row ${row.rowIndex + 1} is missing its draft payload.`);
+  }
+  return {
+    rowIndex: row.rowIndex,
+    draft: row.draft,
+    submissionStatus: row.submissionStatus,
+    retryLineageJobId: row.retryLineageJobId,
+    dispatchError: row.dispatchError,
+    dispatchResult: row.dispatchResult,
+  };
+}
+
+function fromBatchQueueSnapshotRow(row: BatchQueueSnapshotRow): QueuedRow {
+  return {
+    rowIndex: row.rowIndex,
+    sourceRow: {},
+    draft: row.draft,
+    errors: [],
+    warnings: [],
+    status: "ready",
+    pendingReason: null,
+    submissionStatus: row.submissionStatus,
+    dispatchResult: row.dispatchResult,
+    dispatchError: row.dispatchError,
+    retryLineageJobId: row.retryLineageJobId,
+  };
+}
+
+function buildBatchQueueSnapshotRecord(
+  meta: DesktopBatchSnapshotMeta,
+  queuedRows: QueuedRow[],
+  actor: string,
+  submitPhase: BatchSubmitState["phase"],
+  submitMessage: string,
+): BatchQueueSnapshotRecord {
+  return {
+    schemaVersion: BATCH_QUEUE_SNAPSHOT_SCHEMA_VERSION,
+    snapshotId: meta.snapshotId,
+    capturedAt: meta.capturedAt,
+    updatedAt: new Date().toISOString(),
+    sourceFileName: meta.sourceFileName ?? undefined,
+    sourceKind: meta.sourceKind ?? undefined,
+    actor: actor.trim() || "ops.user",
+    submitPhase,
+    submitMessage,
+    queueRows: queuedRows.map(toBatchQueueSnapshotRow),
+  };
+}
+
+function readDesktopBatchSnapshotMeta(
+  result: BatchQueueSnapshotState,
+): DesktopBatchSnapshotMeta | null {
+  if (!result.present || !result.snapshot) {
+    return null;
+  }
+  return {
+    snapshotId: result.snapshot.snapshotId,
+    capturedAt: result.snapshot.capturedAt,
+    sourceFileName: result.snapshot.sourceFileName ?? null,
+    sourceKind: result.snapshot.sourceKind ?? null,
+  };
 }
 
 function matchesQueueSearch(row: QueuedRow, searchText: string): boolean {
@@ -2462,6 +2551,11 @@ export function App() {
   );
   const [mappingPersistedState, setMappingPersistedState] = useState(initialMappingState.status);
   const [queuedRows, setQueuedRows] = useState<QueuedRow[]>([]);
+  const [desktopBatchSnapshotMeta, setDesktopBatchSnapshotMeta] =
+    useState<DesktopBatchSnapshotMeta | null>(null);
+  const [desktopBatchSnapshotHydrated, setDesktopBatchSnapshotHydrated] = useState(
+    !isTauriConnected(),
+  );
   const [selectedQueueRowJobId, setSelectedQueueRowJobId] = useState<string | null>(null);
   const [selectedAuditEntryJobId, setSelectedAuditEntryJobId] = useState<string | null>(null);
   const [restoreStateNotice, setRestoreStateNotice] = useState<string | null>(null);
@@ -3684,25 +3778,28 @@ export function App() {
       return;
     }
     setBatchSubmit({ phase: "idle", message: "", results: [] });
-    setQueuedRows(
-      preparedRows
-        .filter((entry) => entry.status === "ready" && entry.draft !== null)
-        .map((entry) => ({
-          ...entry,
-          submissionStatus: "ready" as const,
-          dispatchResult: null,
-          dispatchError: null,
-          retryLineageJobId: null,
-        }))
-        .slice(),
-    );
+    setDesktopBatchSnapshotMeta(createDesktopBatchSnapshotMeta(sourceData));
+    const nextRows = preparedRows
+      .filter((entry) => entry.status === "ready" && entry.draft !== null)
+      .map((entry) => ({
+        ...entry,
+        submissionStatus: "ready" as const,
+        dispatchResult: null,
+        dispatchError: null,
+        retryLineageJobId: null,
+      }))
+      .slice();
+    setQueuedRows(nextRows);
+    setSelectedQueueRowJobId(nextRows[0]?.draft?.jobId ?? null);
   }
 
   function clearQueueSnapshot() {
     if (queueMutationLocked) {
       return;
     }
+    setDesktopBatchSnapshotMeta(null);
     setQueuedRows([]);
+    setSelectedQueueRowJobId(null);
     setBatchSubmit({ phase: "idle", message: "", results: [] });
   }
 
@@ -4161,6 +4258,102 @@ export function App() {
     }
   });
 
+  const refreshDesktopBatchSnapshot = useEffectEvent(
+    async (reason: "startup" | "restore" = "startup") => {
+      if (!isTauriConnected()) {
+        setDesktopBatchSnapshotHydrated(true);
+        return;
+      }
+
+      try {
+        const result = await loadBatchQueueSnapshot();
+        setDesktopBatchSnapshotMeta(readDesktopBatchSnapshotMeta(result));
+        if (!result.present || !result.snapshot) {
+          if (reason === "restore" && queuedRows.length === 0) {
+            setRestoreStateNotice(
+              "Saved state restored. No shared desktop batch snapshot was found.",
+            );
+          }
+          return;
+        }
+
+        if (reason === "restore" && queuedRows.length > 0) {
+          return;
+        }
+
+        const restoredRows = result.snapshot.queueRows.map(fromBatchQueueSnapshotRow);
+        setQueuedRows(restoredRows);
+        setBatchSubmit({
+          phase: result.snapshot.submitPhase,
+          message: result.snapshot.submitMessage,
+          results: restoredRows
+            .map((row) => row.dispatchResult)
+            .filter((entry): entry is PrintDispatchResult => entry !== null),
+        });
+        setSelectedQueueRowJobId((current) =>
+          restoredRows.some((row) => row.draft?.jobId === current)
+            ? current
+            : (restoredRows[0]?.draft?.jobId ?? null),
+        );
+        if (reason === "startup") {
+          setRestoreStateNotice(
+            `Shared desktop batch snapshot reloaded from ${
+              result.snapshot.sourceFileName ?? "desktop-shell"
+            }.`,
+          );
+        } else {
+          setRestoreStateNotice(
+            `Saved state restored. Shared desktop batch snapshot reloaded from ${
+              result.snapshot.sourceFileName ?? "desktop-shell"
+            }.`,
+          );
+        }
+      } catch (error) {
+        if (reason === "restore") {
+          setRestoreStateNotice(
+            `Saved state restored, but shared desktop batch snapshot reload failed: ${formatErrorMessage(
+              error,
+            )}`,
+          );
+        } else {
+          console.warn("Desktop batch snapshot reload failed.", error);
+        }
+      } finally {
+        setDesktopBatchSnapshotHydrated(true);
+      }
+    },
+  );
+
+  const persistDesktopBatchSnapshot = useEffectEvent(async () => {
+    if (!desktopBatchSnapshotHydrated || !isTauriConnected()) {
+      return;
+    }
+
+    try {
+      if (queuedRows.length === 0) {
+        await clearBatchQueueSnapshot();
+        return;
+      }
+
+      const meta = desktopBatchSnapshotMeta ?? createDesktopBatchSnapshotMeta(sourceData);
+      if (desktopBatchSnapshotMeta !== meta) {
+        setDesktopBatchSnapshotMeta(meta);
+      }
+      const actor = queuedRows[0]?.draft?.actor ?? form.actor;
+      await saveBatchQueueSnapshot(
+        buildBatchQueueSnapshotRecord(
+          meta,
+          queuedRows,
+          actor,
+          batchSubmit.phase,
+          batchSubmit.message,
+        ),
+      );
+    } catch (error) {
+      console.warn("Desktop batch snapshot persistence failed.", error);
+    }
+  });
+
   function formatErrorMessage(error: unknown): string {
     if (error instanceof Error) {
       return error.message;
@@ -4502,7 +4695,9 @@ export function App() {
       qty: "",
       brand: "",
     });
+    setDesktopBatchSnapshotMeta(null);
     setQueuedRows([]);
+    setSelectedQueueRowJobId(null);
     setBatchSubmit({ phase: "idle", message: "", results: [] });
   }
 
@@ -4573,6 +4768,7 @@ export function App() {
       setRestoreStateNotice(
         "Saved state restored. You can continue from the saved operator context.",
       );
+      void refreshDesktopBatchSnapshot("restore");
     }
   }
 
@@ -4650,6 +4846,14 @@ export function App() {
   useEffect(() => {
     void refreshBridgeStatus();
   }, [refreshBridgeStatus]);
+
+  useEffect(() => {
+    void refreshDesktopBatchSnapshot("startup");
+  }, [refreshDesktopBatchSnapshot]);
+
+  useEffect(() => {
+    void persistDesktopBatchSnapshot();
+  }, [persistDesktopBatchSnapshot]);
 
   useEffect(() => {
     const previewJobId = templateDraftPreviewRequest.sample.jobId;

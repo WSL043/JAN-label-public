@@ -92,6 +92,7 @@ impl AuditStore {
         })
     }
 
+    #[cfg(test)]
     pub fn register_pending_proof(&self, record: ProofRecord) -> Result<(), String> {
         self.with_lock(|| {
             let mut records = self.load_proof_records()?;
@@ -113,6 +114,7 @@ impl AuditStore {
         })
     }
 
+    #[cfg(test)]
     pub fn ensure_approved_proof(&self, proof_job_id: &str) -> Result<ProofRecord, String> {
         self.with_lock(|| {
             let records = self.load_proof_records()?;
