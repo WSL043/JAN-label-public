@@ -27,7 +27,7 @@ Rules:
 - `apps/desktop-shell` keeps owning proof/print gate, audit restore, and template-catalog authority until an explicit backend migration ADR supersedes it.
 - Desktop shell layout decisions may stop optimizing for mobile or non-Windows viewport compromises.
 - Validation for `apps/windows-shell` is authoritative on GitHub Windows runners when local `dotnet` is unavailable.
-- For shell chrome, prefer a real Windows ribbon package over hand-crafted imitation when the dependency is compatible and clearly licensed. Current shell-chrome choice: `Fluent.Ribbon`.
+- For shell chrome, prefer packaged Windows workstation primitives over hand-crafted imitation when the dependency is compatible and clearly licensed. The original ribbon-first choice was `Fluent.Ribbon`; the current preview shell-chrome baseline is superseded by ADR `0014`.
 - For the designer frame, prefer package-backed docking and inspector controls over hand-built faux panes when the dependency is compatible and clearly licensed. Current designer-shell choices: `Dirkster.AvalonDock` for docking/documents and `PropertyTools.Wpf` for the right-side property inspector baseline.
 
 ## Consequences

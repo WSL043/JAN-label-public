@@ -46,13 +46,16 @@ Lineage rules:
 - Proof dispatch in `dispatch-ledger.json` and the matching `pending` proof record in `proof-ledger.json` are applied as one recovery-aware transaction.
 - Stale proof transaction markers are replayed automatically on the next locked audit access.
 - Unreadable or corrupt proof transaction markers are quarantined and the current audit operation returns an explicit reconcile error.
-- `admin-web` proof inbox drives `approve` / `reject`.
+- Current review entry points are `apps/windows-shell` safe approve/reject actions plus the legacy `admin-web` proof inbox while `T-052` is still hybrid.
+- `apps/windows-shell` now persists approve/reject through its local SQLite-backed proof ledger before overlaying refreshed live proof state back into the WPF lanes.
+- `apps/windows-shell` `Print Console` now also creates pending proof artifacts locally for the selected subject, and that local create path writes the proof ledger row plus matching proof dispatch row and mirrored dispatch audit event before refresh overlays the visible lane.
 - Approved proofs can be pinned back into print-ready operator flow.
 
 ## 4. Audit Export / Retention
 
 - `export_audit_ledger` returns `all`, `dispatch`, or `proof` snapshots.
 - `admin-web` can export those snapshots as JSON.
+- `apps/windows-shell` now mirrors live dispatch/audit rows plus backup-bundle metadata into local SQLite during refresh, writes JSON export from that local audit mirror, and projects visible `History` / `Print Console` audit rows back out of that same local state after refresh.
 - `trim_audit_ledger` supports:
   - `maxAgeDays`
   - `maxEntries`
@@ -129,6 +132,7 @@ Important distinctions:
 
 - CSV/XLSX should remain usable without a strict external database schema.
 - Alias-based header mapping is the primary contract.
+- XLSX parsing now runs off the main UI thread in `admin-web`; row mapping and risk validation semantics stay unchanged.
 - XLSX numeric JAN handling for this release:
   - scientific numeric cells: error
   - decimal numeric cells: error

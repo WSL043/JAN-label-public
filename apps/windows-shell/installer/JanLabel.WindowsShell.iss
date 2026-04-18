@@ -1,7 +1,7 @@
-#define MyAppName "JAN Label Windows Shell"
+#define MyAppName "JAN Label"
 #define MyAppPublisher "WSL043"
-#define MyAppExeName "JanLabel.WindowsShell.exe"
-#define MyDefaultDirName "{localappdata}\Programs\JAN Label Windows Shell"
+#define MyAppExeName "JanLabel.exe"
+#define MyDefaultDirName "{localappdata}\Programs\JAN Label"
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0-preview"
@@ -12,7 +12,7 @@
 #endif
 
 #ifndef MyOutputBaseFilename
-  #define MyOutputBaseFilename "JAN-Label-Windows-Shell-Setup"
+  #define MyOutputBaseFilename "JAN-Label_windows_x64-setup"
 #endif
 
 #ifndef MySourceDir

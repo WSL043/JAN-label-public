@@ -17,5 +17,6 @@
   </ItemGroup>
   <ItemGroup>
     <ProjectReference Include="..\windows-shell\JanLabel.WindowsShell.csproj" />
+    <ProjectReference Include="..\windows-shell-core\JanLabel.WindowsShell.Core.csproj" />
   </ItemGroup>
 </Project>

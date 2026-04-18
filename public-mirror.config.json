@@ -1,0 +1,6 @@
+{
+  "repository": "WSL043/JAN-label-public",
+  "branch": "main",
+  "createIfMissing": true,
+  "snapshotMetadataPath": ".github/public-mirror-source.json"
+}

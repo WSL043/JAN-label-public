@@ -107,6 +107,7 @@ internal static class ShellActions
         OpenLibrary,
         OverlayStatus,
         CatalogRules,
+        SaveToCatalog,
         PrintPreview,
         RustPreview,
     };
@@ -157,9 +158,9 @@ internal static class ShellActions
     public static readonly string[] DesignerTemplateFocusActions = { OpenLibrary, OverlayStatus, SaveToCatalog };
     public static readonly string[] DesignerDraftFocusActions = { CatalogRules };
     public static readonly string[] DesignerPreviewFocusActions = { PrintPreview, RustPreview, Barcode };
-    public static readonly string[] PrintProofFocusActions = { OpenPdf, Approve, Reject, RunProof, Proof };
+    public static readonly string[] PrintProofFocusActions = { OpenPdf, Approve, Reject, Proof };
     public static readonly string[] PrintHoldFocusActions = { Hold, Release };
-    public static readonly string[] PrintSubjectFocusActions = { RefreshSubjects, RefreshQueue, RouteCheck, DispatchBatch, Print };
+    public static readonly string[] PrintSubjectFocusActions = { RefreshSubjects, RefreshQueue, RouteCheck, DispatchBatch, RunProof, Print };
     public static readonly string[] BatchImportFocusActions = { ImportWorkbook, Csv, Xlsx, AliasMap };
     public static readonly string[] BatchRetryFocusActions = { RetryFailed };
     public static readonly string[] BatchReadyFocusActions = { SubmitReady, QueueSnapshot, FixtureCheck };

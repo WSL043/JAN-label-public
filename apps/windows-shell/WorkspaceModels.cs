@@ -139,8 +139,24 @@ public sealed class HomeWorkspaceModel : WorkspaceModel
 
 public sealed class DesignerWorkspaceModel : WorkspaceModel
 {
+    private const double CanvasScale = 12.0;
+
     private CanvasElementModel? _selectedCanvasElement;
     private DesignerSelectionModel _selectedElementProperties = new();
+    private string _canvasMeta = string.Empty;
+    private string _canvasHint = string.Empty;
+    private string _messageSummary = string.Empty;
+    private string _recordSummary = string.Empty;
+    private string _statusSummary = string.Empty;
+    private string _catalogSummary = string.Empty;
+    private string _toolboxSummary = string.Empty;
+    private string _objectBrowserSummary = string.Empty;
+    private string _dataSourceSummary = string.Empty;
+    private double _canvasWidth;
+    private double _canvasHeight;
+    private string _primaryDocumentTitle = "Format Surface";
+    private string _secondaryDocumentTitle = "Proof Preview";
+    private string _previewSvg = string.Empty;
 
     public DesignerWorkspaceModel()
     {
@@ -221,33 +237,89 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
         }
     }
 
-    public string CanvasMeta { get; init; } = string.Empty;
+    public string CanvasMeta
+    {
+        get => _canvasMeta;
+        set => SetProperty(ref _canvasMeta, value);
+    }
 
-    public string CanvasHint { get; init; } = string.Empty;
+    public string CanvasHint
+    {
+        get => _canvasHint;
+        set => SetProperty(ref _canvasHint, value);
+    }
 
-    public string MessageSummary { get; init; } = string.Empty;
+    public string MessageSummary
+    {
+        get => _messageSummary;
+        set => SetProperty(ref _messageSummary, value);
+    }
 
-    public string RecordSummary { get; init; } = string.Empty;
+    public string RecordSummary
+    {
+        get => _recordSummary;
+        set => SetProperty(ref _recordSummary, value);
+    }
 
-    public string StatusSummary { get; init; } = string.Empty;
+    public string StatusSummary
+    {
+        get => _statusSummary;
+        set => SetProperty(ref _statusSummary, value);
+    }
 
-    public string CatalogSummary { get; init; } = string.Empty;
+    public string CatalogSummary
+    {
+        get => _catalogSummary;
+        set => SetProperty(ref _catalogSummary, value);
+    }
 
-    public string ToolboxSummary { get; init; } = string.Empty;
+    public string ToolboxSummary
+    {
+        get => _toolboxSummary;
+        set => SetProperty(ref _toolboxSummary, value);
+    }
 
-    public string ObjectBrowserSummary { get; init; } = string.Empty;
+    public string ObjectBrowserSummary
+    {
+        get => _objectBrowserSummary;
+        set => SetProperty(ref _objectBrowserSummary, value);
+    }
 
-    public string DataSourceSummary { get; init; } = string.Empty;
+    public string DataSourceSummary
+    {
+        get => _dataSourceSummary;
+        set => SetProperty(ref _dataSourceSummary, value);
+    }
 
-    public double CanvasWidth { get; init; }
+    public double CanvasWidth
+    {
+        get => _canvasWidth;
+        set => SetProperty(ref _canvasWidth, value);
+    }
 
-    public double CanvasHeight { get; init; }
+    public double CanvasHeight
+    {
+        get => _canvasHeight;
+        set => SetProperty(ref _canvasHeight, value);
+    }
 
-    public string PrimaryDocumentTitle { get; init; } = "Format Surface";
+    public string PrimaryDocumentTitle
+    {
+        get => _primaryDocumentTitle;
+        set => SetProperty(ref _primaryDocumentTitle, value);
+    }
 
-    public string SecondaryDocumentTitle { get; init; } = "Proof Preview";
+    public string SecondaryDocumentTitle
+    {
+        get => _secondaryDocumentTitle;
+        set => SetProperty(ref _secondaryDocumentTitle, value);
+    }
 
-    public string PreviewSvg { get; init; } = string.Empty;
+    public string PreviewSvg
+    {
+        get => _previewSvg;
+        set => SetProperty(ref _previewSvg, value);
+    }
 
     public void SelectCanvasElement(CanvasElementModel? element)
     {
@@ -285,10 +357,10 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
 
         SelectedCanvasElement.Caption = SelectedElementProperties.Name;
         SelectedCanvasElement.Value = SelectedElementProperties.Binding;
-        SelectedCanvasElement.X = Math.Round(SelectedElementProperties.Xmm * 10, 1);
-        SelectedCanvasElement.Y = Math.Round(SelectedElementProperties.Ymm * 10, 1);
-        SelectedCanvasElement.Width = Math.Round(SelectedElementProperties.WidthMm * 10, 1);
-        SelectedCanvasElement.Height = Math.Round(SelectedElementProperties.HeightMm * 10, 1);
+        SelectedCanvasElement.X = Math.Round(SelectedElementProperties.Xmm * CanvasScale, 1);
+        SelectedCanvasElement.Y = Math.Round(SelectedElementProperties.Ymm * CanvasScale, 1);
+        SelectedCanvasElement.Width = Math.Round(SelectedElementProperties.WidthMm * CanvasScale, 1);
+        SelectedCanvasElement.Height = Math.Round(SelectedElementProperties.HeightMm * CanvasScale, 1);
         RefreshSelectionRows();
     }
 
@@ -301,10 +373,10 @@ public sealed class DesignerWorkspaceModel : WorkspaceModel
                 Name = element.Caption,
                 Binding = element.Value,
                 Symbology = element.Caption == "BARCODE" ? "EAN-13 / JAN" : "Text",
-                Xmm = Math.Round(element.X / 10, 1),
-                Ymm = Math.Round(element.Y / 10, 1),
-                WidthMm = Math.Round(element.Width / 10, 1),
-                HeightMm = Math.Round(element.Height / 10, 1),
+                Xmm = Math.Round(element.X / CanvasScale, 1),
+                Ymm = Math.Round(element.Y / CanvasScale, 1),
+                WidthMm = Math.Round(element.Width / CanvasScale, 1),
+                HeightMm = Math.Round(element.Height / CanvasScale, 1),
                 BarcodeEngine = element.Caption == "BARCODE" ? "Zint" : "n/a",
                 OutputTargets = "SVG / PDF",
                 DispatchAuthority = "desktop-shell approved proof lineage",
@@ -565,7 +637,14 @@ public sealed class PrintConsoleWorkspaceModel : WorkspaceModel
 
         SelectionHeading = job.Subject;
         SelectionSummary = job.Note;
+        SelectedJobRows.Add(new PropertyRowModel("Current job", job.JobId));
+        if (!string.IsNullOrWhiteSpace(job.ParentJobId))
+        {
+            SelectedJobRows.Add(new PropertyRowModel("Parent job", job.ParentJobId));
+        }
+
         SelectedJobRows.Add(new PropertyRowModel("Template", job.Template));
+        SelectedJobRows.Add(new PropertyRowModel("Brand", job.Brand));
         SelectedJobRows.Add(new PropertyRowModel("Proof", job.Proof));
         SelectedJobRows.Add(new PropertyRowModel("Route", job.Route));
         SelectedJobRows.Add(new PropertyRowModel("Status", job.Status));
@@ -1410,7 +1489,10 @@ public sealed class TemplateCatalogRowModel
 public sealed class JobRowModel
 {
     public JobRowModel(
+        string jobId,
+        string? parentJobId,
         string subject,
+        string brand,
         string proof,
         string route,
         string status,
@@ -1422,7 +1504,10 @@ public sealed class JobRowModel
         string blocker = "",
         string nextAction = "")
     {
+        JobId = jobId;
+        ParentJobId = parentJobId;
         Subject = subject;
+        Brand = brand;
         Proof = proof;
         Route = route;
         Status = status;
@@ -1435,7 +1520,13 @@ public sealed class JobRowModel
         NextAction = nextAction;
     }
 
+    public string JobId { get; }
+
+    public string? ParentJobId { get; }
+
     public string Subject { get; }
+
+    public string Brand { get; }
 
     public string Proof { get; }
 

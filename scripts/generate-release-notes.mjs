@@ -172,9 +172,30 @@ function loadMaintenanceLedger(repo) {
   };
 }
 
+function loadMirrorSourceMetadata() {
+  const metadataPath = path.join(process.cwd(), ".github", "public-mirror-source.json");
+  if (!fs.existsSync(metadataPath)) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(fs.readFileSync(metadataPath, "utf8"));
+  } catch {
+    return null;
+  }
+}
+
 const args = parseArgs(process.argv.slice(2));
 const version = normalizeVersion(args.get("version"));
 const generatedAt = new Date().toISOString();
+const mirrorSource = loadMirrorSourceMetadata();
+const outputPath = path.join(process.cwd(), "docs", "release", `${version}.md`);
+
+if (mirrorSource && fs.existsSync(outputPath)) {
+  process.stdout.write(`${outputPath}\n`);
+  process.exit(0);
+}
+
 const currentStatePath = path.join(process.cwd(), "docs", "handoff", "current-state.md");
 const currentState = fs.readFileSync(currentStatePath, "utf8");
 const remote = tryRun("git remote get-url origin");
@@ -214,9 +235,9 @@ ${commitSummary(commitRange)}
 ## Remaining Release Gate
 
 ${nextTasks || "- No remaining release gate tasks recorded in current-state handoff."}
-`;
 
-const outputPath = path.join(process.cwd(), "docs", "release", `${version}.md`);
+${mirrorSource ? `## Mirror Source\n\n- Source repository: ${mirrorSource.sourceRepository ?? "unknown"}\n- Source ref: ${mirrorSource.sourceRef ?? "unknown"}\n- Source sha: \`${mirrorSource.sourceSha ?? "unknown"}\`\n` : ""}
+`;
 fs.mkdirSync(path.dirname(outputPath), { recursive: true });
 fs.writeFileSync(outputPath, notes);
 process.stdout.write(`${outputPath}\n`);

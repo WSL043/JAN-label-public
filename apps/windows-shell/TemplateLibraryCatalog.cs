@@ -1,9 +1,16 @@
+using JanLabel.WindowsShell.Core;
+
 namespace JanLabel.WindowsShell;
 
 public static class TemplateLibraryCatalog
 {
     public static void SeedHomePanel(TemplateLibraryPanelModel panel)
     {
+        if (TrySeedNativePanel(panel, "native packaged manifest + local overlay", "Home"))
+        {
+            return;
+        }
+
         var entries = BuildEntries();
         panel.HeaderDetail = "packaged manifest + desktop local overlay";
         panel.StatusSummary = "2 dispatch-safe / 1 draft / 1 rollback path";
@@ -50,6 +57,11 @@ public static class TemplateLibraryCatalog
 
     public static void SeedDesignerPanel(TemplateLibraryPanelModel panel)
     {
+        if (TrySeedNativePanel(panel, "native catalog snapshot", "Designer"))
+        {
+            return;
+        }
+
         var entries = BuildEntries();
         panel.HeaderDetail = "selection must stay proof-safe";
         panel.StatusSummary = "overlay delta, save boundary, rollback all visible";
@@ -92,6 +104,37 @@ public static class TemplateLibraryCatalog
                 new MessageRowModel("Info", "catalog", "Selected template detail now shows authority owner, dispatch route, and rollback path in one place."),
                 new MessageRowModel("Info", "default", "basic-50x30@v2 is currently modeled as the default winner for this operator shell."),
             });
+    }
+
+    private static bool TrySeedNativePanel(TemplateLibraryPanelModel panel, string headerDetail, string laneLabel)
+    {
+        if (!NativeTemplateCatalogLoader.TryLoad(out var state, out _) || state is null)
+        {
+            return false;
+        }
+
+        var entries = TemplateCatalogPresentation.BuildEntries(state);
+        var preferredTemplateVersion = string.IsNullOrWhiteSpace(state.EffectiveDefaultTemplateVersion)
+            ? state.DefaultTemplateVersion
+            : state.EffectiveDefaultTemplateVersion;
+        var draftCount = entries.Count((entry) => string.Equals(entry.State, "draft", StringComparison.OrdinalIgnoreCase));
+        var dispatchSafeCount = entries.Count((entry) => !entry.Dispatch.Contains("blocked", StringComparison.OrdinalIgnoreCase));
+        var fallbackCount = entries.Count((entry) => string.Equals(entry.State, "fallback", StringComparison.OrdinalIgnoreCase));
+        var statusSummary = $"{dispatchSafeCount} dispatch-safe / {draftCount} draft / {fallbackCount} rollback";
+
+        TemplateCatalogPresentation.ConfigurePanel(panel, entries, preferredTemplateVersion, headerDetail, statusSummary);
+        panel.ReplaceAlerts(
+            state.Issues
+                .Take(3)
+                .Select((issue) => new MessageRowModel(issue.Severity == "error" ? "Warn" : "Info", "catalog", issue.Message))
+                .Concat(
+                    new[]
+                    {
+                        new MessageRowModel("Info", "catalog", $"{laneLabel} is reading the packaged manifest and local overlay directly from the Windows shell."),
+                    })
+                .Take(3)
+                .ToArray());
+        return true;
     }
 
     private static TemplateCatalogRowModel[] BuildEntries()

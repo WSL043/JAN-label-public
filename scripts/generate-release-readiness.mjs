@@ -249,6 +249,7 @@ function powershellSingleQuote(input) {
 
 const args = parseArgs(process.argv.slice(2));
 const version = normalizeVersion(args.get("version"));
+const releaseVersion = version.startsWith("v") ? version.slice(1) : version;
 const readinessOutputDir = path.join(process.cwd(), "artifacts");
 fs.mkdirSync(readinessOutputDir, { recursive: true });
 const desktopShellVersionStatus = desktopShellVersionAlignment(version);
@@ -281,10 +282,10 @@ const nativeShellTests =
 
 const desktopBuild =
   process.platform === "win32"
-    ? runCommand("pnpm --filter @label/desktop-shell build --ci --no-sign")
+    ? runCommand("cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release")
     : skippedCheck(
-        "pnpm --filter @label/desktop-shell build --ci --no-sign",
-        "Windows desktop build check is only available on Windows hosts.",
+        "cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release",
+        "Desktop-shell companion build check is only available on Windows hosts.",
       );
 
 const nativeShellBuildCommand =
@@ -306,12 +307,12 @@ const nativeShellCompanionArtifactPath = path.join(
   "desktop-shell.exe",
 );
 const nativeShellInstallerOutputDir = path.join(process.cwd(), "apps", "windows-shell", "dist");
-const nativeShellInstallerBaseFilename = `JAN-Label_windows-native-shell_${version}`;
+const nativeShellInstallerBaseFilename = `JAN-Label_${releaseVersion}_windows_x64-setup`;
 const nativeShellInstallerArtifactPath = path.join(
   nativeShellInstallerOutputDir,
   `${nativeShellInstallerBaseFilename}.exe`,
 );
-const nativeShellInstallerCommand = `powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '${powershellSingleQuote(nativeShellInstallerOutputDir)}' | Out-Null; & 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe' '/DMyAppVersion=${version}' '/DMyOutputDir=${powershellSingleQuote(nativeShellInstallerOutputDir)}' '/DMyOutputBaseFilename=${nativeShellInstallerBaseFilename}' 'apps/windows-shell/installer/JanLabel.WindowsShell.iss'"`;
+const nativeShellInstallerCommand = `powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '${powershellSingleQuote(nativeShellInstallerOutputDir)}' | Out-Null; & 'C:\\Program Files (x86)\\Inno Setup 6\\ISCC.exe' '/DMyAppVersion=${releaseVersion}' '/DMyOutputDir=${powershellSingleQuote(nativeShellInstallerOutputDir)}' '/DMyOutputBaseFilename=${nativeShellInstallerBaseFilename}' 'apps/windows-shell/installer/JanLabel.WindowsShell.iss'"`;
 
 const nativeShellBuild =
   process.platform === "win32"
@@ -437,7 +438,7 @@ const markdown = `# Release Readiness ${version}
 - Overall status: **${report.overallStatus}**
 - Now tasks empty: ${report.nowTasksEmpty ? "yes" : `no (${report.nowTaskCount})`}
 - Release notes draft: ${notes.ok ? notes.path : notes.exists ? `${notes.path} (stale)` : "missing"}
-- Windows desktop build: ${statusLabel(desktopBuild)}
+- Desktop companion build: ${statusLabel(desktopBuild)}
 - Windows native shell build: ${statusLabel(nativeShellBuild)}
 - Windows native shell publish: ${statusLabel(nativeShellPublish)}
 - Windows native shell installer: ${statusLabel(nativeShellInstaller)}
@@ -458,7 +459,7 @@ ${report.validations
 - Path: ${notes.path}
 - Result: ${notes.ok ? "pass" : "fail"}
 
-## Desktop Build
+## Desktop Companion Build
 
 - Command: \`${desktopBuild.command}\`
 - Result: ${statusLabel(desktopBuild)}${desktopBuild.blocked ? ` (${desktopBuild.blocked})` : ""}

@@ -104,27 +104,20 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
-        with:
-          node-version: lts/*
-          package-manager-cache: false
-      - name: Enable Corepack
-        run: |
-          corepack enable
-          corepack install
       - uses: dtolnay/rust-toolchain@stable
-      - run: pnpm install --frozen-lockfile
       - run: cargo test --manifest-path apps/desktop-shell/src-tauri/Cargo.toml
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        with:
-          projectPath: apps/desktop-shell
-          args: --ci --no-sign
+      - run: cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release
+      - name: Assert companion build output
+        shell: powershell
+        run: |
+          $companion = "apps/desktop-shell/src-tauri/target/release/desktop-shell.exe"
+          if (-not (Test-Path $companion)) {
+            Write-Error "Expected companion binary output: $companion"
+          }
       - uses: actions/upload-artifact@v7
         with:
-          name: jan-label-windows-bundle
-          path: apps/desktop-shell/src-tauri/target/release/bundle/**
+          name: jan-label-companion
+          path: apps/desktop-shell/src-tauri/target/release/desktop-shell.exe
           if-no-files-found: error
 
   windows-shell-native:
