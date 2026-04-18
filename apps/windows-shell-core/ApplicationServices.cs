@@ -234,6 +234,7 @@ public sealed record AuditEventSummary(
     string SubjectKey,
     string EventKind,
     string OccurredAtUtc,
+    string Actor,
     string DetailJson);
 
 public sealed record AuditDispatchRecord(
