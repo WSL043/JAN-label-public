@@ -1,5 +1,7 @@
 # ops
 
-運用手順の置き場です。  
-再印刷承認フロー、障害時対応、プリンタプロファイルの更新手順をここに追加します。
+Operational runbooks live here.
 
+Current entries:
+
+- `codex-automation.md`

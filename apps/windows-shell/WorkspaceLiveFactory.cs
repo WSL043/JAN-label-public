@@ -4,6 +4,7 @@ using System.Collections.ObjectModel;
 using System.Globalization;
 using System.Linq;
 using System.Windows.Media;
+using JanLabel.WindowsShell.Core;
 
 namespace JanLabel.WindowsShell;
 
@@ -24,10 +25,10 @@ public static class WorkspaceLiveFactory
         var workspace = BuildHomeWorkspace(snapshot);
         return new ModuleModel(
             "Home",
-            "Companion-backed migration and session status",
+            "Live overview and session status",
             "live",
-            "Live desktop-shell companion status for bridge, catalog, governance, and preview.",
-            "desktop-shell remains the proof, audit, and catalog authority while the native shell reads and surfaces the current workstation state.",
+            "Live status for bridge, catalog, governance, and preview.",
+            "The shell surfaces bridge, native catalog, governance, preview, and audit state without taking over proof, restore, or save authority.",
             new[]
             {
                 ShellActionModel.Enabled(ShellActions.RefreshState),
@@ -42,23 +43,23 @@ public static class WorkspaceLiveFactory
                     ShellActionModel.Disabled(ShellActions.OpenHandoff, "Handoff notes stay in the repo until a native-shell document opener is wired.")),
                 new RibbonGroupModel(
                     "Templates",
-                    ShellActionModel.Enabled(ShellActions.OpenLibrary, "Refresh and focus the live template-library board from desktop-shell."),
+                    ShellActionModel.Enabled(ShellActions.OpenLibrary, "Refresh and focus the template-library board resolved by the Windows shell."),
                     ShellActionModel.Enabled(ShellActions.OverlayStatus, "Refresh and focus overlay winner, source, and dispatch-safety state."),
-                    ShellActionModel.Enabled(ShellActions.CatalogRules, "Refresh and focus catalog-governance context from desktop-shell.")),
+                    ShellActionModel.Enabled(ShellActions.CatalogRules, "Refresh and focus native catalog-governance context alongside live lane state.")),
                 new RibbonGroupModel("Preview", ShellActions.ViewPreview, ShellActions.RustPreview),
             },
             new[]
             {
-                new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                new ContextBadgeModel("Service", "live companion", Brushes.SteelBlue),
                 new ContextBadgeModel("Mode", "read + safe ops", Brushes.ForestGreen),
-                new ContextBadgeModel("Release", "v0.3.0", Brushes.DarkGoldenrod),
+                new ContextBadgeModel("State", "overview", Brushes.DarkGoldenrod),
             },
             new[]
             {
-                new StatusStripItemModel("Mode", "Companion dashboard"),
+                new StatusStripItemModel("Mode", "Overview"),
                 new StatusStripItemModel("Bridge", snapshot.BridgeStatus.PrintAdapterKind),
                 new StatusStripItemModel("Catalog", snapshot.TemplateCatalog.DefaultTemplateVersion),
-                new StatusStripItemModel("Backend", "desktop-shell authority"),
+                new StatusStripItemModel("Service", "hybrid local"),
             },
             workspace);
     }
@@ -70,13 +71,14 @@ public static class WorkspaceLiveFactory
             "Designer",
             "Live catalog, governance, and preview surface",
             "preview",
-            "Designer chrome remains WPF-native, but preview and catalog authority now come from the desktop-shell companion.",
-            "Live preview, catalog state, and proof-safe authority are visible without moving save or print ownership out of desktop-shell.",
+            "Designer chrome stays WPF-native while preview comes from the live service and catalog state is resolved directly in WPF.",
+            "Live preview, native catalog state, and proof-safe template status stay visible without leaving the design surface.",
             new[]
             {
-                ShellActionModel.Disabled(ShellActions.NewFormat, "Designer authoring stays local to the shell frame in v0.3.0."),
+                ShellActionModel.Disabled(ShellActions.NewFormat, "Designer authoring stays local to the shell frame in this release."),
+                ShellActionModel.Enabled(ShellActions.SaveToCatalog, "Save the current designer surface into the native local catalog."),
                 ShellActionModel.Enabled(ShellActions.PrintPreview),
-                ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0."),
+                ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation still runs through the local service in this release."),
             },
             new[]
             {
@@ -104,12 +106,12 @@ public static class WorkspaceLiveFactory
                 new RibbonGroupModel(
                     "Validate",
                     ShellActionModel.Enabled(ShellActions.RustPreview),
-                    ShellActionModel.Disabled(ShellActions.SaveToCatalog, "Template write-back remains owned by apps/desktop-shell in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0.")),
+                    ShellActionModel.Enabled(ShellActions.SaveToCatalog, "Save the current designer surface into the native local catalog."),
+                    ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation still runs through the local service in this release.")),
             },
             new[]
             {
-                new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                new ContextBadgeModel("Service", "live preview", Brushes.SteelBlue),
                 new ContextBadgeModel("Catalog", snapshot.TemplateGovernance.EffectiveDefaultSource, Brushes.DarkGoldenrod),
                 new ContextBadgeModel("Output", "SVG / PDF", Brushes.ForestGreen),
             },
@@ -118,7 +120,7 @@ public static class WorkspaceLiveFactory
                 new StatusStripItemModel("Mode", "Designer"),
                 new StatusStripItemModel("Template", snapshot.PreviewTemplateVersion),
                 new StatusStripItemModel("Preview", snapshot.PreviewStatus),
-                new StatusStripItemModel("Proof gate", "desktop-shell"),
+                new StatusStripItemModel("Approval", "service review"),
             },
             workspace);
     }
@@ -131,21 +133,22 @@ public static class WorkspaceLiveFactory
             "Print Console",
             "Live proof and dispatch subject lane",
             pendingProofs == 0 ? "live" : $"{pendingProofs} pending",
-            "This lane is now driven from live proof and audit data, not a seeded dispatch queue.",
-            "The shell shows current proof state and recent dispatch history, but print dispatch itself remains in apps/desktop-shell for v0.3.0.",
+            "This lane is now driven from the local audit mirror plus live bridge state, not a seeded dispatch queue.",
+            "The shell shows current proof state and recent dispatch history, native proof generation is now local, and direct print still runs through the local service.",
             new[]
             {
                 ShellActionModel.Enabled(ShellActions.RefreshSubjects),
+                ShellActionModel.Enabled(ShellActions.RunProof, "Create a fresh pending proof from the selected subject through the native local proof path."),
                 ShellActionModel.Enabled(ShellActions.ApproveProof),
-                ShellActionModel.Disabled(ShellActions.DispatchBatch, "Direct print dispatch remains owned by apps/desktop-shell in v0.3.0."),
+                ShellActionModel.Disabled(ShellActions.DispatchBatch, "Direct print dispatch still runs through the local service in this release."),
             },
             new[]
             {
                 new RibbonGroupModel(
                     "Subjects",
                     ShellActionModel.Enabled(ShellActions.RefreshSubjects),
-                    ShellActionModel.Disabled(ShellActions.Hold, "Queue mutation is not exposed directly from the native shell in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.Release, "Queue mutation is not exposed directly from the native shell in v0.3.0.")),
+                    ShellActionModel.Disabled(ShellActions.Hold, "Queue mutation is not exposed directly from the native shell in this release."),
+                    ShellActionModel.Disabled(ShellActions.Release, "Queue mutation is not exposed directly from the native shell in this release.")),
                 new RibbonGroupModel(
                     "Proof",
                     ShellActionModel.Disabled(ShellActions.OpenPdf, "Artifact opening is not yet wired directly from the native shell."),
@@ -154,12 +157,12 @@ public static class WorkspaceLiveFactory
                 new RibbonGroupModel(
                     "Dispatch",
                     ShellActionModel.Enabled(ShellActions.RouteCheck, "Refresh and focus the current proof subject, bridge route, and print guardrails."),
-                    ShellActionModel.Disabled(ShellActions.RunProof, "Proof generation remains owned by apps/desktop-shell in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.Print, "Direct print dispatch remains owned by apps/desktop-shell in v0.3.0.")),
+                    ShellActionModel.Enabled(ShellActions.RunProof, "Create a fresh pending proof for the selected subject through the native local proof path."),
+                    ShellActionModel.Disabled(ShellActions.Print, "Direct print dispatch still runs through the local service in this release.")),
             },
             new[]
             {
-                new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                new ContextBadgeModel("Review", "proof-safe only", Brushes.SteelBlue),
                 new ContextBadgeModel("Subjects", "audit-derived", Brushes.DarkGoldenrod),
                 new ContextBadgeModel("Route", snapshot.BridgeStatus.PrintAdapterKind, Brushes.ForestGreen),
             },
@@ -168,7 +171,7 @@ public static class WorkspaceLiveFactory
                 new StatusStripItemModel("Mode", "Print Console"),
                 new StatusStripItemModel("Bridge", snapshot.BridgeStatus.PrintAdapterKind),
                 new StatusStripItemModel("Queue", "audit-derived"),
-                new StatusStripItemModel("Dispatch", "desktop-shell only"),
+                new StatusStripItemModel("Dispatch", "proof local / print service"),
             },
             workspace);
     }
@@ -186,35 +189,35 @@ public static class WorkspaceLiveFactory
             "Batch Jobs",
             "Shared batch staging snapshot",
             snapshotBadge,
-            "Batch Jobs now reads the desktop-shell shared batch snapshot while leaving import, retry, and submit ownership outside WPF.",
-            "The native shell can review live queued rows, submit state, and blockers from the shared snapshot, but direct batch mutation remains guarded in apps/admin-web and apps/desktop-shell for v0.3.0.",
+            "Batch Jobs reads the shared batch snapshot while leaving import, retry, and submit actions outside WPF.",
+            "The native shell can review live queued rows, submit state, and blockers from the shared snapshot, but direct batch mutation stays in the main workflow.",
             new[]
             {
-                ShellActionModel.Enabled(ShellActions.QueueSnapshot, "Refresh the shared batch snapshot from desktop-shell."),
+                ShellActionModel.Enabled(ShellActions.QueueSnapshot, "Refresh the shared batch snapshot from the local service."),
                 ShellActionModel.Disabled(ShellActions.RetryFailed, "Retry still runs through admin-web even though the shared snapshot is now visible here."),
-                ShellActionModel.Disabled(ShellActions.ImportWorkbook, "Batch import remains owned by the transitional admin-web path in v0.3.0."),
+                ShellActionModel.Disabled(ShellActions.ImportWorkbook, "Batch import remains in the admin workflow for this release."),
             },
             new[]
             {
-                new RibbonGroupModel(
-                    "Import",
-                    ShellActionModel.Disabled(ShellActions.Csv, "Batch import authority remains transitional in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.Xlsx, "Batch import authority remains transitional in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.AliasMap, "Batch import authority remains transitional in v0.3.0.")),
-                new RibbonGroupModel(
-                    "Queue",
-                    ShellActionModel.Disabled(ShellActions.SubmitReady, "Direct batch submission is not exposed from the native shell in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.RetryFailed, "Retry still runs through admin-web even though the shared snapshot is now visible here."),
-                    ShellActionModel.Enabled(ShellActions.QueueSnapshot, "Refresh and focus the desktop-shell shared batch snapshot.")),
-                new RibbonGroupModel(
-                    "Validation",
-                    ShellActionModel.Disabled(ShellActions.FixtureCheck, "Batch validation remains transitional in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.UnknownTemplate, "Batch validation remains transitional in v0.3.0."),
-                    ShellActionModel.Disabled(ShellActions.JanWarnings, "Batch validation remains transitional in v0.3.0.")),
+                    new RibbonGroupModel(
+                        "Import",
+                        ShellActionModel.Disabled(ShellActions.Csv, "Batch import remains in the admin workflow for this release."),
+                        ShellActionModel.Disabled(ShellActions.Xlsx, "Batch import remains in the admin workflow for this release."),
+                        ShellActionModel.Disabled(ShellActions.AliasMap, "Batch import remains in the admin workflow for this release.")),
+                    new RibbonGroupModel(
+                        "Queue",
+                        ShellActionModel.Disabled(ShellActions.SubmitReady, "Direct batch submission is not exposed from the native shell in this release."),
+                        ShellActionModel.Disabled(ShellActions.RetryFailed, "Retry still runs through admin-web even though the shared snapshot is now visible here."),
+                        ShellActionModel.Enabled(ShellActions.QueueSnapshot, "Refresh and focus the shared batch snapshot.")),
+                    new RibbonGroupModel(
+                        "Validation",
+                        ShellActionModel.Disabled(ShellActions.FixtureCheck, "Batch validation remains in the admin workflow for this release."),
+                        ShellActionModel.Disabled(ShellActions.UnknownTemplate, "Batch validation remains in the admin workflow for this release."),
+                        ShellActionModel.Disabled(ShellActions.JanWarnings, "Batch validation remains in the admin workflow for this release.")),
             },
             new[]
             {
-                new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                new ContextBadgeModel("Access", "read-only", Brushes.SteelBlue),
                 new ContextBadgeModel("Snapshot", snapshot.BatchQueueSnapshot.Present ? "live" : "empty", snapshot.BatchQueueSnapshot.Present ? Brushes.ForestGreen : Brushes.DarkGoldenrod),
                 new ContextBadgeModel("Guardrail", failedCount > 0 ? "review blockers" : "read-only", failedCount > 0 ? Brushes.Firebrick : Brushes.DarkGoldenrod),
             },
@@ -223,7 +226,7 @@ public static class WorkspaceLiveFactory
                 new StatusStripItemModel("Mode", "Batch snapshot"),
                 new StatusStripItemModel("Ready", readyCount.ToString(CultureInfo.InvariantCulture)),
                 new StatusStripItemModel("Failed", failedCount.ToString(CultureInfo.InvariantCulture)),
-                new StatusStripItemModel("Mutation", "desktop-shell only"),
+                new StatusStripItemModel("Mutation", "outside WPF"),
             },
             workspace);
     }
@@ -236,13 +239,13 @@ public static class WorkspaceLiveFactory
             "History",
             "Live proof review and audit lane",
             pendingProofs == 0 ? "live" : $"{pendingProofs} pending",
-            "History now consumes live audit search, export, and bundle-list data from the desktop-shell companion.",
-            "Approve / reject / export now use safe companion commands, while restore and destructive retention remain explicitly out of scope in v0.3.0.",
+            "History consumes the local SQLite-backed audit mirror after each live refresh.",
+            "Approve and reject persist through the native local proof ledger, and both audit rows and bundle inventory now come from the local audit mirror. Restore still remains guarded elsewhere.",
             new[]
             {
                 ShellActionModel.Enabled(ShellActions.RefreshAudit),
                 ShellActionModel.Enabled(ShellActions.ExportAudit),
-                ShellActionModel.Disabled(ShellActions.TrimRetention, "Destructive retention apply is not exposed from the native shell in v0.3.0."),
+                ShellActionModel.Disabled(ShellActions.TrimRetention, "Destructive retention apply is not exposed from the native shell in this release."),
             },
             new[]
             {
@@ -255,16 +258,16 @@ public static class WorkspaceLiveFactory
                     "Audit",
                     ShellActionModel.Enabled(ShellActions.RefreshAudit),
                     ShellActionModel.Enabled(ShellActions.ExportAudit),
-                    ShellActionModel.Disabled(ShellActions.RetentionDryRun, "Retention commands remain owned by apps/desktop-shell in v0.3.0.")),
+                    ShellActionModel.Disabled(ShellActions.RetentionDryRun, "Retention commands still run through the local service in this release.")),
                 new RibbonGroupModel(
                     "Restore",
-                    ShellActionModel.Enabled(ShellActions.ListBundles, "Refresh and focus desktop-shell audit backup bundle inventory."),
-                    ShellActionModel.Disabled(ShellActions.ValidateBundle, "Restore validation stays guarded in apps/desktop-shell."),
-                    ShellActionModel.Disabled(ShellActions.Restore, "Audit restore remains owned by apps/desktop-shell in v0.3.0.")),
+                    ShellActionModel.Enabled(ShellActions.ListBundles, "Refresh and focus audit backup bundle inventory from the local service."),
+                    ShellActionModel.Disabled(ShellActions.ValidateBundle, "Restore validation stays guarded in the local service."),
+                    ShellActionModel.Disabled(ShellActions.Restore, "Audit restore still runs through the local service in this release.")),
             },
             new[]
             {
-                new ContextBadgeModel("Authority", "desktop-shell", Brushes.SteelBlue),
+                new ContextBadgeModel("Review", "safe ops", Brushes.SteelBlue),
                 new ContextBadgeModel("Export", "safe", Brushes.ForestGreen),
                 new ContextBadgeModel("Restore", "guarded", Brushes.DarkGoldenrod),
             },
@@ -273,7 +276,7 @@ public static class WorkspaceLiveFactory
                 new StatusStripItemModel("Mode", "History / audit"),
                 new StatusStripItemModel("Proof inbox", pendingProofs.ToString(CultureInfo.InvariantCulture)),
                 new StatusStripItemModel("Bundles", snapshot.AuditBackupBundles.Count.ToString(CultureInfo.InvariantCulture)),
-                new StatusStripItemModel("Restore", "desktop-shell only"),
+                new StatusStripItemModel("Restore", "guarded"),
             },
             workspace);
     }
@@ -283,19 +286,23 @@ public static class WorkspaceLiveFactory
         var activityRows = BuildHomeActivityRows(snapshot).ToArray();
         var model = new HomeWorkspaceModel
         {
-            HeaderDetail = "desktop-shell companion live snapshot",
-            StatusSummary = "desktop-shell companion live snapshot",
+            HeaderDetail = "live workstation snapshot",
+            StatusSummary = "live service snapshot",
             ActivitySummary = $"latest {activityRows.Length} live event(s)",
         };
 
-        var templateEntries = BuildTemplateEntries(snapshot);
-        var warningCount = snapshot.BridgeStatus.WarningDetails.Count + snapshot.TemplateGovernance.Issues.Count;
+        var templateCatalogSnapshot = TemplateCatalogSnapshotAdapter.FromCompanion(snapshot.TemplateCatalog, snapshot.TemplateGovernance);
+        var templateEntries = TemplateCatalogPresentation.BuildEntries(templateCatalogSnapshot);
+        var preferredTemplateVersion = string.IsNullOrWhiteSpace(templateCatalogSnapshot.EffectiveDefaultTemplateVersion)
+            ? templateCatalogSnapshot.DefaultTemplateVersion
+            : templateCatalogSnapshot.EffectiveDefaultTemplateVersion;
+        var warningCount = snapshot.BridgeStatus.WarningDetails.Count + templateCatalogSnapshot.Issues.Count;
         model.SummaryCards.Add(new SummaryCardModel("Bridge", snapshot.BridgeStatus.PrintAdapterKind, $"Adapters: {string.Join(", ", snapshot.BridgeStatus.AvailableAdapters)}"));
-        model.SummaryCards.Add(new SummaryCardModel("Catalog", snapshot.TemplateCatalog.DefaultTemplateVersion, $"{snapshot.TemplateCatalog.Templates.Count} visible entries from desktop-shell."));
-        model.SummaryCards.Add(new SummaryCardModel("Governance", warningCount.ToString(CultureInfo.InvariantCulture), "Bridge warnings and overlay issues surfaced from desktop-shell."));
+        model.SummaryCards.Add(new SummaryCardModel("Catalog", preferredTemplateVersion, $"{templateEntries.Count} visible entries resolved directly in the Windows shell."));
+        model.SummaryCards.Add(new SummaryCardModel("Governance", warningCount.ToString(CultureInfo.InvariantCulture), "Bridge warnings and overlay issues surfaced in the current workstation state."));
         model.SummaryCards.Add(new SummaryCardModel("Preview", BuildPreviewHeadline(snapshot), snapshot.PreviewMessage));
 
-        model.SessionRows.Add(new PropertyRowModel("Default template", snapshot.TemplateCatalog.DefaultTemplateVersion));
+        model.SessionRows.Add(new PropertyRowModel("Default template", preferredTemplateVersion));
         model.SessionRows.Add(new PropertyRowModel("Adapter", snapshot.BridgeStatus.PrintAdapterKind));
         model.SessionRows.Add(new PropertyRowModel("Audit log", snapshot.BridgeStatus.AuditLogDir));
         model.SessionRows.Add(new PropertyRowModel("Backup dir", snapshot.BridgeStatus.AuditBackupDir));
@@ -303,43 +310,43 @@ public static class WorkspaceLiveFactory
         model.SessionRows.Add(new PropertyRowModel("Print dir", snapshot.BridgeStatus.PrintOutputDir));
         model.SessionRows.Add(new PropertyRowModel("Zint", snapshot.BridgeStatus.ResolvedZintPath));
 
-        ConfigureTemplatePanel(
+        TemplateCatalogPresentation.ConfigurePanel(
             model.TemplateLibrary,
             templateEntries,
-            snapshot.TemplateCatalog.DefaultTemplateVersion,
-            "desktop-shell packaged manifest + local overlay",
+            preferredTemplateVersion,
+            "packaged manifest + local overlay",
             $"{templateEntries.Count((entry) => !entry.Dispatch.Contains("blocked", StringComparison.OrdinalIgnoreCase))} dispatch-safe / {templateEntries.Count((entry) => entry.State == "draft")} blocked");
 
         model.ActivityRows.AddRange(activityRows);
         model.ControlSections.Add(
             new PropertySectionModel(
-                "Authority Boundary",
-                "The Windows shell now reads live bridge, catalog, governance, preview, and audit state from apps/desktop-shell without taking ownership away from it.",
+                "Service Boundary",
+                "The Windows shell reads bridge, preview, and audit state from the local service while resolving catalog state directly from packaged and local manifest files.",
                 new[]
                 {
-                    new PropertyRowModel("Proof / print gate", "apps/desktop-shell"),
-                    new PropertyRowModel("Catalog authority", "apps/desktop-shell local overlay + packaged manifest"),
-                    new PropertyRowModel("Direct write-back", "deferred after v0.3.0"),
+                    new PropertyRowModel("Proof / print gate", "service-backed review"),
+                    new PropertyRowModel("Catalog source", "local overlay + packaged manifest"),
+                    new PropertyRowModel("Direct write-back", "not available in WPF"),
                 }));
         model.ControlSections.Add(
             new PropertySectionModel(
                 "Current Live Lanes",
-                "These lanes are now companion-backed in the native shell.",
+                "These lanes now mix native catalog reads with companion-backed workflow state.",
                 new[]
                 {
-                    new PropertyRowModel("Home", "bridge + catalog + governance + preview"),
+                    new PropertyRowModel("Home", "bridge + native catalog + governance + preview"),
                     new PropertyRowModel("Batch Jobs", "shared batch snapshot visibility"),
                     new PropertyRowModel("Print Console", "proof and audit-derived subject visibility"),
                     new PropertyRowModel("History", "proof review, export, bundle listing"),
                 }));
 
-        model.NextSteps.Add(new QueueItemModel("Refresh live state", "Re-query bridge, catalog, preview, and audit data from desktop-shell.", "live", "Use this before making release calls on v0.3.0 readiness."));
+        model.NextSteps.Add(new QueueItemModel("Refresh live state", "Re-query bridge, preview, and audit data while re-reading the native catalog state.", "live", "Use this before making decisions on the current workstation state."));
         model.NextSteps.Add(new QueueItemModel("Review pending proofs", "Move into Print Console or History and use safe approve / reject operations.", "proof", "Pending proofs are the live blocker that can actually move from this shell."));
-        model.NextSteps.Add(new QueueItemModel("Review shared batch snapshot", "Open Batch Jobs to inspect the current admin-web queue snapshot without taking submit ownership away from desktop-shell.", "batch", "Batch visibility is live now, but import / retry / submit remain guarded elsewhere."));
+        model.NextSteps.Add(new QueueItemModel("Review shared batch snapshot", "Open Batch Jobs to inspect the current admin-web queue snapshot without taking submit ownership away from the main workflow.", "batch", "Batch visibility is live now, but import, retry, and submit remain guarded elsewhere."));
 
         model.StatusItems.Add(new StatusItemModel("Bridge", "connected", $"Current adapter: {snapshot.BridgeStatus.PrintAdapterKind}", "OK", Brushes.ForestGreen));
-        model.StatusItems.Add(new StatusItemModel("Catalog", snapshot.TemplateCatalog.DefaultTemplateVersion, $"Effective source: {snapshot.TemplateGovernance.EffectiveDefaultSource}", "LIVE", Brushes.SteelBlue));
-        model.StatusItems.Add(new StatusItemModel("Governance", snapshot.TemplateGovernance.ManifestStatus, $"{snapshot.TemplateGovernance.Issues.Count} surfaced issues", warningCount == 0 ? "OK" : "WATCH", warningCount == 0 ? Brushes.ForestGreen : Brushes.DarkGoldenrod));
+        model.StatusItems.Add(new StatusItemModel("Catalog", preferredTemplateVersion, $"Effective source: {templateCatalogSnapshot.EffectiveDefaultSource}", "LIVE", Brushes.SteelBlue));
+        model.StatusItems.Add(new StatusItemModel("Governance", templateCatalogSnapshot.ManifestStatus, $"{templateCatalogSnapshot.Issues.Count} surfaced issues", warningCount == 0 ? "OK" : "WATCH", warningCount == 0 ? Brushes.ForestGreen : Brushes.DarkGoldenrod));
         model.StatusItems.Add(new StatusItemModel("Preview", snapshot.PreviewStatus, snapshot.PreviewMessage, BuildPreviewStatusCode(snapshot), ResolvePreviewAccent(snapshot)));
         return model;
     }
@@ -364,14 +371,19 @@ public static class WorkspaceLiveFactory
             new DataSourceRowModel("template_version", "Text", snapshot.PreviewTemplateVersion),
             new DataSourceRowModel("proof_mode", "Expr", "preview"),
         };
+        var templateCatalogSnapshot = TemplateCatalogSnapshotAdapter.FromCompanion(snapshot.TemplateCatalog, snapshot.TemplateGovernance);
+        var templateEntries = TemplateCatalogPresentation.BuildEntries(templateCatalogSnapshot);
+        var preferredTemplateVersion = string.IsNullOrWhiteSpace(templateCatalogSnapshot.EffectiveDefaultTemplateVersion)
+            ? templateCatalogSnapshot.DefaultTemplateVersion
+            : templateCatalogSnapshot.EffectiveDefaultTemplateVersion;
         var model = new DesignerWorkspaceModel
         {
             CanvasMeta = $"{snapshot.PreviewTemplateVersion} | {snapshot.BridgeStatus.PrintAdapterKind} | {snapshot.PreviewStatus} preview",
-            CanvasHint = "Canvas interaction stays local to the WPF shell; preview and authority state now come from apps/desktop-shell.",
-            MessageSummary = $"{snapshot.TemplateGovernance.Issues.Count} governance issue(s) / {BuildPreviewSummary(snapshot)}",
+            CanvasHint = "Canvas interaction stays local to the WPF shell while preview comes from the live service and catalog state is resolved directly in WPF.",
+            MessageSummary = $"{templateCatalogSnapshot.Issues.Count} governance issue(s) / {BuildPreviewSummary(snapshot)}",
             RecordSummary = "live sample record",
-            StatusSummary = "desktop-shell companion drives preview, bridge, and catalog authority",
-            CatalogSummary = $"{snapshot.TemplateGovernance.EffectiveDefaultSource} default / {snapshot.TemplateCatalog.Templates.Count} visible entries",
+            StatusSummary = "live service drives preview and bridge; catalog state is resolved locally",
+            CatalogSummary = $"{templateCatalogSnapshot.EffectiveDefaultSource} default / {templateEntries.Count} visible entries",
             ToolboxSummary = $"{toolboxGroups.Length} groups / {toolboxGroups.Sum((group) => group.Items.Count)} tools",
             ObjectBrowserSummary = $"{CountDesignerLeafNodes(objectNodes)} design objects / {CountDesignerLayerNodes(objectNodes)} layers",
             DataSourceSummary = $"{dataSources.Length} mapped fields",
@@ -387,12 +399,12 @@ public static class WorkspaceLiveFactory
             model.ToolboxGroups.Add(toolboxGroup);
         }
 
-        ConfigureTemplatePanel(
+        TemplateCatalogPresentation.ConfigurePanel(
             model.TemplateLibrary,
-            BuildTemplateEntries(snapshot),
-            snapshot.TemplateCatalog.DefaultTemplateVersion,
-            "desktop-shell catalog authority",
-            $"{snapshot.TemplateGovernance.ManifestStatus} / {snapshot.TemplateGovernance.Issues.Count} surfaced issue(s)");
+            templateEntries,
+            preferredTemplateVersion,
+            "catalog and save path",
+            $"{templateCatalogSnapshot.ManifestStatus} / {templateCatalogSnapshot.Issues.Count} surfaced issue(s)");
 
         foreach (var objectNode in objectNodes)
         {
@@ -415,16 +427,16 @@ public static class WorkspaceLiveFactory
         model.CanvasElements.Add(new CanvasElementModel("STATUS", BuildPreviewCanvasStatus(snapshot), 360, 304, 240, 32, 13, false));
 
         model.SetupRows.Add(new PropertyRowModel("Document", snapshot.PreviewTemplateVersion));
-        model.SetupRows.Add(new PropertyRowModel("Effective default", snapshot.TemplateCatalog.DefaultTemplateVersion));
-        model.SetupRows.Add(new PropertyRowModel("Catalog source", snapshot.TemplateGovernance.EffectiveDefaultSource));
-        model.SetupRows.Add(new PropertyRowModel("Preview route", "desktop-shell companion"));
+        model.SetupRows.Add(new PropertyRowModel("Effective default", preferredTemplateVersion));
+        model.SetupRows.Add(new PropertyRowModel("Catalog source", templateCatalogSnapshot.EffectiveDefaultSource));
+        model.SetupRows.Add(new PropertyRowModel("Preview route", "live companion"));
         model.SetupRows.Add(new PropertyRowModel("Preview source", snapshot.PreviewSource));
-        model.SetupRows.Add(new PropertyRowModel("Proof authority", "apps/desktop-shell"));
+        model.SetupRows.Add(new PropertyRowModel("Proof review", "service-backed"));
         model.SetupRows.Add(new PropertyRowModel("Adapter", snapshot.BridgeStatus.PrintAdapterKind));
 
         model.PropertySections.Add(new PropertySectionModel("Selected Object", "Property-grid editing remains local to the shell frame.", new[] { new PropertyRowModel("Name", "JAN barcode"), new PropertyRowModel("Binding", "{jan}"), new PropertyRowModel("Symbology", "EAN-13 / JAN"), new PropertyRowModel("Position", "28,132"), new PropertyRowModel("Size", "320 x 102") }));
-        model.PropertySections.Add(new PropertySectionModel("Live Preview Contract", "This preview now comes from desktop-shell companion mode, not from a seeded mock.", new[] { new PropertyRowModel("Preview command", "preview_template_draft"), new PropertyRowModel("Output", "SVG / PDF release scope"), new PropertyRowModel("Template source", snapshot.PreviewTemplateVersion), new PropertyRowModel("Preview source", snapshot.PreviewSource), new PropertyRowModel("Preview status", snapshot.PreviewStatus) }));
-        model.PropertySections.Add(new PropertySectionModel("Authority Boundary", "Saving and proof generation remain outside the native shell for v0.3.0.", new[] { new PropertyRowModel("Save to catalog", "desktop-shell only"), new PropertyRowModel("Proof generation", "desktop-shell only"), new PropertyRowModel("Print gate", "approved proof lineage") }));
+        model.PropertySections.Add(new PropertySectionModel("Live Preview", "This preview comes from the companion service rather than a seeded mock.", new[] { new PropertyRowModel("Preview command", "preview_template_draft"), new PropertyRowModel("Output", "SVG / PDF"), new PropertyRowModel("Template source", snapshot.PreviewTemplateVersion), new PropertyRowModel("Preview source", snapshot.PreviewSource), new PropertyRowModel("Preview status", snapshot.PreviewStatus) }));
+        model.PropertySections.Add(new PropertySectionModel("Save and Proof", "Saving to catalog now runs natively in WPF, while proof generation and dispatch remain gated in the local service.", new[] { new PropertyRowModel("Save to catalog", "native local catalog"), new PropertyRowModel("Proof generation", "service only"), new PropertyRowModel("Print gate", "approved proof lineage") }));
 
         model.RecordRows.Add(new PropertyRowModel("SKU", "200-145-3"));
         model.RecordRows.Add(new PropertyRowModel("JAN", snapshot.Preview?.NormalizedJan ?? "4901234567894"));
@@ -452,7 +464,7 @@ public static class WorkspaceLiveFactory
         model.StatusItems.Add(new StatusItemModel("Bridge", "connected", $"Adapter: {snapshot.BridgeStatus.PrintAdapterKind}", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Catalog", snapshot.TemplateCatalog.DefaultTemplateVersion, $"Source: {snapshot.TemplateGovernance.EffectiveDefaultSource}", "LIVE", Brushes.SteelBlue));
         model.StatusItems.Add(new StatusItemModel("Preview", snapshot.PreviewStatus, snapshot.PreviewMessage, BuildPreviewStatusCode(snapshot), ResolvePreviewAccent(snapshot)));
-        model.StatusItems.Add(new StatusItemModel("Proof authority", "desktop-shell", "Save and proof remain outside the native shell in v0.3.0.", "LOCK", Brushes.Firebrick));
+        model.StatusItems.Add(new StatusItemModel("Save path", "native local catalog", "Saved templates persist directly into the local catalog; proof review is still required.", "LIVE", Brushes.ForestGreen));
 
         AddRulers(model.TopRulerMarks, model.SideRulerMarks);
         model.SelectCanvasElement(model.CanvasElements[2]);
@@ -467,9 +479,9 @@ public static class WorkspaceLiveFactory
         var model = new PrintConsoleWorkspaceModel
         {
             MessageSummary = $"{snapshot.AuditSearch.Entries.Count((entry) => string.Equals(entry.Proof?.Status, "pending", StringComparison.OrdinalIgnoreCase))} pending proof(s) / direct dispatch disabled",
-            FooterDetail = "live proof + audit state from desktop-shell companion",
+            FooterDetail = "live proof/audit snapshot overlaid with local proof-create and proof-review state",
             JobSummary = $"{snapshot.AuditSearch.Entries.Select((entry) => entry.Dispatch.MatchSubject.Sku).Distinct(StringComparer.OrdinalIgnoreCase).Count()} recent subjects",
-            ProofQueueSummary = $"{proofQueue.Length} companion-backed proof(s)",
+            ProofQueueSummary = $"{proofQueue.Length} locally reviewable proof(s)",
             TimelineSummary = $"{timelineRows.Length} recent audit-derived event(s)",
         };
 
@@ -479,8 +491,8 @@ public static class WorkspaceLiveFactory
         }
 
         model.RouteRows.Add(new PropertyRowModel("Primary route", snapshot.BridgeStatus.PrintAdapterKind));
-        model.RouteRows.Add(new PropertyRowModel("Proof authority", "apps/desktop-shell"));
-        model.RouteRows.Add(new PropertyRowModel("Dispatch authority", "apps/desktop-shell"));
+        model.RouteRows.Add(new PropertyRowModel("Proof review", "native local ledger"));
+        model.RouteRows.Add(new PropertyRowModel("Dispatch", "service-backed"));
         model.RouteRows.Add(new PropertyRowModel("Audit source", snapshot.BridgeStatus.AuditLogDir));
 
         foreach (var job in printJobs)
@@ -493,24 +505,25 @@ public static class WorkspaceLiveFactory
             model.TimelineRows.Add(activity);
         }
 
-        model.ControlSections.Add(new PropertySectionModel("Scope for v0.3.0", "This lane is live for reading proof / audit state and safe proof review operations only.", new[] { new PropertyRowModel("Live data", "print_bridge_status + search_audit_log"), new PropertyRowModel("Safe actions", "approve_proof / reject_proof"), new PropertyRowModel("Direct print", "disabled in native shell") }));
-        model.ControlSections.Add(new PropertySectionModel("Authority Boundary", "Recent dispatch history is visible here, but direct queue mutation is still outside this shell.", new[] { new PropertyRowModel("Subject source", "audit-derived subject view"), new PropertyRowModel("Proof gate", "approved proof lineage in desktop-shell"), new PropertyRowModel("Unsupported actions", "print, hold, release, run proof") }));
+        model.ControlSections.Add(new PropertySectionModel("Current Scope", "This lane is live for reading proof and audit state plus native proof create/review operations.", new[] { new PropertyRowModel("Live data", "print_bridge_status + search_audit_log"), new PropertyRowModel("Native actions", "run proof / approve_proof / reject_proof"), new PropertyRowModel("Direct print", "disabled in native shell") }));
+        model.ControlSections.Add(new PropertySectionModel("Dispatch Guardrails", "Recent dispatch history is visible here, but direct queue mutation stays outside this shell.", new[] { new PropertyRowModel("Subject source", "audit-derived subject view"), new PropertyRowModel("Proof gate", "approved proof lineage"), new PropertyRowModel("Unsupported actions", "print, hold, release") }));
 
         model.MessageRows.Add(new MessageRowModel("Info", "bridge", $"Current bridge adapter is {snapshot.BridgeStatus.PrintAdapterKind}."));
-        model.MessageRows.Add(new MessageRowModel("Warn", "dispatch", "Direct print dispatch stays disabled in the native shell for v0.3.0."));
+        model.MessageRows.Add(new MessageRowModel("Info", "proof", "Run Proof now creates a fresh pending proof through the native local proof path for the selected subject row."));
+        model.MessageRows.Add(new MessageRowModel("Warn", "dispatch", "Direct print dispatch stays disabled in the native shell for this release."));
         if (snapshot.AuditSearch.Entries.Any((entry) => string.Equals(entry.Proof?.Status, "pending", StringComparison.OrdinalIgnoreCase)))
         {
             model.MessageRows.Add(new MessageRowModel("Warn", "proof", "Pending proofs are still blocking related dispatch subjects."));
         }
         else
         {
-            model.MessageRows.Add(new MessageRowModel("Info", "proof", "No pending proofs are currently surfaced by desktop-shell."));
+            model.MessageRows.Add(new MessageRowModel("Info", "proof", "No pending proofs are currently surfaced by the local audit mirror."));
         }
 
         model.StatusItems.Add(new StatusItemModel("Bridge", "connected", $"Warnings: {snapshot.BridgeStatus.WarningDetails.Count}", "OK", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Proof gate", "strict", "Approved proof lineage still gates print.", "LOCK", Brushes.Firebrick));
         model.StatusItems.Add(new StatusItemModel("Subject view", "audit-derived", "Recent proof and dispatch subjects only; not a live queue snapshot.", "LIVE", Brushes.SteelBlue));
-        model.StatusItems.Add(new StatusItemModel("Dispatch", "desktop-shell only", "Print / proof generation stay out of scope in v0.3.0.", "WATCH", Brushes.DarkGoldenrod));
+        model.StatusItems.Add(new StatusItemModel("Dispatch", "print only", "Proof generation is now local; direct print still stays in the service workflow.", "WATCH", Brushes.DarkGoldenrod));
 
         model.SelectedProof = model.ProofQueue.FirstOrDefault();
         if (model.SelectedProof is null)
@@ -533,14 +546,14 @@ public static class WorkspaceLiveFactory
         {
             MessageSummary = batchSnapshot is null
                 ? string.IsNullOrWhiteSpace(batchSnapshotError)
-                    ? "desktop-shell shared batch snapshot is empty"
-                    : "desktop-shell shared batch snapshot is temporarily unavailable"
+                    ? "shared batch snapshot is empty"
+                    : "shared batch snapshot is temporarily unavailable"
                 : $"{queueRows.Count} queued row(s) / {failedCount} blocker(s)",
             FooterDetail = batchSnapshot is null
                 ? string.IsNullOrWhiteSpace(batchSnapshotError)
                     ? "waiting for admin-web to publish a shared batch snapshot"
                     : $"batch snapshot lane degraded: {batchSnapshotError}"
-                : $"desktop-shell shared snapshot updated {batchSnapshot.UpdatedAt}",
+                : $"shared snapshot updated {batchSnapshot.UpdatedAt}",
             QueueSummary = batchSnapshot is null
                 ? string.IsNullOrWhiteSpace(batchSnapshotError)
                     ? "no queued rows published"
@@ -550,7 +563,7 @@ public static class WorkspaceLiveFactory
                 ? string.IsNullOrWhiteSpace(batchSnapshotError)
                     ? "shared snapshot not published"
                     : "shared snapshot refresh failed"
-                : $"{batchSnapshot.SourceKind ?? "snapshot"} / {batchSnapshot.SourceFileName ?? "desktop-shell shared snapshot"}",
+                : $"{batchSnapshot.SourceKind ?? "snapshot"} / {batchSnapshot.SourceFileName ?? "shared snapshot"}",
             ActivitySummary = batchSnapshot is null
                 ? string.IsNullOrWhiteSpace(batchSnapshotError)
                     ? "publish a queue from admin-web to light this lane up"
@@ -558,9 +571,9 @@ public static class WorkspaceLiveFactory
                 : batchSnapshot.SubmitMessage,
         };
 
-        model.ColumnRows.Add(new PropertyRowModel("Snapshot route", string.IsNullOrWhiteSpace(snapshot.BatchQueueSnapshot.FilePath) ? "desktop-shell companion response" : snapshot.BatchQueueSnapshot.FilePath));
-        model.ColumnRows.Add(new PropertyRowModel("Authority", "apps/admin-web via apps/desktop-shell"));
-        model.ColumnRows.Add(new PropertyRowModel("Release scope", "read-only queue visibility in WPF"));
+        model.ColumnRows.Add(new PropertyRowModel("Snapshot route", string.IsNullOrWhiteSpace(snapshot.BatchQueueSnapshot.FilePath) ? "companion response" : snapshot.BatchQueueSnapshot.FilePath));
+        model.ColumnRows.Add(new PropertyRowModel("Workflow", "admin-web shared queue"));
+        model.ColumnRows.Add(new PropertyRowModel("Scope", "read-only queue visibility in WPF"));
         model.ColumnRows.Add(new PropertyRowModel("Direct mutation", "disabled in native shell"));
 
         if (batchSnapshot is null)
@@ -570,9 +583,9 @@ public static class WorkspaceLiveFactory
                 "awaiting published queue",
                 string.IsNullOrWhiteSpace(batchSnapshotError) ? "empty" : "degraded",
                 string.IsNullOrWhiteSpace(batchSnapshotError)
-                    ? "No admin-web queue snapshot is currently published through desktop-shell."
+                    ? "No admin-web queue snapshot is currently published."
                     : $"The shared batch snapshot could not be loaded: {batchSnapshotError}",
-                "desktop-shell companion",
+                "companion service",
                 "shared snapshot",
                 string.IsNullOrWhiteSpace(batchSnapshotError)
                     ? "Publish a queue from admin-web before reviewing it here."
@@ -587,11 +600,11 @@ public static class WorkspaceLiveFactory
             model.ControlSections.Add(new PropertySectionModel(
                 "Shared Snapshot Contract",
                 string.IsNullOrWhiteSpace(batchSnapshotError)
-                    ? "This lane now waits on a desktop-shell-owned snapshot instead of seeded mock rows."
-                    : "This lane reads a desktop-shell-owned snapshot, but the current refresh could not load that file.",
+                    ? "This lane now waits on a shared snapshot instead of seeded mock rows."
+                    : "This lane reads the shared snapshot, but the current refresh could not load that file.",
                 new[]
                 {
-                    new PropertyRowModel("Published by", "apps/admin-web via desktop-shell"),
+                    new PropertyRowModel("Published by", "apps/admin-web"),
                     new PropertyRowModel("Read by", "apps/windows-shell companion"),
                     new PropertyRowModel("Direct submit", "not exposed in WPF"),
                 }));
@@ -605,15 +618,15 @@ public static class WorkspaceLiveFactory
                     new PropertyRowModel("Real mutation path", "apps/admin-web"),
                 }));
 
-            model.MessageRows.Add(new MessageRowModel("Info", "batch", "Batch Jobs now expects a shared snapshot from admin-web through desktop-shell."));
-            model.MessageRows.Add(new MessageRowModel("Warn", "scope", "Import, submission, and retry remain disabled in the native shell for v0.3.0."));
+            model.MessageRows.Add(new MessageRowModel("Info", "batch", "Batch Jobs now expects a shared snapshot published from admin-web."));
+            model.MessageRows.Add(new MessageRowModel("Warn", "scope", "Import, submission, and retry remain disabled in the native shell for this release."));
             if (!string.IsNullOrWhiteSpace(batchSnapshotError))
             {
                 model.MessageRows.Add(new MessageRowModel("Warn", "snapshot", $"Shared batch snapshot load failed: {batchSnapshotError}"));
             }
 
             model.StatusItems.Add(new StatusItemModel("Snapshot", string.IsNullOrWhiteSpace(batchSnapshotError) ? "empty" : "degraded", string.IsNullOrWhiteSpace(batchSnapshotError) ? "No shared batch snapshot is available yet." : "Shared batch snapshot refresh failed; the rest of the live shell remains available.", string.IsNullOrWhiteSpace(batchSnapshotError) ? "WAIT" : "WATCH", Brushes.DarkGoldenrod));
-            model.StatusItems.Add(new StatusItemModel("Authority", "admin-web via desktop-shell", "Queue mutation stays in admin-web; desktop-shell remains the authority path for shared state.", "LOCK", Brushes.Firebrick));
+            model.StatusItems.Add(new StatusItemModel("Workflow", "admin-web", "Queue mutation stays in admin-web; WPF is review-only here.", "LOCK", Brushes.Firebrick));
             model.StatusItems.Add(new StatusItemModel("Mode", "read-only", "Review shared queued rows after admin-web publishes them.", "LIVE", Brushes.SteelBlue));
 
             model.SelectedImportSession = model.ImportSessions.FirstOrDefault();
@@ -625,10 +638,10 @@ public static class WorkspaceLiveFactory
             $"{batchSnapshot.SourceKind ?? "snapshot"} / {batchSnapshot.CapturedAt}",
             batchSnapshot.SubmitPhase,
             string.IsNullOrWhiteSpace(batchSnapshot.SubmitMessage)
-                ? $"{queueRows.Count} queued row(s) are published through desktop-shell."
+                ? $"{queueRows.Count} queued row(s) are published through the shared snapshot."
                 : batchSnapshot.SubmitMessage,
             batchSnapshot.Actor,
-            "desktop-shell shared snapshot",
+            "shared snapshot",
             failedCount > 0 ? $"{failedCount} row(s) are blocked or failed." : "No blockers are currently surfaced.",
             readyCount > 0
                 ? "Review ready rows here, then submit from admin-web when appropriate."
@@ -639,7 +652,7 @@ public static class WorkspaceLiveFactory
             model.BatchRows.Add(row);
         }
 
-        model.ActivityRows.Add(new ActivityRowModel(batchSnapshot.CapturedAt, "snapshot", $"{queueRows.Count} queued row(s) captured from {batchSnapshot.SourceFileName ?? "desktop-shell"}.", "live"));
+        model.ActivityRows.Add(new ActivityRowModel(batchSnapshot.CapturedAt, "snapshot", $"{queueRows.Count} queued row(s) captured from {batchSnapshot.SourceFileName ?? "shared snapshot"}.", "live"));
         model.ActivityRows.Add(new ActivityRowModel(batchSnapshot.UpdatedAt, "submit", string.IsNullOrWhiteSpace(batchSnapshot.SubmitMessage) ? "Submit state is idle." : batchSnapshot.SubmitMessage, batchSnapshot.SubmitPhase));
         if (failedCount > 0)
         {
@@ -648,7 +661,7 @@ public static class WorkspaceLiveFactory
 
         model.ControlSections.Add(new PropertySectionModel(
             "Shared Snapshot Contract",
-            "This lane now reflects a live queue snapshot saved by admin-web through desktop-shell.",
+            "This lane now reflects a live queue snapshot saved by admin-web for workstation review.",
             new[]
             {
                 new PropertyRowModel("Snapshot id", batchSnapshot.SnapshotId),
@@ -656,13 +669,13 @@ public static class WorkspaceLiveFactory
                 new PropertyRowModel("Updated", batchSnapshot.UpdatedAt),
             }));
         model.ControlSections.Add(new PropertySectionModel(
-            "Authority Boundary",
+            "Workflow Boundary",
             "Queued rows are live here, but import, retry, and submit still happen outside WPF.",
             new[]
             {
                 new PropertyRowModel("Import / rebuild", "apps/admin-web"),
                 new PropertyRowModel("Retry / submit", "apps/admin-web"),
-                new PropertyRowModel("Proof / print gate", "apps/desktop-shell"),
+                new PropertyRowModel("Proof / print gate", "service-backed"),
             }));
 
         model.MessageRows.Add(new MessageRowModel("Info", "batch", $"Shared snapshot route is {snapshot.BatchQueueSnapshot.FilePath}."));
@@ -676,9 +689,9 @@ public static class WorkspaceLiveFactory
             model.MessageRows.Add(new MessageRowModel("Info", "queue", $"{readyCount} queued row(s) are ready for admin-web submit."));
         }
 
-        model.StatusItems.Add(new StatusItemModel("Snapshot", queueRows.Count.ToString(CultureInfo.InvariantCulture), "Shared queue rows currently published through desktop-shell.", "LIVE", Brushes.ForestGreen));
+        model.StatusItems.Add(new StatusItemModel("Snapshot", queueRows.Count.ToString(CultureInfo.InvariantCulture), "Shared queue rows are currently available in this workstation.", "LIVE", Brushes.ForestGreen));
         model.StatusItems.Add(new StatusItemModel("Submit state", batchSnapshot.SubmitPhase, string.IsNullOrWhiteSpace(batchSnapshot.SubmitMessage) ? "No submit message is currently recorded." : batchSnapshot.SubmitMessage, batchSnapshot.SubmitPhase == "error" ? "WATCH" : "INFO", batchSnapshot.SubmitPhase == "error" ? Brushes.DarkGoldenrod : Brushes.SteelBlue));
-        model.StatusItems.Add(new StatusItemModel("Authority", "admin-web via desktop-shell", "Queued rows are visible here; import, retry, and submit remain outside WPF.", "LOCK", Brushes.Firebrick));
+        model.StatusItems.Add(new StatusItemModel("Workflow", "admin-web", "Queued rows are visible here; import, retry, and submit remain outside WPF.", "LOCK", Brushes.Firebrick));
 
         model.SelectedBatch = model.BatchRows.FirstOrDefault((row) => string.Equals(row.CanonicalStatus, "failed", StringComparison.OrdinalIgnoreCase))
             ?? model.BatchRows.FirstOrDefault((row) => string.Equals(row.CanonicalStatus, "ready", StringComparison.OrdinalIgnoreCase))
@@ -694,7 +707,7 @@ public static class WorkspaceLiveFactory
             ? "unknown-template"
             : $"{draft.Template.Id}@{draft.Template.Version}";
         var route = row.DispatchResult?.Submission.AdapterKind
-            ?? (string.IsNullOrWhiteSpace(draft.PrinterProfile.Adapter) ? "desktop-shell" : draft.PrinterProfile.Adapter);
+            ?? (string.IsNullOrWhiteSpace(draft.PrinterProfile.Adapter) ? "service route" : draft.PrinterProfile.Adapter);
         var note = BuildBatchRowNote(row);
         return new BatchRowModel(
             draft.JobId,
@@ -744,7 +757,7 @@ public static class WorkspaceLiveFactory
             return "No retry needed unless admin-web records a later failure.";
         }
 
-        return "Mutation stays outside WPF in v0.3.0.";
+        return "Mutation stays outside WPF in this release.";
     }
 
     private static string NormalizeBatchStatus(string? status)
@@ -772,11 +785,11 @@ public static class WorkspaceLiveFactory
         var model = new HistoryWorkspaceModel
         {
             MessageSummary = $"{snapshot.AuditSearch.Entries.Count((entry) => string.Equals(entry.Proof?.Status, "pending", StringComparison.OrdinalIgnoreCase))} pending proof(s) / {snapshot.AuditBackupBundles.Count} bundle(s)",
-            FooterDetail = "approve, reject, export, and bundle listing are companion-backed",
+            FooterDetail = "approve/reject, audit rows, export, and bundle inventory now use the local SQLite mirror",
             LedgerSummary = $"{snapshot.AuditSearch.Entries.Count} recent audit entries",
             PendingProofSummary = $"{pendingProofs.Length} review item(s)",
             BundleSummary = $"{bundleRows.Length} guarded bundle(s)",
-            FilterSummary = "desktop-shell companion filter set",
+            FilterSummary = "live filter set",
         };
 
         foreach (var proof in pendingProofs)
@@ -794,25 +807,26 @@ public static class WorkspaceLiveFactory
             model.AuditRows.Add(auditRow);
         }
 
-        model.FilterRows.Add(new PropertyRowModel("Query source", "desktop-shell companion"));
+        model.FilterRows.Add(new PropertyRowModel("Query source", "local SQLite mirror after live sync"));
         model.FilterRows.Add(new PropertyRowModel("Loaded entries", snapshot.AuditSearch.Entries.Count.ToString(CultureInfo.InvariantCulture)));
         model.FilterRows.Add(new PropertyRowModel("Default template", snapshot.TemplateCatalog.DefaultTemplateVersion));
-        model.FilterRows.Add(new PropertyRowModel("Restore authority", "desktop-shell only"));
+        model.FilterRows.Add(new PropertyRowModel("Restore path", "service only"));
 
-        model.ControlSections.Add(new PropertySectionModel("Safe Actions", "Only read + safe operations are exposed from this lane in v0.3.0.", new[] { new PropertyRowModel("Approve proof", "enabled"), new PropertyRowModel("Reject proof", "enabled"), new PropertyRowModel("Export audit", "enabled") }));
+        model.ControlSections.Add(new PropertySectionModel("Safe Actions", "Only read and safe operations are exposed from this lane in this release.", new[] { new PropertyRowModel("Approve proof", "enabled"), new PropertyRowModel("Reject proof", "enabled"), new PropertyRowModel("Export audit", "enabled") }));
         model.ControlSections.Add(new PropertySectionModel("Deferred Actions", "Destructive or authority-shifting operations stay outside the native shell for this release.", new[] { new PropertyRowModel("Retention apply", "disabled"), new PropertyRowModel("Restore bundle", "disabled"), new PropertyRowModel("Artifact pin / repair", "deferred") }));
 
-        model.MessageRows.Add(new MessageRowModel("Info", "audit", "Audit search and export are now backed by the desktop-shell companion."));
-        model.MessageRows.Add(new MessageRowModel("Warn", "restore", "Restore stays guarded in apps/desktop-shell for v0.3.0."));
+        model.MessageRows.Add(new MessageRowModel("Info", "proof", "Approve and reject now persist through the native local proof ledger before the shell overlays refreshed live state."));
+        model.MessageRows.Add(new MessageRowModel("Info", "audit", "Audit rows, export, and bundle listing now come from the native local SQLite mirror after each refresh."));
+        model.MessageRows.Add(new MessageRowModel("Warn", "restore", "Restore stays guarded in the service workflow for this release."));
         foreach (var issue in snapshot.TemplateGovernance.Issues.Take(2))
         {
             model.MessageRows.Add(new MessageRowModel(MapIssueLevel(issue.Severity), "catalog", issue.Message));
         }
 
         model.StatusItems.Add(new StatusItemModel("Pending proofs", model.PendingProofs.Count.ToString(CultureInfo.InvariantCulture), "Safe approve / reject is available from this shell.", model.PendingProofs.Count == 0 ? "OK" : "WATCH", model.PendingProofs.Count == 0 ? Brushes.ForestGreen : Brushes.DarkGoldenrod));
-        model.StatusItems.Add(new StatusItemModel("Audit export", "ready", "Export returns the current audit snapshot from desktop-shell.", "OK", Brushes.ForestGreen));
-        model.StatusItems.Add(new StatusItemModel("Bundle listing", snapshot.AuditBackupBundles.Count.ToString(CultureInfo.InvariantCulture), "Bundle list is live; restore remains guarded elsewhere.", "LIVE", Brushes.SteelBlue));
-        model.StatusItems.Add(new StatusItemModel("Retention", "deferred", "Retention commands are not exposed from WPF in v0.3.0.", "LOCK", Brushes.Firebrick));
+        model.StatusItems.Add(new StatusItemModel("Audit export", "local", "Export returns the current local SQLite-backed audit mirror.", "OK", Brushes.ForestGreen));
+        model.StatusItems.Add(new StatusItemModel("Bundle listing", snapshot.AuditBackupBundles.Count.ToString(CultureInfo.InvariantCulture), "Bundle list now comes from the local audit mirror; restore remains guarded elsewhere.", "LOCAL", Brushes.SteelBlue));
+        model.StatusItems.Add(new StatusItemModel("Retention", "deferred", "Retention commands are not exposed from WPF in this release.", "LOCK", Brushes.Firebrick));
 
         model.SelectedPendingProof = model.PendingProofs.FirstOrDefault();
         if (model.SelectedPendingProof is null)
@@ -826,108 +840,6 @@ public static class WorkspaceLiveFactory
         }
 
         return model;
-    }
-
-    private static void ConfigureTemplatePanel(
-        TemplateLibraryPanelModel panel,
-        IReadOnlyList<TemplateCatalogRowModel> entries,
-        string preferredTemplateVersion,
-        string headerDetail,
-        string statusSummary)
-    {
-        panel.HeaderDetail = headerDetail;
-        panel.StatusSummary = statusSummary;
-        panel.EntrySummary = $"{entries.Count} visible / {entries.Count((entry) => string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase))} local / {entries.Count((entry) => string.Equals(entry.State, "draft", StringComparison.OrdinalIgnoreCase))} draft";
-        panel.ReplaceSummaryCards(
-            new[]
-            {
-                new SummaryCardModel("Effective Default", preferredTemplateVersion, "Desktop-shell still decides which saved template version wins."),
-                new SummaryCardModel("Dispatch-Safe", entries.Count((entry) => !entry.Dispatch.Contains("blocked", StringComparison.OrdinalIgnoreCase)).ToString(CultureInfo.InvariantCulture), "Only saved catalog entries should be treated as proof-safe."),
-                new SummaryCardModel("Blocked / Draft", entries.Count((entry) => entry.State == "draft").ToString(CultureInfo.InvariantCulture), "Unsafe or broken local entries stay visible instead of disappearing."),
-                new SummaryCardModel("Rollback", entries.FirstOrDefault((entry) => entry.State == "fallback")?.Name ?? "none", "Packaged fallback stays explicit when a local overlay wins."),
-            });
-        panel.LoadEntries(entries, preferredTemplateVersion);
-        panel.ReplaceGuidanceSections(
-            new[]
-            {
-                new PropertySectionModel("Authority Boundary", "Template choice is visible here, but catalog authority still belongs to desktop-shell.", new[] { new PropertyRowModel("Winning default", "desktop-shell packaged + local catalog resolution"), new PropertyRowModel("Unsafe state", "blocked or draft entries remain non-dispatchable"), new PropertyRowModel("Re-proof rule", "saved overlay changes still require fresh proof review") }),
-                new PropertySectionModel("Why This Board Exists", "Operators should be able to tell which template wins, whether it is dispatch-safe, and how to back out before leaving the shell lane.", new[] { new PropertyRowModel("Dispatch-safe", "saved catalog entries only"), new PropertyRowModel("Rollback", "explicit packaged fallback"), new PropertyRowModel("Draft confusion", "kept visible so it is not mistaken for production state") }),
-            });
-        panel.ReplaceAlerts(
-            entries
-                .Where((entry) => entry.State == "draft" || entry.State == "fallback")
-                .Take(3)
-                .Select((entry) => new MessageRowModel(entry.State == "draft" ? "Warn" : "Info", "catalog", $"{entry.Name}: {entry.Note}"))
-                .DefaultIfEmpty(new MessageRowModel("Info", "catalog", "No catalog alerts are currently surfaced."))
-                .ToArray());
-    }
-
-    private static List<TemplateCatalogRowModel> BuildTemplateEntries(ShellWorkspaceSnapshot snapshot)
-    {
-        var entries = new List<TemplateCatalogRowModel>();
-        var catalogVersions = new HashSet<string>(snapshot.TemplateCatalog.Templates.Select((entry) => entry.Version), StringComparer.OrdinalIgnoreCase);
-        var packagedFallback = snapshot.TemplateCatalog.Templates.FirstOrDefault(
-            (entry) =>
-                string.Equals(entry.Source, "packaged", StringComparison.OrdinalIgnoreCase) &&
-                !string.Equals(entry.Version, snapshot.TemplateCatalog.DefaultTemplateVersion, StringComparison.OrdinalIgnoreCase))
-            ?.Version;
-
-        foreach (var entry in snapshot.TemplateCatalog.Templates)
-        {
-            var localEntry = snapshot.TemplateGovernance.LocalEntries.FirstOrDefault((candidate) => string.Equals(candidate.Version, entry.Version, StringComparison.OrdinalIgnoreCase));
-            var hasBlockingIssue = HasBlockingIssue(snapshot.TemplateGovernance, entry.Version, localEntry);
-            var isDefault = string.Equals(entry.Version, snapshot.TemplateGovernance.EffectiveDefaultTemplateVersion, StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(entry.Version, snapshot.TemplateCatalog.DefaultTemplateVersion, StringComparison.OrdinalIgnoreCase);
-            var isFallback = !isDefault &&
-                string.Equals(entry.Version, packagedFallback, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(snapshot.TemplateGovernance.EffectiveDefaultSource, "local", StringComparison.OrdinalIgnoreCase);
-            var issueSummary = BuildIssueSummary(snapshot.TemplateGovernance, entry.Version);
-
-            entries.Add(
-                new TemplateCatalogRowModel(
-                    entry.Version,
-                    entry.Source ?? "unknown",
-                    isDefault ? "default" : hasBlockingIssue ? "draft" : isFallback ? "fallback" : "stable",
-                    string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase)
-                        ? "desktop-shell local catalog overlay"
-                        : "desktop-shell packaged manifest",
-                    hasBlockingIssue
-                        ? "blocked until overlay repair"
-                        : "proof + print after approved proof in desktop-shell",
-                    localEntry?.ResolvedPath ?? "packaged manifest",
-                    entry.Description ?? BuildTemplateNote(entry, isDefault, isFallback),
-                    string.IsNullOrWhiteSpace(issueSummary)
-                        ? (string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase)
-                            ? "Local saved overlay is currently visible to desktop-shell."
-                            : "Packaged manifest entry remains available for rollback.")
-                        : issueSummary,
-                    isFallback
-                        ? "Select this packaged entry directly or remove the winning local override."
-                        : string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase)
-                            ? "Switch back to a packaged entry or save a corrected local overlay, then rerun proof."
-                            : "Keep this packaged baseline visible for rollback discipline."));
-        }
-
-        foreach (var localEntry in snapshot.TemplateGovernance.LocalEntries.Where((entry) => !catalogVersions.Contains(entry.Version)))
-        {
-            entries.Add(
-                new TemplateCatalogRowModel(
-                    localEntry.Version,
-                    "local",
-                    "draft",
-                    "desktop-shell local overlay",
-                    "blocked until overlay repair",
-                    localEntry.ResolvedPath,
-                    "Local overlay entry is present in governance diagnostics but not currently surfaced as a dispatch-safe catalog entry.",
-                    BuildIssueSummary(snapshot.TemplateGovernance, localEntry.Version),
-                    "Repair or remove the local overlay before treating it as production-safe."));
-        }
-
-        return entries
-            .OrderByDescending((entry) => entry.State == "default")
-            .ThenByDescending((entry) => entry.State == "fallback")
-            .ThenBy((entry) => entry.Name, StringComparer.OrdinalIgnoreCase)
-            .ToList();
     }
 
     private static IEnumerable<ActivityRowModel> BuildHomeActivityRows(ShellWorkspaceSnapshot snapshot)
@@ -1068,7 +980,7 @@ public static class WorkspaceLiveFactory
                         $"{entry.Dispatch.TemplateVersion} | {entry.Dispatch.MatchSubject.JanNormalized}",
                         proof.Status,
                         BuildProofNote(proof.Status),
-                        "desktop-shell proof review",
+                        "proof review queue",
                         proof.ArtifactPath,
                         BuildProofBlocker(proof.Status),
                         BuildProofNextAction(proof.Status));
@@ -1082,9 +994,11 @@ public static class WorkspaceLiveFactory
                 (entry) => new
                 {
                     entry.Dispatch.MatchSubject.Sku,
+                    entry.Dispatch.MatchSubject.Brand,
                     entry.Dispatch.TemplateVersion,
                     entry.Dispatch.MatchSubject.JanNormalized,
                     entry.Dispatch.MatchSubject.Qty,
+                    entry.Dispatch.Audit.JobLineageId,
                 })
             .Select((group) => group.OrderByDescending((entry) => entry.Dispatch.Audit.OccurredAt, StringComparer.Ordinal).First())
             .OrderByDescending((entry) => entry.Dispatch.Audit.OccurredAt, StringComparer.Ordinal)
@@ -1094,7 +1008,10 @@ public static class WorkspaceLiveFactory
                     var proofStatus = entry.Proof?.Status ?? "missing";
                     var routeStatus = MapPrintSubjectStatus(entry);
                     return new JobRowModel(
+                        entry.Dispatch.Audit.JobId,
+                        entry.Dispatch.Audit.ParentJobId,
                         entry.Dispatch.MatchSubject.Sku,
+                        entry.Dispatch.MatchSubject.Brand,
                         proofStatus,
                         entry.Dispatch.SubmissionAdapterKind,
                         routeStatus,
@@ -1134,7 +1051,7 @@ public static class WorkspaceLiveFactory
                         $"{entry.Dispatch.TemplateVersion} | {entry.Dispatch.MatchSubject.Sku}",
                         proof.Status,
                         "Pending proof requires operator review before the related dispatch path can be considered safe.",
-                        "desktop-shell proof review",
+                        "proof review queue",
                         proof.ArtifactPath,
                         "Pending proof still blocks the related dispatch subject.",
                         "Approve or reject from History or Print Console.");
@@ -1150,11 +1067,11 @@ public static class WorkspaceLiveFactory
                     bundle.FileName,
                     $"{bundle.SizeBytes} bytes",
                     "listed",
-                    "Bundle listing is live, but restore remains guarded in apps/desktop-shell for v0.3.0.",
-                    "desktop-shell restore authority",
+                    "Bundle listing now comes from the local audit mirror, but restore remains guarded in the service workflow for this release.",
+                    "restore review",
                     bundle.FilePath,
                     "Restore is intentionally disabled from the native shell.",
-                    "Use desktop-shell if explicit restore review is required."));
+                    "Use the service workflow if explicit restore review is required."));
     }
 
     private static IEnumerable<AuditRowModel> BuildHistoryAuditRows(ShellWorkspaceSnapshot snapshot)
@@ -1176,56 +1093,14 @@ public static class WorkspaceLiveFactory
                     BuildPrintSubjectNote(entry, MapPrintSubjectStatus(entry))));
     }
 
-    private static bool HasBlockingIssue(
-        TemplateCatalogGovernanceResultDto governance,
-        string version,
-        TemplateCatalogGovernanceEntryDto? localEntry)
-    {
-        if (localEntry is not null && (!localEntry.Enabled || !localEntry.FileExists))
-        {
-            return true;
-        }
-
-        return governance.Issues.Any(
-            (issue) =>
-                issue.Message.Contains(version, StringComparison.OrdinalIgnoreCase) &&
-                string.Equals(issue.Severity, "error", StringComparison.OrdinalIgnoreCase));
-    }
-
-    private static string BuildIssueSummary(TemplateCatalogGovernanceResultDto governance, string version)
-    {
-        return string.Join(
-            " ",
-            governance.Issues
-                .Where((issue) => issue.Message.Contains(version, StringComparison.OrdinalIgnoreCase))
-                .Select((issue) => issue.Message));
-    }
-
-    private static string BuildTemplateNote(TemplateCatalogEntryDto entry, bool isDefault, bool isFallback)
-    {
-        if (isDefault)
-        {
-            return "Current effective default selected by desktop-shell.";
-        }
-
-        if (isFallback)
-        {
-            return "Packaged fallback kept visible so rollback is explicit.";
-        }
-
-        return string.Equals(entry.Source, "local", StringComparison.OrdinalIgnoreCase)
-            ? "Saved local overlay currently visible to desktop-shell."
-            : "Packaged manifest entry remains available for operator selection.";
-    }
-
     private static string BuildProofNote(string status)
     {
         return status.ToLowerInvariant() switch
         {
-            "approved" => "Proof is approved and can act as live lineage context for desktop-shell.",
+            "approved" => "Proof is approved and can act as live lineage context for dispatch review.",
             "rejected" => "Proof was rejected and cannot unlock print until a corrected proof is reviewed.",
-            "pending" => "Proof is still awaiting operator review in desktop-shell.",
-            _ => "Proof state is visible from desktop-shell audit data.",
+            "pending" => "Proof is still awaiting operator review in the local audit mirror.",
+            _ => "Proof state is visible from the local audit mirror.",
         };
     }
 
@@ -1244,10 +1119,10 @@ public static class WorkspaceLiveFactory
     {
         return status.ToLowerInvariant() switch
         {
-            "approved" => "Use as live proof context; direct print still runs from desktop-shell.",
-            "rejected" => "Correct the issue, save the catalog state, and rerun proof in desktop-shell.",
+            "approved" => "Use as live proof context; direct print still runs through the service workflow.",
+            "rejected" => "Correct the issue, save the catalog state, and rerun proof from the native shell.",
             "pending" => "Approve or reject from the native shell safe-op path.",
-            _ => "Refresh audit state from desktop-shell.",
+            _ => "Refresh the local audit mirror from the live service.",
         };
     }
 
@@ -1276,7 +1151,7 @@ public static class WorkspaceLiveFactory
     {
         return routeStatus switch
         {
-            "ready" => $"Approved proof context is visible for {entry.Dispatch.MatchSubject.Sku}; direct print still routes through desktop-shell.",
+            "ready" => $"Approved proof context is visible for {entry.Dispatch.MatchSubject.Sku}; direct print still routes through the service workflow.",
             "held" => $"Pending proof keeps {entry.Dispatch.MatchSubject.Sku} out of a dispatch-safe state.",
             "blocked" => $"No approved proof context is currently visible for {entry.Dispatch.MatchSubject.Sku}.",
             _ => $"Recent {entry.Dispatch.Audit.Event} event is visible for {entry.Dispatch.MatchSubject.Sku}.",
@@ -1287,7 +1162,7 @@ public static class WorkspaceLiveFactory
     {
         return routeStatus switch
         {
-            "ready" => "Direct dispatch still stays in desktop-shell for v0.3.0.",
+            "ready" => "Direct dispatch still stays in the service workflow for this release.",
             "held" => "A pending proof decision is still blocking this subject.",
             "blocked" => entry.Proof is null ? "No proof record is visible for this subject." : "Rejected proof keeps this subject blocked.",
             _ => "Review current audit context before treating this subject as production-safe.",
@@ -1298,9 +1173,9 @@ public static class WorkspaceLiveFactory
     {
         return routeStatus switch
         {
-            "ready" => "Use desktop-shell for actual print dispatch when the operator is ready.",
+            "ready" => "Use the service workflow for actual print dispatch when the operator is ready.",
             "held" => "Approve or reject the pending proof first.",
-            "blocked" => "Create or repair proof state in desktop-shell before dispatch.",
+            "blocked" => "Create or repair proof state from the native shell before dispatch.",
             _ => "Refresh live state before acting.",
         };
     }

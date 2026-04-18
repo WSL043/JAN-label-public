@@ -97,11 +97,11 @@
 
         <Border Grid.Column="2" Style="{StaticResource PaneBorderStyle}" Margin="0,0,8,0">
           <TabControl Style="{StaticResource WorksurfaceTabControlStyle}">
-            <TabItem Header="Readiness">
+            <TabItem Header="Overview">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="10">
                   <DockPanel>
-                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Workstation Readiness" />
+                    <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Workstation Overview" />
                     <TextBlock DockPanel.Dock="Right" Foreground="{StaticResource MutedBrush}" Text="{Binding HeaderDetail}" />
                   </DockPanel>
                   <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding SummaryCards}">
@@ -125,10 +125,10 @@
                 </StackPanel>
               </ScrollViewer>
             </TabItem>
-            <TabItem Header="Migration Scope">
+            <TabItem Header="Workspace Details">
               <ScrollViewer VerticalScrollBarVisibility="Auto">
                 <StackPanel Margin="10">
-                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Migration Scope" />
+                  <TextBlock Style="{StaticResource SectionTitleStyle}" Text="Workspace Details" />
                   <ItemsControl Margin="0,8,0,0" ItemsSource="{Binding ControlSections}">
                     <ItemsControl.ItemTemplate>
                       <DataTemplate>

@@ -9,7 +9,9 @@
     "typecheck": "pnpm -r --if-present typecheck",
     "fixture:validate": "node scripts/validate-fixtures.mjs",
     "release:notes": "node scripts/generate-release-notes.mjs",
-    "release:readiness": "node scripts/generate-release-readiness.mjs"
+    "release:readiness": "node scripts/generate-release-readiness.mjs",
+    "mirror:sync": "node scripts/publish-public-mirror.mjs",
+    "mirror:release": "node scripts/publish-public-mirror.mjs"
   },
   "devDependencies": {
     "@biomejs/biome": "^1.9.4",

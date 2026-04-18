@@ -18,7 +18,7 @@
 
 ## K-008 GitHub Actions `OPENAI_API_KEY` is not set
 - status: open
-- impact: cloud-side Codex fallback automation cannot fully run
+- impact: Codex workflows can now route through GitHub-hosted or self-hosted runners and can be replayed through `repository_dispatch`, but the actual Codex review/comment/triage/autofix/maintenance steps still skip until the secret is configured
 - response: configure the repository secret
 - release impact for PDF-only milestone: non-blocker; defer to `T-030` milestone
 
@@ -33,9 +33,8 @@
 - response: use `warningDetails[]` and the runbook checklist before production operation
 
 ## K-011 XLSX import chunk is still large
-- status: watch
-- impact: lazy-load is in place, but the XLSX bundle remains heavy
-- response: consider worker/off-main-thread parsing if field use grows
+- status: resolved
+- resolution: `apps/admin-web` now parses XLSX uploads inside a dedicated web worker, so the heavy `xlsx` decode path no longer blocks the main operator UI thread during compose import or legacy proof seed upload
 
 ## K-012 audit ledger is local-filesystem only
 - status: open
@@ -106,6 +105,20 @@
 - status: open
 - impact: `apps/windows-shell` cannot be built locally when `dotnet` is unavailable, so native-shell validation must move to GitHub Windows runners
 - response: treat the `windows-shell-native` CI job as the authoritative validation path unless local `.NET 8` is explicitly installed for shell work
+
+## K-041 `docs/domain-model.md` was garbled
+- status: resolved
+- resolution: `docs/domain-model.md` was rewritten for the `v1.0.0` single-stack route and is back in the normal routing set
+
+## K-042 native Designer draft PDF preview rejects non-ASCII text
+- status: open
+- impact: the new `.NET` draft PDF preview path now skips PDF generation with a visible warning instead of silently corrupting non-ASCII text, because the current lightweight PDF builder does not yet embed Unicode-capable fonts; draft SVG can still render the same content, so the two draft artifacts are not yet text-parity complete for multilingual labels
+- response: treat this as an `M3` render-engine gap, use the draft SVG for multilingual authoring checks for now, and do not treat the current draft PDF preview as multilingual-proof-safe until the `.NET` render path owns proper font/text output
+
+## K-043 native proof review and audit lanes still depend on live sync for upstream authority
+- status: watch
+- impact: WPF proof create/review decisions, visible audit rows, bundle inventory, and audit export now all come from the native SQLite mirror, but that mirror still depends on a successful live-service refresh to ingest new upstream proof/dispatch state, and retention apply, restore, and dispatch are still outside the single-stack path
+- response: keep this as a `T-052` proof/audit follow-up; native visible audit state plus native proof create/review are real now, but upstream authority still needs more `.NET` replacements before the lane becomes fully single-stack
 
 ## K-034 native-shell preview packaging is CI-driven
 - status: watch

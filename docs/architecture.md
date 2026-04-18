@@ -1,86 +1,101 @@
 # architecture
 
-## 1. 方針
+## 1. Principles
 
-最初に固定するのは UI ではなく印刷コアの境界です。  
-このリポジトリでは、Windows 向け MVP を最短で成立させつつ、同じ印刷コアを後から macOS / Linux / mobile から再利用できるよう、責務を次の 3 層に分けます。
+- Print core first, shell second.
+- The current shipped baseline still relies on Rust for JAN normalization, proof rules, render, print routing, audit, and template-catalog resolution.
+- The target architecture is `.NET / WPF` single-stack convergence; see `docs/dotnet-convergence.md`.
+- The next formal release target is `v1.0.0`; acceptance is tracked in `docs/release/v1.0.0-acceptance.md`.
+- The operator application direction is Windows-only.
+- `apps/windows-shell` is the target operator shell and long-term visible operator app.
+- `apps/admin-web` remains transitional only; it is not the long-term UX direction.
+- `apps/desktop-shell` remains the current authoritative bridge and proof/print gate only until its `.NET` replacement is validated and the legacy slice is retired.
 
-1. `crates/*`
-   印刷コア。業務ルール、JAN 検証、テンプレート解決、レンダリング、監査ログ、プリンタアダプタ。
-2. `apps/admin-web`
-   ジョブ作成、検索、再印刷指示、履歴確認、設定管理。
-3. `apps/desktop-shell`
-   必要になった時だけ追加する Windows 配布シェル。中心ではない。
+## 2. Runtime Layers
 
-## 2. コンポーネント境界
+Current shipped baseline:
 
 ```text
-[Admin Web / Mobile Client]
-           |
-           v
-[Job API / Local Bridge]
-           |
-           v
-[print-agent]
-  |-> [domain]
-  |-> [importer]
-  |-> [barcode -> Zint]
-  |-> [render -> SVG/PDF]
-  |-> [printer-adapters]
-  `-> [audit-log]
+[apps/windows-shell]       [apps/admin-web (transitional only)]
+            |                         |
+            +-----------+-------------+
+                        |
+                        v
+              [apps/desktop-shell]
+                        |
+                        v
+                 [crates/print-agent]
+                   |-> [crates/domain]
+                   |-> [crates/render]
+                   |-> [crates/printer-adapters]
+                   `-> [crates/audit-log]
 ```
 
-## 3. 実装原則
+Target `v1.0.0` runtime:
 
-- UI は「何を印刷するか」を作る。印刷そのものの正しさは Rust 側で担保する。
-- レンダリングは最初に `SVG/PDF` を正とし、プリンタ専用言語は adapter で追加する。
-- バーコードは自前ロジックを主役にしない。JAN の正規化と検証だけを自前で持ち、描画は Zint に委譲する。
-- `printer profile` を導入し、プリンタ固有差分はテンプレートに混ぜない。
-- 監査ログは印刷成功だけでなく、作成、失敗、再印刷も同じ `job_id` 系譜に残す。
-
-## 4. 主要インターフェース
-
-```rust
-pub struct DispatchRequest {
-    pub job_id: String,
-    pub sku: String,
-    pub jan: String,
-    pub qty: u32,
-    pub template_version: String,
-    pub actor_user_id: String,
-    pub requested_at: String,
-}
-
-pub trait PrinterAdapter {
-    fn submit(&self, artifact: &PrintArtifact) -> Result<SubmissionReceipt, AdapterError>;
-}
+```text
+[apps/windows-shell]
+          |
+          v
+[apps/windows-shell-core]
+     |-> [SQLite local state]
+     |-> [catalog / artifacts / exports / backups]
+     `-> [render / proof / dispatch / audit / import services]
 ```
 
-```ts
-export type PrintJobDraft = {
-  jobId: string;
-  parentSku: string;
-  sku: string;
-  jan: { raw: string; normalized: string; source: "manual" | "import" };
-  qty: number;
-  brand: string;
-  template: { id: string; version: string };
-  printerProfile: { id: string; adapter: string; paperSize: string; dpi: number };
-  actor: string;
-  requestedAt: string;
-};
-```
+## 3. Current Front Ownership
 
-## 5. 初期デプロイ形態
+- `apps/windows-shell`
+  - operator-facing shell language
+  - Windows desktop chrome
+  - workstation layout and lane framing
+  - package-backed chrome, docking, and inspector surfaces
+  - only intended long-term visible operator application
+- shared `.NET` support libraries
+  - extracted Windows-native workflow logic that should not live in WPF shell files
+  - current first slice: `apps/windows-shell-core` for native template catalog read / merge logic
+  - current `M1` foundation: LocalAppData path resolution, SQLite bootstrap, migration tracking, and first-pass runtime service contracts
+- `apps/admin-web`
+  - transitional operational UI
+  - still useful for parity checks and backend-connected workflows during migration
+  - not the design reference for shell chrome or long-term operator UX
+  - should not receive new browser-style shell investment
+- `apps/desktop-shell`
+  - current final proof gate
+  - current dispatch authority
+  - current audit restore authority
+  - current packaged + local template catalog resolution for dispatch
 
-- Windows ローカル開発: `admin-web` + `print-agent` + PDF 仮想プリンタ + 物理ラベルプリンタ
-- Windows 配布: `admin-web` を Tauri で包む、またはブラウザ UI + ローカル常駐エージェント
-- 将来の mobile: ジョブ作成と再印刷指示を担当し、直接印刷は後回し
+## 4. UI Direction
 
-## 6. 今のリポジトリで固定したこと
+The operator app should stop spending time on hand-built web-style chrome.
 
-- 12 桁 JAN は 13 桁へ自動補完する
-- 13 桁 JAN はチェックディジット不整合なら reject する
-- ゴールデンテストは `render` crate の SVG 出力から始める
-- importer の正規列は `parent_sku, sku, jan, qty, brand, template, printer_profile, enabled`
+The target is normal Windows desktop software in the style of traditional label tools:
 
+- packaged workstation controls first
+- menu / toolbar / docking / property-grid language
+- explicit Windows desktop workflows
+- no browser-like shell as the target design language
+
+Current repository baseline on `main`:
+
+- `AdonisUI` + `AdonisUI.ClassicTheme` for top-level WPF chrome and workstation framing
+- `Dirkster.AvalonDock` for docked panes, documents, and operator workbench structure
+- `PropertyTools.Wpf` for inspector/property-grid surfaces
+
+Historical feature branches may still reference `Fluent.Ribbon` from the package-first migration path. Treat `docs/handoff/current-state.md` as the current shell-baseline source of truth.
+
+Rules:
+
+- prefer packaged Windows controls over custom `Grid + Border + ListBox` chrome when a compatible package already owns the interaction model
+- keep custom layout work inside pane content, not shell chrome
+- bias toward docked workbench language similar to traditional Windows label software
+- avoid spending new shell-polish time on `apps/admin-web`; migrate workflow parity into WPF instead
+- treat `docs/dotnet-convergence.md` as the target-state development rule when current shipped ownership and target ownership differ
+
+## 5. Release and Packaging Path
+
+- The private repository remains the source of truth.
+- Formal Windows packaging for `v0.3.0` and later runs from the public packaging mirror `WSL043/JAN-label-public`.
+- Snapshot-only exports are used for mirror sync so private git history is not published.
+- Private-repo CI is useful when available, but mirror-side Windows runners are the authoritative packaging path when billing blocks private GitHub-hosted Actions.

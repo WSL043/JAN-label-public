@@ -78,6 +78,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: pnpm release:notes --version $env:GITHUB_REF_NAME
+      - name: Create draft GitHub Release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $title = "JAN Label $tag"
+          $notes = "docs/release/$tag.md"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release edit $tag --title $title --notes-file $notes --draft=true
+          } else {
+            gh release create $tag --verify-tag --title $title --notes-file $notes --draft
+          }
       - name: Build desktop-shell companion
         run: cargo build --manifest-path apps/desktop-shell/src-tauri/Cargo.toml --release
       - name: Generate release readiness report
@@ -104,9 +118,10 @@ jobs:
         run: |
           New-Item -ItemType Directory -Force -Path "apps/windows-shell/dist" | Out-Null
           $outputDir = (Resolve-Path "apps/windows-shell/dist").Path
-          $outputBaseFilename = "JAN-Label_windows-native-shell_$env:GITHUB_REF_NAME"
+          $releaseVersion = $env:GITHUB_REF_NAME.TrimStart("v")
+          $outputBaseFilename = "JAN-Label_${releaseVersion}_windows_x64-setup"
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" `
-            "/DMyAppVersion=$env:GITHUB_REF_NAME" `
+            "/DMyAppVersion=$releaseVersion" `
             "/DMyOutputDir=$outputDir" `
             "/DMyOutputBaseFilename=$outputBaseFilename" `
             "apps/windows-shell/installer/JanLabel.WindowsShell.iss"
@@ -116,25 +131,11 @@ jobs:
       - name: Upload native shell installer artifact
         uses: actions/upload-artifact@v7
         with:
-          name: jan-label-native-shell-release-installer
+          name: jan-label-release-installer
           path: |
             apps/windows-shell/dist/*.exe
             apps/windows-shell/dist/*.sha256
           if-no-files-found: error
-      - uses: tauri-apps/tauri-action@v0
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        with:
-          projectPath: apps/desktop-shell
-          tagName: ${{ github.ref_name }}
-          releaseName: JAN Label ${{ github.ref_name }}
-          releaseDraft: true
-          releaseBody: |
-            Windows desktop installer built from `apps/desktop-shell`.
-            See the generated notes below for merged changes in this tag.
-          generateReleaseNotes: true
-          args: --ci --no-sign
-          assetNamePattern: JAN-Label_[version]_windows_[arch][setup][ext]
       - name: Upload native shell assets to GitHub Release
         shell: powershell
         env:

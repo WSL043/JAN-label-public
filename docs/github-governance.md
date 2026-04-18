@@ -1,33 +1,34 @@
 # github-governance
 
-## 1. ブランチ保護 / ruleset
+## 1. Branch Protection / Ruleset
 
-`main` に対して次を必須にします。
+`main` should require:
 
-- 直 push 禁止
-- PR 経由のみ
-- required status checks 必須
-- stale review dismiss 有効
-- merge queue はチーム規模拡大後に検討
-- force push 禁止
-- branch deletion 禁止
+- no direct push
+- pull requests only
+- required status checks
+- stale review dismissal
+- no force push
+- no branch deletion
 
-## 現在の制約
+`merge queue` can be reconsidered after team size grows.
 
-2026-04-14 時点で、remote は `WSL043/JAN-label` の private repository です。  
-`gh api repos/WSL043/JAN-label/branches/main/protection` は `HTTP 403` を返し、
-「GitHub Pro へアップグレードするか public repository にする必要がある」という制約が確認できました。
+## Current Constraint
 
-そのため、このリポジトリでは次の 2 段階で進めます。
+As of `2026-04-14`, the main remote is the private repository `WSL043/JAN-label`.
 
-- repo 側
-  `.github/workflows/ci.yml`、`CODEOWNERS`、PR template、issue forms を先に整備する
-- remote 側
-  GitHub Pro / Team 以上へ切り替えた後に branch protection / ruleset を有効化する
+`gh api repos/WSL043/JAN-label/branches/main/protection` returned `HTTP 403`, confirming the current plan constraint: branch protection requires either a public repository or a higher GitHub plan.
 
-## 2. required status checks
+Because of that, governance is split in two layers:
 
-GitHub ruleset には次の job 名をそのまま登録します。
+- repository layer:
+  commit the workflow checks, PR templates, labels, and CODEOWNERS rules first
+- remote layer:
+  enable branch protection / rulesets once the repository plan allows it
+
+## 2. Required Status Checks
+
+Register these job names directly in the GitHub ruleset:
 
 - `rust-format`
 - `rust-lint`
@@ -39,11 +40,11 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - `desktop-shell-windows`
 - `docs-guard`
 
-`golden-tests` が失敗した PR は merge 不可です。
+If `golden-tests` fails, the PR must not merge.
 
 ## 3. CODEOWNERS
 
-初期は少人数前提で `@WSL043` をデフォルト owner にしつつ、印刷中核パスを明示的に強化します。
+Initial ownership stays lightweight, with `@WSL043` as the default owner while explicitly protecting the print-core paths:
 
 - `crates/render/**`
 - `crates/printer-adapters/**`
@@ -51,14 +52,14 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - `packages/fixtures/**`
 - `docs/**`
 
-## 4. PR ルール
+## 4. PR Rules
 
-- 1 PR 1 目的
-- printer adapter 変更時は `area:printer-adapters` ラベル必須
-- fixture 変更時は golden test か importer validation のどちらかを同時更新
-- コード変更で docs 更新が不要なら PR template に理由を書く
+- one PR, one purpose
+- printer adapter changes require the `area:printer-adapters` label
+- fixture changes must update either golden tests or importer validation in the same PR
+- if product code changes do not require docs updates, state the reason in the PR template
 
-## 5. labels 設計
+## 5. Labels
 
 - `type:bug`
 - `type:feature`
@@ -73,48 +74,57 @@ GitHub ruleset には次の job 名をそのまま登録します。
 - `priority:p2`
 - `status:blocked`
 
-## 6. CI 基本設計
+## 6. CI Baseline
 
-- Rust
+- Rust:
   `fmt`, `clippy`, `test`
-- Web
+- Web:
   `biome`, `typecheck`
-- Fixtures
+- Fixtures:
   `node scripts/validate-fixtures.mjs`
-- Docs
-  プロダクトコード変更時に docs 同時更新があるか確認
+- Docs:
+  verify that product-code changes land with docs changes
 
-## 6.5 Codex automation
+## 6.5 Codex Automation
 
-- GitHub 上の Codex 連携は event-driven を基本とする
-- 第 1 段階では `openai/codex-action@v1` を使い、same-repo PR の自動レビューと `@codex` PR コメント応答を有効にする
-- 第 2 段階では `workflow_run` で `CI` failure を拾い、失敗ログを添えて Codex が PR に triage を返す
-- 第 3 段階では `schedule` / `workflow_dispatch` の `Codex Maintenance` で unresolved CI と release blocker を要約する
-- 第 4 段階では same-repo PR の failed `CI` から `Codex CI Autofix` が fix branch と draft PR を起こす
-- 第 5 段階では `Codex Maintenance` の結果を GitHub issue に集約し、release 前確認の恒久ログにする
-- GitHub 上の Codex は bug-finding / debugging の一次対応を担当する
-  PR review、`@codex` コメント応答、CI triage、CI autofix、maintenance summary をここに寄せる
-- ローカル Codex は実装、手元の再現、tag / release 実行を担当する
-- `Codex PR Review` と `Codex PR Comment` は `refs/pull/*/merge` に依存せず、PR の head SHA と base/head branch fetch で動かす
-- `OPENAI_API_KEY` は GitHub Actions secret として管理する
-- GitHub-hosted Linux runner では `sandbox: read-only` を基本にし、レビュー / triage を優先する
-- 自動修正 PR は same-repo PR のみに限定し、fork PR は triage comment のみに留める
-- self-hosted runner / webhook 化は次段階で追加する
-- self-hosted runner を使う場合は persistent な `codex-home` を検討してよいが、最初から必須にはしない
-- GitHub 側 Codex は PR review / PR comment / CI triage / autofix の運用担当とし、最終的な実装統合と品質責任はローカル Codex が持つ
-- GitHub 側で新しいタスクや重要判断が発生した場合は、同日中に `docs/todo/active.md` と `docs/handoff/current-state.md` を同期し、必要なら `docs/adr/` に判断を残す
+The repository baseline now includes all of these stages:
 
-## 7. release tagging
+1. `openai/codex-action@v1` for same-repo PR review and `@codex` PR comment response
+2. `workflow_run` triage for failed `CI` runs on PRs
+3. scheduled / manual `Codex Maintenance` summaries
+4. same-repo failed-`CI` autofix branches and draft PRs
+5. maintenance summaries collected into a persistent GitHub issue ledger
+6. configurable self-hosted runner and webhook-replay operations through `repository_dispatch`
 
-- tag 形式は `vMAJOR.MINOR.PATCH`
-- テンプレート変更だけでも patch を切る
-- printer profile の互換性破壊は minor 以上で扱う
-- 本番プリンタ向け adapter 追加は release notes に検証機種を明記する
-- `v*` タグ push 時は `.github/workflows/release.yml` が GitHub Release を自動作成する
-- `Release` workflow は `apps/desktop-shell` を `windows-latest` で build し、Windows installer を release asset に添付する
+Operational rules:
 
-## 8. セキュリティと監査
+- Codex workflows keep their native GitHub triggers and also accept these replay event types:
+  - `codex-pr-review`
+  - `codex-pr-comment`
+  - `codex-ci-triage`
+  - `codex-ci-autofix`
+  - `codex-maintenance`
+- repository variable `CODEX_RUNNER_LABELS_JSON` selects runner labels for Codex workflows
+- if that variable is unset, Codex workflows default to `ubuntu-latest`
+- same-repo restrictions stay in force for PR review, PR comment response, and CI autofix
+- GitHub-side Codex remains responsible for PR review, PR comment response, CI triage, CI autofix, and maintenance summaries
+- local Codex remains responsible for implementation, local reproduction, release execution, and final integration quality
+- persistent `codex-home` is optional for self-hosted runner setups, not a required repository contract
+- `OPENAI_API_KEY` remains a GitHub Actions secret requirement
 
-- セキュリティ報告先は `SECURITY.md`
-- 依存更新は PR ベースで実施
-- 監査ログ仕様を壊す変更は `print-core` owner の review を必須にする
+Use [docs/ops/codex-automation.md](ops/codex-automation.md) for the runner, token, and webhook relay contract.
+
+## 7. Release Tagging
+
+- tags use `vMAJOR.MINOR.PATCH`
+- template-only changes still cut a patch release
+- printer-profile compatibility breaks require at least a minor release
+- production-printer adapter additions must list validated hardware in release notes
+- pushing a `v*` tag triggers `.github/workflows/release.yml`
+- the `Release` workflow builds `apps/desktop-shell` on `windows-latest` and attaches the installer artifact
+
+## 8. Security And Audit
+
+- security reports go through `SECURITY.md`
+- dependency updates land by pull request
+- changes that break audit-log semantics require explicit print-core review

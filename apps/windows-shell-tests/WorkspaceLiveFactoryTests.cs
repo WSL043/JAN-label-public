@@ -78,6 +78,7 @@ public sealed class WorkspaceLiveFactoryTests
 
         var printConsole = Assert.IsType<PrintConsoleWorkspaceModel>(
             modules.Single((module) => module.Label == "Print Console").Workspace);
+        var printConsoleModule = modules.Single((module) => module.Label == "Print Console");
         var batchJobs = Assert.IsType<BatchJobsWorkspaceModel>(
             modules.Single((module) => module.Label == "Batch Jobs").Workspace);
         var history = Assert.IsType<HistoryWorkspaceModel>(
@@ -85,7 +86,8 @@ public sealed class WorkspaceLiveFactoryTests
 
         Assert.Equal(12, printConsole.ProofQueue.Count);
         Assert.Equal(12, history.PendingProofs.Count);
-        Assert.Contains(batchJobs.ColumnRows, (row) => row.Name == "Authority" && row.Value == "apps/admin-web via apps/desktop-shell");
+        Assert.Contains(printConsoleModule.HeaderActions, (action) => action.Label == ShellActions.RunProof && action.IsEnabled);
+        Assert.Contains(batchJobs.ColumnRows, (row) => row.Name == "Workflow" && row.Value == "admin-web shared queue");
         Assert.Contains(batchJobs.StatusItems, (item) => item.Label == "Snapshot" && item.Value == "degraded");
         Assert.Contains("temporarily unavailable", batchJobs.MessageSummary, StringComparison.OrdinalIgnoreCase);
     }
