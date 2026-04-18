@@ -141,7 +141,7 @@ public sealed class LocalTemplateCatalogServiceTests
         Assert.Equal("packaged", document.Source);
         Assert.EndsWith("packages\\templates\\basic-50x30@v1.json", document.SourcePath, StringComparison.OrdinalIgnoreCase);
         Assert.NotEmpty(document.Fields);
-        Assert.Contains(document.DocumentJson, "\"template_version\": \"basic-50x30@v1\"", StringComparison.Ordinal);
+        Assert.Contains("\"template_version\": \"basic-50x30@v1\"", document.DocumentJson, StringComparison.Ordinal);
     }
 
     [Fact]

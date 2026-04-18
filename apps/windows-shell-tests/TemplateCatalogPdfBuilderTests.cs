@@ -33,7 +33,7 @@ public sealed class TemplateCatalogPdfBuilderTests
         var pdfText = Encoding.ASCII.GetString(pdf);
         Assert.StartsWith("%PDF-1.4", pdfText, StringComparison.Ordinal);
         Assert.Contains("/MediaBox [0 0 141.73 85.04]", pdfText, StringComparison.Ordinal);
-        Assert.Contains("Native draft PDF only", pdfText, StringComparison.Ordinal);
+        Assert.Contains("Native draft preview only", pdfText, StringComparison.Ordinal);
         Assert.Contains("brand:JAN-LAB", pdfText, StringComparison.Ordinal);
     }
 
